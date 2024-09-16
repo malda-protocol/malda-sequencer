@@ -20,31 +20,39 @@ import {RiscZeroCheats} from "risc0/test/RiscZeroCheats.sol";
 import {console2} from "forge-std/console2.sol";
 import {Test} from "forge-std/Test.sol";
 import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
-import {EvenNumber} from "../contracts/EvenNumber.sol";
+import {UserLiquidity} from "../contracts/UserLiquidity.sol";
 import {Elf} from "./Elf.sol"; // auto-generated contract after running `cargo build`.
 
-contract EvenNumberTest is RiscZeroCheats, Test {
-    EvenNumber public evenNumber;
+contract UserLiquidityTest is RiscZeroCheats, Test {
+    UserLiquidity public userLiquidity;
+    address public constant user = address(0);
 
     function setUp() public {
         IRiscZeroVerifier verifier = deployRiscZeroVerifier();
-        evenNumber = new EvenNumber(verifier);
-        assertEq(evenNumber.get(), 0);
+        userLiquidity = new UserLiquidity(verifier);
+        assertEq(userLiquidity.get(user), false);
     }
 
-    function test_SetEven() public {
-        uint256 number = 12345678;
-        (bytes memory journal, bytes memory seal) = prove(Elf.IS_EVEN_PATH, abi.encode(number));
+    function test_Set_WhenLiquidityIsNonZero() public {
+        console2.log("Path: ", Elf.CHECK_LIQUIDITY_PATH);
 
-        evenNumber.set(abi.decode(journal, (uint256)), seal);
-        assertEq(evenNumber.get(), number);
+        (bytes memory journal, bytes memory seal) = prove(
+            Elf.CHECK_LIQUIDITY_PATH,
+            abi.encode(user)
+        );
+
+        userLiquidity.set(abi.decode(journal, (address)), seal);
+        assertEq(userLiquidity.get(address(user)), true);
     }
 
-    function test_SetZero() public {
-        uint256 number = 0;
-        (bytes memory journal, bytes memory seal) = prove(Elf.IS_EVEN_PATH, abi.encode(number));
+    function test_Set_WhenLiquidityIsZero() public {
+        address userZero = address(0);
+        (bytes memory journal, bytes memory seal) = prove(
+            Elf.CHECK_LIQUIDITY_PATH,
+            abi.encode(userZero)
+        );
 
-        evenNumber.set(abi.decode(journal, (uint256)), seal);
-        assertEq(evenNumber.get(), number);
+        userLiquidity.set(abi.decode(journal, (address)), seal);
+        assertEq(userLiquidity.get(userZero), false);
     }
 }
