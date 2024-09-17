@@ -128,6 +128,7 @@ mod tests {
             .build()
             .unwrap();
 
+
         println!("Env type ID: {:?}", &env.type_id());
 
         // NOTE: Use the executor to run tests without proving.
