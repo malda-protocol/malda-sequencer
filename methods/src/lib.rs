@@ -21,15 +21,13 @@ mod tests {
 
     use alloy_primitives::{address, Address, U256};
     use alloy_sol_types::{sol, SolCall, SolValue};
+    use anyhow::Error;
     use risc0_steel::{
         config::{ETH_MAINNET_CHAIN_SPEC, ETH_SEPOLIA_CHAIN_SPEC},
         ethereum::EthEvmEnv,
-        Contract, EvmBlockHeader, SolCommitment
+        Contract, EvmBlockHeader, SolCommitment,
     };
     use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
-    use anyhow::Error;
-    
-    
 
     sol! {
         interface ICompound {
@@ -47,10 +45,8 @@ mod tests {
         }
     }
 
-
     #[test]
     fn proves_when_liquidity_is_non_zero() {
-
         // choose random user with positive liquidity from etherscan
         let user = address!("a66d568cD146C01ac44034A01272C69C2d9e4BaB");
         let block = 20770922; // we fix this in case account removes liquidity
@@ -67,7 +63,6 @@ mod tests {
         assert_eq!(journal.liquidity, expected_liquidity);
     }
 
-
     #[test]
     #[should_panic(expected = "liquidity is 0")]
     fn rejects_when_liquidity_is_zero() {
@@ -81,14 +76,13 @@ mod tests {
 
         // should panic due to assertion in guest code
         let _ = session_info.unwrap();
-
     }
 
     // helper function to reuse in both tests
-    fn check_liquidity_non_zero(user: Address, block: u64) -> Result <SessionInfo, Error> {
+    fn check_liquidity_non_zero(user: Address, block: u64) -> Result<SessionInfo, Error> {
         println!("User: {}", user);
         let comptroller = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
-        
+
         let mut env = EthEvmEnv::from_rpc(
             "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0",
             Some(block), // we fix this in case account removes liquidity
@@ -128,11 +122,9 @@ mod tests {
             .build()
             .unwrap();
 
-
         println!("Env type ID: {:?}", &env.type_id());
 
         // NOTE: Use the executor to run tests without proving.
         default_executor().execute(env, super::CHECK_LIQUIDITY_ELF)
     }
-
 }
