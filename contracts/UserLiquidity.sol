@@ -17,6 +17,7 @@
 pragma solidity ^0.8.20;
 
 import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
+import {Steel} from "risc0/steel/Steel.sol";
 import {ImageID} from "./ImageID.sol"; // auto-generated contract after running `cargo build`.
 
 /// @title A starter application using RISC Zero.
@@ -37,17 +38,29 @@ contract UserLiquidity {
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
 
+    /// @notice Journal that is committed to by the guest.
+    struct Journal {
+        Steel.Commitment commitment;
+        uint256 liquidity;
+        address user;
+    }
+
     /// @notice Initialize the contract, binding it to a specified RISC Zero verifier.
     constructor(IRiscZeroVerifier _verifier) {
         verifier = _verifier;
     }
 
     /// @notice Set the even number stored on the contract. Requires a RISC Zero proof that the number is even.
-    function set(address user, bytes calldata seal) public {
-        // Construct the expected journal data. Verify will fail if journal does not match.
-        bytes memory journal = abi.encode(user);
-        verifier.verify(seal, imageId, sha256(journal));
-        userHasLiquidity[user] = true;
+    function set(bytes calldata journalData, bytes calldata seal) public {
+        // Decode and validate the journal data
+        Journal memory journal = abi.decode(journalData, (Journal));
+        require(Steel.validateCommitment(journal.commitment), "Invalid commitment");
+
+        // Verify the proof
+        verifier.verify(seal, imageId, sha256(journalData));
+
+        userHasLiquidity[journal.user] = true;
+        // here we just set liquidity to true, for real logic use journal.liquidity
     }
 
     /// @notice Returns the number stored.
