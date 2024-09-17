@@ -24,9 +24,12 @@ mod tests {
     use risc0_steel::{
         config::{ETH_MAINNET_CHAIN_SPEC, ETH_SEPOLIA_CHAIN_SPEC},
         ethereum::EthEvmEnv,
-        Contract, EvmBlockHeader,
+        Contract, EvmBlockHeader, SolCommitment
     };
-    use risc0_zkvm::{default_executor, ExecutorEnv};
+    use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
+    use anyhow::Error;
+    
+    
 
     sol! {
         interface ICompound {
@@ -36,17 +39,59 @@ mod tests {
         interface IUserLiquidity {
             function set(address user, bytes calldata seal) external;
         }
+
+        struct Journal {
+            SolCommitment commitment;
+            uint256 liquidity;
+            address user;
+        }
     }
+
 
     #[test]
     fn proves_when_liquidity_is_non_zero() {
-        let user = address!("d8da6bf26964af9d7eed9e03e53415d37aa96045");
-        let comptroller = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
 
+        // choose random user with positive liquidity from etherscan
+        let user = address!("a66d568cD146C01ac44034A01272C69C2d9e4BaB");
+        let block = 20770922; // we fix this in case account removes liquidity
+        let expected_liquidity = U256::from::<u128>(16853630641732729601194); // liquidity of account at given block
+
+        let session_info = check_liquidity_non_zero(user, block);
+
+        println!("Session info: {:?}", &session_info);
+
+        let session_info = session_info.unwrap();
+
+        println!("{:?}", &session_info.journal.bytes);
+        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        assert_eq!(journal.liquidity, expected_liquidity);
+    }
+
+
+    #[test]
+    #[should_panic(expected = "liquidity is 0")]
+    fn rejects_when_liquidity_is_zero() {
+        // zero address to have zero liquidity
+        let user = address!("0000000000000000000000000000000000000000");
+        let block = 20770922; // we fix this in case account removes liquidity
+
+        let session_info = check_liquidity_non_zero(user, block);
+
+        println!("Session info: {:?}", &session_info);
+
+        // should panic due to assertion in guest code
+        let _ = session_info.unwrap();
+
+    }
+
+    // helper function to reuse in both tests
+    fn check_liquidity_non_zero(user: Address, block: u64) -> Result <SessionInfo, Error> {
         println!("User: {}", user);
+        let comptroller = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
+        
         let mut env = EthEvmEnv::from_rpc(
             "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0",
-            None,
+            Some(block), // we fix this in case account removes liquidity
         )
         .unwrap();
         env = env.with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
@@ -78,7 +123,7 @@ mod tests {
         let env = ExecutorEnv::builder()
             .write(&view_call_input)
             .unwrap()
-            .write(&user.abi_encode())
+            .write(&user)
             .unwrap()
             .build()
             .unwrap();
@@ -86,30 +131,7 @@ mod tests {
         println!("Env type ID: {:?}", &env.type_id());
 
         // NOTE: Use the executor to run tests without proving.
-        let session_info = default_executor().execute(env, super::CHECK_LIQUIDITY_ELF);
-
-        println!("Session info: {:?}", &session_info);
-
-        let session_info = session_info.unwrap();
-
-        println!("{:?}", &session_info.journal.bytes);
-        let x = Address::abi_decode(&session_info.journal.bytes, true).unwrap();
-        assert_eq!(x, user);
+        default_executor().execute(env, super::CHECK_LIQUIDITY_ELF)
     }
 
-    #[test]
-    #[should_panic(expected = "liquidity below 0")]
-    fn rejects_when_liquidity_is_zero() {
-        let user_zero = address!("0000000000000000000000000000000000000000");
-
-        let env = ExecutorEnv::builder()
-            .write_slice(&user_zero.abi_encode())
-            .build()
-            .unwrap();
-
-        // NOTE: Use the executor to run tests without proving.
-        default_executor()
-            .execute(env, super::CHECK_LIQUIDITY_ELF)
-            .unwrap();
-    }
 }
