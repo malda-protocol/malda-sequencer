@@ -17,12 +17,12 @@
 pragma solidity ^0.8.20;
 
 import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
+import {Steel} from "risc0/steel/Steel.sol";
 import {ImageID} from "./ImageID.sol"; // auto-generated contract after running `cargo build`.
 
 /// @title A starter application using RISC Zero.
-/// @notice This basic application holds a number, guaranteed to be even.
-/// @dev This contract demonstrates one pattern for offloading the computation of an expensive
-///      or difficult to implement function to a RISC Zero guest running on Bonsai.
+/// @notice This contract keeps track of whether a user has liquidity in Compound.
+/// @dev Can only be set if a proof is provided that user has nonzero liquidty
 contract UserLiquidity {
     /// @notice RISC Zero verifier contract address.
     IRiscZeroVerifier public immutable verifier;
@@ -30,27 +30,39 @@ contract UserLiquidity {
     ///         The image ID is similar to the address of a smart contract.
     ///         It uniquely represents the logic of that guest program,
     ///         ensuring that only proofs generated from a pre-defined guest program
-    ///         (in this case, checking if a number is even) are considered valid.
+    ///         (in this case, checking user has liquidity) are considered valid.
     bytes32 public constant imageId = ImageID.CHECK_LIQUIDITY_ID;
 
-    /// @notice A number that is guaranteed, by the RISC Zero zkVM, to be even.
+    /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
+
+    /// @notice Journal that is committed to by the guest.
+    struct Journal {
+        Steel.Commitment commitment;
+        uint256 liquidity;
+        address user;
+    }
 
     /// @notice Initialize the contract, binding it to a specified RISC Zero verifier.
     constructor(IRiscZeroVerifier _verifier) {
         verifier = _verifier;
     }
 
-    /// @notice Set the even number stored on the contract. Requires a RISC Zero proof that the number is even.
-    function set(address user, bytes calldata seal) public {
-        // Construct the expected journal data. Verify will fail if journal does not match.
-        bytes memory journal = abi.encode(user);
-        verifier.verify(seal, imageId, sha256(journal));
-        userHasLiquidity[user] = true;
+    /// @notice Set the liquidity to true. Requires a RISC Zero proof that the number is even.
+    function set(bytes calldata journalData, bytes calldata seal) public {
+        // Decode and validate the journal data
+        Journal memory journal = abi.decode(journalData, (Journal));
+        require(Steel.validateCommitment(journal.commitment), "Invalid commitment");
+
+        // Verify the proof
+        verifier.verify(seal, imageId, sha256(journalData));
+
+        userHasLiquidity[journal.user] = true;
+        // here we just set liquidity to true, for real logic use journal.liquidity
     }
 
-    /// @notice Returns the number stored.
+    /// @notice Returns the liquidity bool stored.
     function get(address user) public view returns (bool) {
         return userHasLiquidity[user];
     }

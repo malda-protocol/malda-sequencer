@@ -17,42 +17,106 @@
 pragma solidity ^0.8.20;
 
 import {RiscZeroCheats} from "risc0/test/RiscZeroCheats.sol";
+import {RiscZeroMockVerifier} from "risc0/test/RiscZeroMockVerifier.sol";
 import {console2} from "forge-std/console2.sol";
 import {Test} from "forge-std/Test.sol";
-import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
+import {IRiscZeroVerifier, Receipt as RiscZeroReceipt, VerificationFailed} from "risc0/IRiscZeroVerifier.sol";
 import {UserLiquidity} from "../contracts/UserLiquidity.sol";
 import {Elf} from "./Elf.sol"; // auto-generated contract after running `cargo build`.
+import {UserLiquidity} from "../contracts/UserLiquidity.sol";
+import {Steel, Beacon, Encoding} from "risc0/steel/Steel.sol";
 
 contract UserLiquidityTest is RiscZeroCheats, Test {
+    
     UserLiquidity public userLiquidity;
-    address public constant user = address(0);
+    RiscZeroMockVerifier public verifier;
+    bytes32 public imageId;
+
+    // take same example values as for guest tests, irrelevant since just mock proof for now but with bonsai test real values
+    string public constant mainnetRpcUrl = "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
+    uint256 public constant blockNo = 20770922;
+    address public constant userWithLiquidity = 0xa66d568cD146C01ac44034A01272C69C2d9e4BaB;
+    address public constant userWithoutLiquidity = address(0x0);
+    uint256 public constant liquidity = 16853630641732729601194; 
 
     function setUp() public {
-        IRiscZeroVerifier verifier = deployRiscZeroVerifier();
+        vm.createSelectFork(mainnetRpcUrl, blockNo);
+        verifier = RiscZeroMockVerifier(address(deployRiscZeroVerifier()));
         userLiquidity = new UserLiquidity(verifier);
-        assertEq(userLiquidity.get(user), false);
+        imageId = userLiquidity.imageId();
+        assertEq(userLiquidity.get(userWithLiquidity), false);
+        assertEq(userLiquidity.get(userWithoutLiquidity), false);
     }
 
     function test_Set_WhenLiquidityIsNonZero() public {
-        console2.log("Path: ", Elf.CHECK_LIQUIDITY_PATH);
+        // get the hash of the previous block
+        uint240 blockNumber = uint240(block.number - 1);
+        bytes32 blockHash = blockhash(blockNumber);
 
-        (bytes memory journal, bytes memory seal) = prove(
-            Elf.CHECK_LIQUIDITY_PATH,
-            abi.encode(user)
-        );
+        // mock the Journal
+        UserLiquidity.Journal memory journal = UserLiquidity.Journal({
+            commitment: Steel.Commitment(Encoding.encodeVersionedID(blockNumber, 0), blockHash),
+            liquidity: liquidity,
+            user: userWithLiquidity
+        });
 
-        userLiquidity.set(abi.decode(journal, (address)), seal);
-        assertEq(userLiquidity.get(address(user)), true);
+        // create a mock proof
+        RiscZeroReceipt memory receipt = verifier.mockProve(imageId, sha256(abi.encode(journal)));
+
+        userLiquidity.set(abi.encode(journal), receipt.seal);
+
+        // check that liquidity has been set
+        assert(userLiquidity.get(userWithLiquidity) == true);
     }
 
-    function test_Set_WhenLiquidityIsZero() public {
-        address userZero = address(0);
-        (bytes memory journal, bytes memory seal) = prove(
-            Elf.CHECK_LIQUIDITY_PATH,
-            abi.encode(userZero)
-        );
+    // Some test where user without liquidity tries to set - not sure if possible here since this would fail on the prover side
+    // there is the Risc0Cheatcode prove() which we can integrate, but need bonsai API for that
+    // For now exclude test since it would not revert
+    function test_Set_WhenLiquidityIsZero_Reverts() public {
+        // get the hash of the previous block
+        uint240 blockNumber = uint240(block.number - 1);
+        bytes32 blockHash = blockhash(blockNumber);
 
-        userLiquidity.set(abi.decode(journal, (address)), seal);
-        assertEq(userLiquidity.get(userZero), false);
+        // mock the Journal
+        UserLiquidity.Journal memory journal = UserLiquidity.Journal({
+            commitment: Steel.Commitment(Encoding.encodeVersionedID(blockNumber, 0), blockHash),
+            liquidity: 0,
+            user: userWithoutLiquidity
+        });
+
+        // create a mock proof
+        RiscZeroReceipt memory receipt = verifier.mockProve(imageId, sha256(abi.encode(journal)));
+
+        // try to set the liquidity - this will still pass and the test fail because we create a mock proof
+        // that userWithoutLiquidity has liquidity. In reality this proof cannot exist.
+        vm.expectRevert();
+        userLiquidity.set(abi.encode(journal), receipt.seal);
+
+        // check that liquidity was not been set
+        assert(userLiquidity.get(userWithoutLiquidity) == false);
+    }
+
+    function test_Set_WhenLiquidityIsZero_ManipulatedProof_Reverts() public {
+        // get the hash of the previous block
+        uint240 blockNumber = uint240(block.number - 1);
+        bytes32 blockHash = blockhash(blockNumber);
+
+        // mock the Journal
+        UserLiquidity.Journal memory journal = UserLiquidity.Journal({
+            commitment: Steel.Commitment(Encoding.encodeVersionedID(blockNumber, 0), blockHash),
+            liquidity: 0,
+            user: userWithoutLiquidity
+        });
+
+        // create a mock proof
+        RiscZeroReceipt memory receipt = verifier.mockProve(imageId, sha256(abi.encode(journal)));
+
+        // Malicious depositor without liquidity requests a proof and then changes the liquidity to more than zero in the journal
+        journal.liquidity = 1;
+        vm.expectRevert(abi.encodeWithSelector(VerificationFailed.selector));
+        userLiquidity.set(abi.encode(journal), receipt.seal);
+
+        // check that liquidity was not been set
+        assert(userLiquidity.get(userWithoutLiquidity) == false);
     }
 }
