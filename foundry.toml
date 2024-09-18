@@ -6,7 +6,7 @@
   src = "contracts"
   test = "tests"
 
-  # This test is not run because we need real proover 
+  # This test is not run because we need real proover to be run
   no_match_test = "test_Set_WhenLiquidityIsZero_Reverts"
 
   # See more config options https://github.com/foundry-rs/foundry/tree/master/config
