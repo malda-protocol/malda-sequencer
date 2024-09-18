@@ -83,7 +83,7 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
             RiscZeroReceipt memory receipt = mockVerifier.mockProve(imageId, sha256(journal));
             seal = receipt.seal;
         } else {
-            (journal, seal) = prove(Elf.CHECK_LIQUIDITY_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
+            (journal, seal) = prove(Elf.CHECK_LIQUIDITY_PATH, hex"12345678");
         }
 
         userLiquidity.set(journal, seal);
