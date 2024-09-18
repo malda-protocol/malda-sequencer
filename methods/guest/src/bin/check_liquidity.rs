@@ -15,7 +15,7 @@
 use alloy_primitives::{address, Address, U256};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
-    config::ETH_MAINNET_CHAIN_SPEC, config::ETH_SEPOLIA_CHAIN_SPEC, ethereum::EthEvmInput,
+    config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
@@ -31,11 +31,14 @@ sol! {
 
 sol! {
     struct Journal {
+        SolCommitment commitment;
         uint256 liquidity;
+        address user;
     }
 }
 
 fn main() {
+
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
@@ -45,19 +48,22 @@ fn main() {
 
     let env = input.into_env().with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
 
+
     let comptroller = Contract::new(comptroller_address, &env);
 
     let call = ICompound::getAccountLiquidityCall { account };
     let returns = comptroller.call_builder(&call).call();
 
     // Run the computation.
-    // In this case, asserting that the provided number is even.
-    assert!(returns._1 >= U256::from(0), "liquidity below 0");
+    // In this case, asserting liquidity is not zero
+    assert!(returns._1 > U256::from(0), "liquidity is 0");
 
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
+        commitment: env.block_commitment(),
         liquidity: returns._1,
+        user: account
     };
     env::commit_slice(&journal.abi_encode());
 }
