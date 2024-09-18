@@ -27,7 +27,6 @@ import {UserLiquidity} from "../contracts/UserLiquidity.sol";
 import {Steel, Beacon, Encoding} from "risc0/steel/Steel.sol";
 
 contract UserLiquidityTest is RiscZeroCheats, Test {
-    
     UserLiquidity public userLiquidity;
     RiscZeroMockVerifier public verifier;
     bytes32 public imageId;
@@ -37,7 +36,18 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
     uint256 public constant blockNo = 20770922;
     address public constant userWithLiquidity = 0xa66d568cD146C01ac44034A01272C69C2d9e4BaB;
     address public constant userWithoutLiquidity = address(0x0);
-    uint256 public constant liquidity = 16853630641732729601194; 
+    uint256 public constant liquidity = 16853630641732729601194;
+
+    struct ProverInput {
+        bytes input;
+    }
+
+    struct ProofInputParams {
+        uint256 chainId;
+        uint256 blockNo;
+        address user;
+    }
+    mapping(uint256 => mapping(uint256 => mapping(address => bytes))) public proofInputs;
 
     function setUp() public {
         vm.createSelectFork(mainnetRpcUrl, blockNo);
@@ -46,6 +56,7 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
         imageId = userLiquidity.imageId();
         assertEq(userLiquidity.get(userWithLiquidity), false);
         assertEq(userLiquidity.get(userWithoutLiquidity), false);
+        _populateTestProofInputFromJSON();
     }
 
     function test_Set_WhenLiquidityIsNonZero() public {
@@ -119,4 +130,26 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
         // check that liquidity was not been set
         assert(userLiquidity.get(userWithoutLiquidity) == false);
     }
+
+
+
+    function _populateTestProofInputFromJSON() internal {
+        string memory config_data = vm.readFile("tests/testProofInput.json");
+        ProofInputParams[] memory params;
+        bytes memory paramsRaw = vm.parseJson(config_data, ".TestProofParams");
+        params = abi.decode(paramsRaw, (ProofInputParams[]));
+        ProverInput[] memory prooverInput;
+        bytes memory prooverInputRaw = vm.parseJson(config_data, ".TestProofInput");
+
+        prooverInput = abi.decode(prooverInputRaw, (ProverInput[]));
+
+        for (uint256 i; i < params.length; ++i) {
+            proofInputs[params[i].blockNo][params[i].chainId][params[i].user] = prooverInput[i].input;
+        }
+    }
+
+    function test_JSON_read_correctly() public view {
+        assertEq(proofInputs[1][18000000][0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2], hex'12345678');
+    }
+    
 }
