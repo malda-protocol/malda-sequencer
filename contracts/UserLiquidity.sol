@@ -49,13 +49,6 @@ contract UserLiquidity {
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
 
-    /// @notice Journal that is committed to by the guest.
-    struct Journal {
-        Steel.Commitment commitment;
-        uint256 liquidity;
-        address user;
-    }
-
     /// @notice Initialize the contract, binding it to a specified RISC Zero verifier.
     constructor(IRiscZeroVerifier _verifier) {
         verifier = _verifier;
