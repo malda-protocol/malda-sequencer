@@ -17,6 +17,7 @@
 pragma solidity ^0.8.20;
 
 import {RiscZeroCheats} from "risc0/test/RiscZeroCheats.sol";
+import {RiscZeroMockVerifier} from "risc0/test/RiscZeroMockVerifier.sol";
 import {console2} from "forge-std/console2.sol";
 import {IRiscZeroVerifier, VerificationFailed} from "risc0/IRiscZeroVerifier.sol";
 import {Elf} from "./Elf.sol"; // auto-generated contract after running `cargo build`.

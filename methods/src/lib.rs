@@ -22,10 +22,12 @@ mod tests {
     use alloy_primitives::{address, Address, U256};
     use alloy_sol_types::{sol, SolCall, SolValue};
     use anyhow::Error;
+    use anyhow::Error;
     use risc0_steel::{
         config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract, EvmBlockHeader,
         SolCommitment,
     };
+    use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
     use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
 
     sol! {
@@ -35,6 +37,12 @@ mod tests {
 
         interface IUserLiquidity {
             function set(address user, bytes calldata seal) external;
+        }
+
+        struct Journal {
+            SolCommitment commitment;
+            uint256 liquidity;
+            address user;
         }
 
         struct Journal {
@@ -87,6 +95,7 @@ mod tests {
 
         let mut env = EthEvmEnv::from_rpc(
             "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0",
+            Some(block), // we fix this in case account removes liquidity
             Some(block), // we fix this in case account removes liquidity
         )
         .unwrap();

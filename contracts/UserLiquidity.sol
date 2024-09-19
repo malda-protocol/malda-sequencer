@@ -18,6 +18,7 @@ pragma solidity ^0.8.20;
 
 import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
 import {Steel} from "risc0/steel/Steel.sol";
+import {Steel} from "risc0/steel/Steel.sol";
 import {ImageID} from "./ImageID.sol"; // auto-generated contract after running `cargo build`.
 
 /// @notice Journal that is committed to by the guest.
@@ -30,6 +31,8 @@ struct Journal {
 /// @title A starter application using RISC Zero.
 /// @notice This contract keeps track of whether a user has liquidity in Compound.
 /// @dev Can only be set if a proof is provided that user has nonzero liquidty
+/// @notice This contract keeps track of whether a user has liquidity in Compound.
+/// @dev Can only be set if a proof is provided that user has nonzero liquidty
 contract UserLiquidity {
     /// @notice RISC Zero verifier contract address.
     IRiscZeroVerifier public immutable verifier;
@@ -38,11 +41,20 @@ contract UserLiquidity {
     ///         It uniquely represents the logic of that guest program,
     ///         ensuring that only proofs generated from a pre-defined guest program
     ///         (in this case, checking user has liquidity) are considered valid.
+    ///         (in this case, checking user has liquidity) are considered valid.
     bytes32 public constant imageId = ImageID.CHECK_LIQUIDITY_ID;
 
     /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
+    /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
+
+    /// @notice Journal that is committed to by the guest.
+    struct Journal {
+        Steel.Commitment commitment;
+        uint256 liquidity;
+        address user;
+    }
 
     /// @notice Initialize the contract, binding it to a specified RISC Zero verifier.
     constructor(IRiscZeroVerifier _verifier) {
