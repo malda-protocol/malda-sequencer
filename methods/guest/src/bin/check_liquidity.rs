@@ -58,7 +58,9 @@ fn main() {
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
         commitment: env.block_commitment(),
+        commitment: env.block_commitment(),
         liquidity: returns._1,
+        user: account
         user: account
     };
     env::commit_slice(&journal.abi_encode());
