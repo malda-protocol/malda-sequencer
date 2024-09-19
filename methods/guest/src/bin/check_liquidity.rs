@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloy_primitives::{address, Address, U256};
+use alloy_primitives::{address, Address};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
     config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
@@ -20,7 +20,6 @@ use risc0_steel::{
 };
 use risc0_zkvm::guest::env;
 
-risc0_zkvm::guest::entry!(main);
 
 sol! {
     /// ERC-20 balance function signature.
@@ -39,6 +38,7 @@ sol! {
 
 fn main() {
 
+
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
@@ -53,10 +53,6 @@ fn main() {
 
     let call = ICompound::getAccountLiquidityCall { account };
     let returns = comptroller.call_builder(&call).call();
-
-    // Run the computation.
-    // In this case, asserting liquidity is not zero
-    assert!(returns._1 > U256::from(0), "liquidity is 0");
 
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.

@@ -23,9 +23,8 @@ mod tests {
     use alloy_sol_types::{sol, SolCall, SolValue};
     use anyhow::Error;
     use risc0_steel::{
-        config::{ETH_MAINNET_CHAIN_SPEC, ETH_SEPOLIA_CHAIN_SPEC},
-        ethereum::EthEvmEnv,
-        Contract, EvmBlockHeader, SolCommitment,
+        config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract, EvmBlockHeader,
+        SolCommitment,
     };
     use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
 
@@ -52,7 +51,7 @@ mod tests {
         let block = 20770922; // we fix this in case account removes liquidity
         let expected_liquidity = U256::from::<u128>(16853630641732729601194); // liquidity of account at given block
 
-        let session_info = check_liquidity_non_zero(user, block);
+        let session_info = get_users_liquidity_at_block(user, block);
 
         println!("Session info: {:?}", &session_info);
 
@@ -64,22 +63,25 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "liquidity is 0")]
-    fn rejects_when_liquidity_is_zero() {
-        // zero address to have zero liquidity
-        let user = address!("0000000000000000000000000000000000000000");
+    fn proves_when_liquidity_is_zero() {
+        // address to have zero liquidity
+        let user = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd2B");
         let block = 20770922; // we fix this in case account removes liquidity
+        let expected_liquidity = U256::from::<u128>(0); // liquidity of account at given block
 
-        let session_info = check_liquidity_non_zero(user, block);
+        let session_info = get_users_liquidity_at_block(user, block);
 
         println!("Session info: {:?}", &session_info);
 
-        // should panic due to assertion in guest code
-        let _ = session_info.unwrap();
+        let session_info = session_info.unwrap();
+
+        println!("{:?}", &session_info.journal.bytes);
+        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        assert_eq!(journal.liquidity, expected_liquidity);
     }
 
     // helper function to reuse in both tests
-    fn check_liquidity_non_zero(user: Address, block: u64) -> Result<SessionInfo, Error> {
+    fn get_users_liquidity_at_block(user: Address, block: u64) -> Result<SessionInfo, Error> {
         println!("User: {}", user);
         let comptroller = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
 
