@@ -28,7 +28,6 @@ import {Steel, Beacon, Encoding} from "risc0/steel/Steel.sol";
 
 contract UserLiquidityTest is RiscZeroCheats, Test {
     UserLiquidity public userLiquidity;
-    RiscZeroMockVerifier public mockVerifier;
     IRiscZeroVerifier public verifier;
     bytes32 public imageId;
 
@@ -54,9 +53,8 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
 
     function setUp() public {
         vm.createSelectFork(mainnetRpcUrl, blockNo + 1); // + 1 because verification on chain can earliest happen 1 block later
-        mockVerifier = RiscZeroMockVerifier(address(deployRiscZeroVerifier()));
         verifier = deployRiscZeroVerifier();
-        userLiquidity = devMode() ? new UserLiquidity(mockVerifier) : new UserLiquidity(verifier);
+        userLiquidity = new UserLiquidity(verifier);
         imageId = userLiquidity.imageId();
         assertEq(userLiquidity.get(userWithLiquidity), false);
         assertEq(userLiquidity.get(userWithoutLiquidity), false);
@@ -68,23 +66,7 @@ contract UserLiquidityTest is RiscZeroCheats, Test {
         uint240 blockNumber = uint240(blockNo);
         bytes32 blockHash = blockhash(blockNumber);
 
-        bytes memory journal;
-        bytes memory seal;
-        // create a mock proof
-        if (devMode()) {
-            // mock the Journal
-            journal = abi.encode(
-                UserLiquidity.Journal({
-                    commitment: Steel.Commitment(Encoding.encodeVersionedID(blockNumber, 0), blockHash),
-                    liquidity: liquidity,
-                    user: userWithLiquidity
-                })
-            );
-            RiscZeroReceipt memory receipt = mockVerifier.mockProve(imageId, sha256(journal));
-            seal = receipt.seal;
-        } else {
-            (journal, seal) = prove(Elf.CHECK_LIQUIDITY_PATH, hex"12345678");
-        }
+        (bytes memory journal, bytes memory seal) = prove(Elf.CHECK_LIQUIDITY_PATH, hex"12345678");
 
         userLiquidity.set(journal, seal);
 
