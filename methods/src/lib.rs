@@ -88,7 +88,7 @@ mod tests {
 
         let mut env = EthEvmEnv::from_rpc(
             "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0",
-            Some(block), // we fix this in case account removes liqudidity
+            Some(block), // we fix this in case account removes liquidity
         )
         .unwrap();
         env = env.with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
