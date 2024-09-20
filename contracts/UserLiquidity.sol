@@ -18,9 +18,19 @@ pragma solidity ^0.8.20;
 
 import {IRiscZeroVerifier} from "risc0/IRiscZeroVerifier.sol";
 import {Steel} from "risc0/steel/Steel.sol";
+import {Steel} from "risc0/steel/Steel.sol";
 import {ImageID} from "./ImageID.sol"; // auto-generated contract after running `cargo build`.
 
+/// @notice Journal that is committed to by the guest.
+struct Journal {
+    Steel.Commitment commitment;
+    uint256 liquidity;
+    address user;
+}
+
 /// @title A starter application using RISC Zero.
+/// @notice This contract keeps track of whether a user has liquidity in Compound.
+/// @dev Can only be set if a proof is provided that user has nonzero liquidty
 /// @notice This contract keeps track of whether a user has liquidity in Compound.
 /// @dev Can only be set if a proof is provided that user has nonzero liquidty
 contract UserLiquidity {
@@ -37,13 +47,6 @@ contract UserLiquidity {
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
 
-    /// @notice Journal that is committed to by the guest.
-    struct Journal {
-        Steel.Commitment commitment;
-        uint256 liquidity;
-        address user;
-    }
-
     /// @notice Initialize the contract, binding it to a specified RISC Zero verifier.
     constructor(IRiscZeroVerifier _verifier) {
         verifier = _verifier;
@@ -58,8 +61,7 @@ contract UserLiquidity {
         // Verify the proof
         verifier.verify(seal, imageId, sha256(journalData));
 
-        userHasLiquidity[journal.user] = true;
-        // here we just set liquidity to true, for real logic use journal.liquidity
+        userHasLiquidity[journal.user] = journal.liquidity > 0;
     }
 
     /// @notice Returns the liquidity bool stored.

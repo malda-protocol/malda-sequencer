@@ -23,11 +23,7 @@ use clap::Parser;
 use host::TxSender;
 use methods::CHECK_LIQUIDITY_ELF;
 use risc0_ethereum_contracts::groth16::encode;
-use risc0_steel::{
-    config::{ETH_MAINNET_CHAIN_SPEC, ETH_SEPOLIA_CHAIN_SPEC},
-    ethereum::EthEvmEnv,
-    Contract, EvmBlockHeader,
-};
+use risc0_steel::{config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract, EvmBlockHeader};
 use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, VerifierContext};
 use tracing_subscriber::EnvFilter;
 

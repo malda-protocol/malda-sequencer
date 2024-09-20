@@ -17,7 +17,7 @@ alloy-primitives = { version = "0.7", default-features = false, features = [
 ] }
 alloy-sol-types = { version = "0.7.7" }
 log = { version = "0.4" }
-risc0-steel = "0.11.1"
+risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "steel-v0.11.1" }
 risc0-zkvm = { version = "1.0", default-features = false, features = ['std'] }
 
 [profile.release]
