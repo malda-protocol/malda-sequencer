@@ -44,7 +44,6 @@ contract UserLiquidity {
     bytes32 public constant imageId = ImageID.CHECK_LIQUIDITY_ID;
 
     /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
-    /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
     ///         It can be set by calling the `set` function.
     mapping(address user => bool hasLiquidity) public userHasLiquidity;
 
