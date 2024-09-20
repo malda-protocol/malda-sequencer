@@ -22,13 +22,13 @@ contract TestHelper is Test {
         ProofInputParams[] memory params;
         bytes memory paramsRaw = vm.parseJson(config_data, ".TestProofParams");
         params = abi.decode(paramsRaw, (ProofInputParams[]));
-        ProverInput[] memory prooverInput;
-        bytes memory prooverInputRaw = vm.parseJson(config_data, ".TestProofInput");
+        ProverInput[] memory proverInput;
+        bytes memory proverInputRaw = vm.parseJson(config_data, ".TestProofInput");
 
-        prooverInput = abi.decode(prooverInputRaw, (ProverInput[]));
+        proverInput = abi.decode(proverInputRaw, (ProverInput[]));
 
         for (uint256 i; i < params.length; ++i) {
-            proofInputs[params[i].blockNo][params[i].chainId][params[i].user] = prooverInput[i].input;
+            proofInputs[params[i].blockNo][params[i].chainId][params[i].user] = proverInput[i].input;
         }
     }
 }
