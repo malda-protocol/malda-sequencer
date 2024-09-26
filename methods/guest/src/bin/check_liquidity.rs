@@ -43,7 +43,6 @@ fn main() {
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
 
-    println!("Account: {}", account);
     let comptroller_address = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
 
     let env = input.into_env().with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
