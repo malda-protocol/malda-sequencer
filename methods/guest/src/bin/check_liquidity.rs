@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloy_primitives::{address, Address};
+use alloy_primitives::{address, Address, U256, Signature, B256, Sealable, keccak256};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
     config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
+use risc0_steel::EvmEnv;
+
+use k256::ecdsa::VerifyingKey;
+use k256::ecdsa::Error;
+use k256::ecdsa::RecoveryId;
+
+use std::collections::HashMap;
 
 
 sol! {
@@ -35,6 +42,12 @@ sol! {
         address user;
     }
 }
+
+const SECP256K1N_HALF: U256 = U256::from_be_bytes([
+    0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
+]);
+
 
 fn main() {
 
@@ -62,3 +75,82 @@ fn main() {
     };
     env::commit_slice(&journal.abi_encode());
 }
+
+
+fn check_block_validity(env: EvmEnv<risc0_steel::StateDb, risc0_steel::ethereum::EthBlockHeader>) -> () {
+    
+    // extract sequencer signature from extra data
+    let extra_data = env.header().extra_data.clone();
+
+    let length = extra_data.len();
+    let signature = extra_data.slice(length - 65..length);
+    let prefix = extra_data.slice(0..length - 65);
+
+
+    let r_array: [u8; 32] = signature.slice(0..32).to_vec().try_into().unwrap();
+    let r = U256::from_be_bytes(r_array);
+
+    let s_array: [u8; 32] = signature.slice(32..64).to_vec().try_into().unwrap();
+    let s = U256::from_be_bytes(s_array);
+
+    let v_array: [u8; 1] = signature.slice(64..65).to_vec().try_into().unwrap();
+    let v = v_array[0] == 1;
+
+    let sig = Signature::from_rs_and_parity(r, s, v).unwrap();
+
+
+    // hash block without signature
+    let mut header = env.header().clone();
+    header.extra_data = prefix;
+
+    let sighash: [u8; 32] = header.hash_slow().to_vec().try_into().unwrap();
+    let sighash = B256::new(sighash);
+
+    let sequencer = recover_signer(sig, sighash).unwrap();
+    println!("sequencer: {:?}", sequencer);
+
+    let sequencer_to_chain_id = HashMap::<Address, u32>::new();
+    sequencer_to_chain_id.insert(sequencer, 1);
+    
+
+}
+
+fn recover_signer(signature: Signature, sighash: B256) -> Option<Address> {
+    if signature.s() > SECP256K1N_HALF {
+        return None;
+    }
+
+    let mut sig: [u8; 65] = [0; 65];
+
+    sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
+    sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
+    sig[64] = signature.v().y_parity_byte();
+
+    // NOTE: we are removing error from underlying crypto library as it will restrain primitive
+    // errors and we care only if recovery is passing or not.
+    recover_signer_unchecked(&sig, &sighash.0).ok()
+}
+
+
+pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+    let mut signature = k256::ecdsa::Signature::from_slice(&sig[0..64])?;
+    let mut recid = sig[64];
+
+    // normalize signature and flip recovery id if needed.
+    if let Some(sig_normalized) = signature.normalize_s() {
+        signature = sig_normalized;
+        recid ^= 1;
+    }
+    let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
+
+    // recover key
+    let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &signature, recid)?;
+    Ok(public_key_to_address(recovered_key))
+}
+
+    /// Converts a public key into an ethereum address by hashing the encoded public key with
+    /// keccak256.
+    pub fn public_key_to_address(public: VerifyingKey) -> Address {
+        let hash = keccak256(&public.to_encoded_point(/* compress = */ false).as_bytes()[1..]);
+        Address::from_slice(&hash[12..])
+    }
