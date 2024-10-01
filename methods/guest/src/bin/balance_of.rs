@@ -12,17 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloy_primitives::{address, Address, U256, Signature, B256, Sealable, keccak256};
+use alloy_primitives::Address;
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
     ethereum::EthEvmInput,
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
-
-use k256::ecdsa::{VerifyingKey, Error, RecoveryId};
-
-use std::collections::HashMap;
 
 
 sol! {

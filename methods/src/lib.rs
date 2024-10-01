@@ -32,6 +32,7 @@ mod tests {
     sol! {
         interface ICompound {
             function accountLiquidityOf(address user) external view returns (uint256, uint256, uint256);
+            function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
             
         }
 
@@ -41,6 +42,12 @@ mod tests {
 
         interface IUserLiquidity {
             function set(address user, bytes calldata seal) external;
+        }
+
+        struct MainnetJournal {
+            SolCommitment commitment;
+            uint256 liquidity;
+            address user;
         }
 
         struct Journal {
@@ -75,170 +82,52 @@ mod tests {
     const RPC_URL_OPTIMISM: &str = "https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
     const RPC_URL_ARBITRUM: &str = "https://arb-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
 
+    // 
+    // following two tests are check_liquidity (legacy) for mainnet, complementary to the solidity tests. ETH -> ETH prove
+    // 
 
     #[test]
-    fn proves_when_liquidity_is_non_zero_linea() {
+    fn proves_when_liquidity_is_non_zero_mainnet() {
         // choose random user with positive liquidity from etherscan
-        let chain_url = RPC_URL_LINEA;
-        let user = address!("0A047Ec8c33c7E8e9945662F127A5A32c0730190");
-        let block = 10144608; // we fix this in case account removes liquidity
-        let expected_liquidity = U256::from::<u128>(2597964494811397427); // liquidity of account at given block
+        let chain_url = RPC_URL_MAINNET;
+        let user = address!("a66d568cD146C01ac44034A01272C69C2d9e4BaB");
+        let block = 20770922; // we fix this in case account removes liquidity
+        let expected_liquidity = U256::from::<u128>(16853630641732729601194); // liquidity of account at given block
 
-        let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_LINEA);
+        let session_info = get_users_liquidity_at_block_and_chain_url_mainnet(user, block, chain_url, COMPTROLLER_MAIN);
 
         println!("Session info: {:?}", &session_info);
 
         let session_info = session_info.unwrap();
 
         println!("{:?}", &session_info.journal.bytes);
-        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        let journal = MainnetJournal::abi_decode(&session_info.journal.bytes, true).unwrap();
         assert_eq!(journal.liquidity, expected_liquidity);
     }
 
     #[test]
-    fn proves_when_liquidity_is_zero_linea() {
-        // choose random user with positive liquidity from etherscan
-        let chain_url = RPC_URL_LINEA;
-        let user = address!("0A047Ec8c33c7E8e9845662F127A5A32c0730190");
-        let block = 10144608; // we fix this in case account removes liquidity
+    fn proves_when_liquidity_is_zero_mainnet() {
+        // address to have zero liquidity
+        let chain_url = RPC_URL_MAINNET;
+        let user = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd2B");
+        let block = 20770922; // we fix this in case account removes liquidity
         let expected_liquidity = U256::from::<u128>(0); // liquidity of account at given block
 
-        let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_LINEA);
+        let session_info = get_users_liquidity_at_block_and_chain_url_mainnet(user, block, chain_url, COMPTROLLER_MAIN);
 
         println!("Session info: {:?}", &session_info);
 
         let session_info = session_info.unwrap();
 
         println!("{:?}", &session_info.journal.bytes);
-        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        let journal = MainnetJournal::abi_decode(&session_info.journal.bytes, true).unwrap();
         assert_eq!(journal.liquidity, expected_liquidity);
     }
 
-    // #[test]
-    // fn proves_when_liquidity_is_non_zero_scroll() {
-    //     // choose random user with positive liquidity from etherscan
-    //     let chain_url = RPC_URL_SCROLL;
-    //     let user = address!("55b82EEB5d2AFDC77dae6362ac0251C6A2bDfA4D");
-    //     let block = 9750462; // we fix this in case account removes liquidity
-    //     let expected_liquidity = U256::from::<u128>(546838304739424099106); // liquidity of account at given block
-
-    //     let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_SCROLL);
-
-    //     println!("Session info: {:?}", &session_info);
-
-    //     let session_info = session_info.unwrap();
-
-    //     println!("{:?}", &session_info.journal.bytes);
-    //     let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-    //     assert_eq!(journal.liquidity, expected_liquidity);
-    // }
-
-    // #[test]
-    // fn proves_when_liquidity_is_zero_scroll() {
-    //     // choose random user with positive liquidity from etherscan
-    //     let chain_url = RPC_URL_SCROLL;
-    //     let user = address!("57fEe8983600aCc4d551D5383fCCf37D1131a72B");
-    //     let block = 9750462; // we fix this in case account removes liquidity
-    //     let expected_liquidity = U256::from::<u128>(0); // liquidity of account at given block
-
-    //     let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_SCROLL);
-
-    //     println!("Session info: {:?}", &session_info);
-
-    //     let session_info = session_info.unwrap();
-
-    //     println!("{:?}", &session_info.journal.bytes);
-    //     let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-    //     assert_eq!(journal.liquidity, expected_liquidity);
-    // }
-
-    // #[test]
-    // fn proves_when_liquidity_is_non_zero() {
-    //     // choose random user with positive liquidity from etherscan
-    //     let chain_url = RPC_URL_MAINNET;
-    //     let user = address!("a66d568cD146C01ac44034A01272C69C2d9e4BaB");
-    //     let block = 20770922; // we fix this in case account removes liquidity
-    //     let expected_liquidity = U256::from::<u128>(16853630641732729601194); // liquidity of account at given block
-
-    //     let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_MAIN);
-
-    //     println!("Session info: {:?}", &session_info);
-
-    //     let session_info = session_info.unwrap();
-
-    //     println!("{:?}", &session_info.journal.bytes);
-    //     let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-    //     assert_eq!(journal.liquidity, expected_liquidity);
-    // }
-
-    // #[test]
-    // fn proves_when_liquidity_is_zero() {
-    //     // address to have zero liquidity
-    //     let chain_url = RPC_URL_MAINNET;
-    //     let user = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd2B");
-    //     let block = 20770922; // we fix this in case account removes liquidity
-    //     let expected_liquidity = U256::from::<u128>(0); // liquidity of account at given block
-
-    //     let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_MAIN);
-
-    //     println!("Session info: {:?}", &session_info);
-
-    //     let session_info = session_info.unwrap();
-
-    //     println!("{:?}", &session_info.journal.bytes);
-    //     let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-    //     assert_eq!(journal.liquidity, expected_liquidity);
-    // }
-
-    // helper function to reuse in both tests
-    fn get_users_liquidity_at_block_and_chain_url(user: Address, block: u64, chain_url: &str, comptroller: Address) -> Result<SessionInfo, Error> {
-        println!("User: {}", user);
-
-        let mut env = EthEvmEnv::from_rpc(
-            chain_url,
-            Some(block), // we fix this in case account removes liquidity
-        )
-        .unwrap();
-
-        let block_number = env.header().number();
-        println!("block_number: {}", block_number);
-
-        let call = ICompound::accountLiquidityOfCall { user };
-
-        let mut contract = Contract::preflight(comptroller, &mut env);
-        let returns = contract.call_builder(&call).call().unwrap();
-
-        println!(
-            "For block {} calling `{}` on {} returns: {}",
-            env.header().number(),
-            ICompound::accountLiquidityOfCall::SIGNATURE,
-            comptroller,
-            returns._1
-        );
-
-        let view_call_input = match env.into_input() {
-            Ok(input) => input,
-            Err(e) => {
-                println!("Failed to create input: {:?}", e);
-                panic!("Unable to proceed due to previous error.");
-            }
-        };
-
-        let env = ExecutorEnv::builder()
-            .write(&view_call_input)
-            .unwrap()
-            .write(&user)
-            .unwrap()
-            .write(&comptroller)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        println!("Env type ID: {:?}", &env.type_id());
-
-        // NOTE: Use the executor to run tests without proving.
-        default_executor().execute(env, super::CHECK_LIQUIDITY_CROSSCHAIN_ELF)
-    }
+    // 
+    // following two tests are check_balance for several l2 with the purpose to test if steel proof for the chain is supported
+    // because of the different hash, stell should not work with scroll
+    // 
 
     #[test]
     fn proves_balance_on_linea() {
@@ -259,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn proves_balance_on_scroll() {
         // choose random user with positive liquidity from etherscan
         let chain_url = RPC_URL_SCROLL;
@@ -331,7 +221,52 @@ mod tests {
         assert_eq!(journal.balance, expected_balance);
     }
 
-        // helper function to reuse in both tests
+    // 
+    // following two tests are for check_liquidity_cross for linea. Prove Linea -> any EVM chain
+    // this scroll does not support steel proof and other chains dont have sequencer signature, only Linea supports this for now
+    // 
+
+    #[test]
+    fn proves_when_liquidity_is_non_zero_linea() {
+        // choose random user with positive liquidity from etherscan
+        let chain_url = RPC_URL_LINEA;
+        let user = address!("0A047Ec8c33c7E8e9945662F127A5A32c0730190");
+        let block = 10144608; // we fix this in case account removes liquidity
+        let expected_liquidity = U256::from::<u128>(2597964494811397427); // liquidity of account at given block
+
+        let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_LINEA);
+
+        println!("Session info: {:?}", &session_info);
+
+        let session_info = session_info.unwrap();
+
+        println!("{:?}", &session_info.journal.bytes);
+        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        assert_eq!(journal.liquidity, expected_liquidity);
+    }
+
+
+
+    #[test]
+    fn proves_when_liquidity_is_zero_linea() {
+        // choose random user with positive liquidity from etherscan
+        let chain_url = RPC_URL_LINEA;
+        let user = address!("0A047Ec8c33c7E8e9845662F127A5A32c0730190");
+        let block = 10144608; // we fix this in case account removes liquidity
+        let expected_liquidity = U256::from::<u128>(0); // liquidity of account at given block
+
+        let session_info = get_users_liquidity_at_block_and_chain_url(user, block, chain_url, COMPTROLLER_LINEA);
+
+        println!("Session info: {:?}", &session_info);
+
+        let session_info = session_info.unwrap();
+
+        println!("{:?}", &session_info.journal.bytes);
+        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        assert_eq!(journal.liquidity, expected_liquidity);
+    }
+
+    // helper function to reuse in both tests
     fn get_users_balance_at_block_and_chain_url(user: Address, block: u64, chain_url: &str, asset: Address) -> Result<SessionInfo, Error> {
             println!("User: {}", user);
     
@@ -380,4 +315,103 @@ mod tests {
             // NOTE: Use the executor to run tests without proving.
             default_executor().execute(env, super::BALANCE_OF_ELF)
         }
+
+    fn get_users_liquidity_at_block_and_chain_url_mainnet(user: Address, block: u64, chain_url: &str, comptroller: Address) -> Result<SessionInfo, Error> {
+        println!("User: {}", user);
+
+        let mut env = EthEvmEnv::from_rpc(
+            chain_url,
+            Some(block), // we fix this in case account removes liquidity
+        )
+        .unwrap();
+
+        let block_number = env.header().number();
+        println!("block_number: {}", block_number);
+
+        let call = ICompound::getAccountLiquidityCall { account: user };
+
+        let mut contract = Contract::preflight(comptroller, &mut env);
+        let returns = contract.call_builder(&call).call().unwrap();
+
+        println!(
+            "For block {} calling `{}` on {} returns: {}",
+            env.header().number(),
+            ICompound::getAccountLiquidityCall::SIGNATURE,
+            comptroller,
+            returns._1
+        );
+
+        let view_call_input = match env.into_input() {
+            Ok(input) => input,
+            Err(e) => {
+                println!("Failed to create input: {:?}", e);
+                panic!("Unable to proceed due to previous error.");
+            }
+        };
+
+        let env = ExecutorEnv::builder()
+            .write(&view_call_input)
+            .unwrap()
+            .write(&user)
+            .unwrap()
+            .write(&comptroller)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        println!("Env type ID: {:?}", &env.type_id());
+
+        // NOTE: Use the executor to run tests without proving.
+        default_executor().execute(env, super::CHECK_LIQUIDITY_ELF)
+    }
+
+        // helper function to reuse in both tests
+    fn get_users_liquidity_at_block_and_chain_url(user: Address, block: u64, chain_url: &str, comptroller: Address) -> Result<SessionInfo, Error> {
+        println!("User: {}", user);
+
+        let mut env = EthEvmEnv::from_rpc(
+            chain_url,
+            Some(block), // we fix this in case account removes liquidity
+        )
+        .unwrap();
+
+        let block_number = env.header().number();
+        println!("block_number: {}", block_number);
+
+        let call = ICompound::accountLiquidityOfCall { user };
+
+        let mut contract = Contract::preflight(comptroller, &mut env);
+        let returns = contract.call_builder(&call).call().unwrap();
+
+        println!(
+            "For block {} calling `{}` on {} returns: {}",
+            env.header().number(),
+            ICompound::accountLiquidityOfCall::SIGNATURE,
+            comptroller,
+            returns._1
+        );
+
+        let view_call_input = match env.into_input() {
+            Ok(input) => input,
+            Err(e) => {
+                println!("Failed to create input: {:?}", e);
+                panic!("Unable to proceed due to previous error.");
+            }
+        };
+
+        let env = ExecutorEnv::builder()
+            .write(&view_call_input)
+            .unwrap()
+            .write(&user)
+            .unwrap()
+            .write(&comptroller)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        println!("Env type ID: {:?}", &env.type_id());
+
+        // NOTE: Use the executor to run tests without proving.
+        default_executor().execute(env, super::CHECK_LIQUIDITY_CROSSCHAIN_ELF)
+    }
 }

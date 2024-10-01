@@ -48,6 +48,8 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 ]);
 
 
+// this currently only works for Linea, other chains will panic on signature extraction from extra_data. Scroll will panic on call proof 
+// due to different hash structure
 fn main() {
 
     // Read the input data for this application.
