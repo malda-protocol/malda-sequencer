@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloy_primitives::{address, Address};
+use alloy_primitives::Address;
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
-    config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
+    ethereum::EthEvmInput,
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
@@ -23,42 +23,43 @@ use risc0_zkvm::guest::env;
 
 sol! {
     /// ERC-20 balance function signature.
-    interface ICompound {
-        function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
+    interface IERC20 {
+        function balanceOf(address account) external view returns (uint256);
     }
 }
 
 sol! {
     struct Journal {
         SolCommitment commitment;
-        uint256 liquidity;
+        uint256 balance;
         address user;
+        address asset;
     }
 }
 
-fn main() {
 
+fn main() {
 
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
+    let asset_address = env::read();
 
-    let comptroller_address = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
+    let env = input.into_env();
 
-    let env = input.into_env().with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
+    let comptroller = Contract::new(asset_address, &env);
 
-
-    let comptroller = Contract::new(comptroller_address, &env);
-
-    let call = ICompound::getAccountLiquidityCall { account };
+    let call = IERC20::balanceOfCall { account };
     let returns = comptroller.call_builder(&call).call();
+    // let chain_id = check_block_validity_and_get_chain_id(env.header().clone());
 
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
         commitment: env.block_commitment(),
-        liquidity: returns._1,
-        user: account
+        balance: returns._0,
+        user: account,
+        asset: asset_address
     };
     env::commit_slice(&journal.abi_encode());
 }
