@@ -56,7 +56,7 @@ fn main() {
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
-        commitment: env.block_commitment(),
+        commitment: env.commitment().clone(),
         balance: returns._0,
         user: account,
         asset: asset_address
