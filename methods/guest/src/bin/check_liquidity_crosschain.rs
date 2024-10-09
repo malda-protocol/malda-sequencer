@@ -15,7 +15,7 @@
 use alloy_primitives::{address, Address, U256, Signature, B256, Sealable, keccak256};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
-    config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
+    ethereum::{ETH_MAINNET_CHAIN_SPEC, EthEvmInput},
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
@@ -68,7 +68,7 @@ fn main() {
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
-        commitment: env.block_commitment(),
+        commitment: env.commitment().clone(),
         liquidity: returns._1,
         user: account,
         chain_id: chain_id,

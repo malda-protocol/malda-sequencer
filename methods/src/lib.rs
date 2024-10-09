@@ -75,7 +75,7 @@ mod tests {
     const WETH_BASE: Address = address!("4200000000000000000000000000000000000006");
     const WETH_SCROLL: Address = address!("5300000000000000000000000000000000000004");
 
-    const RPC_URL_LINEA: &str = "https://linea-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    const RPC_URL_LINEA: &str = "https://rpc.linea.build";
     const RPC_URL_SCROLL: &str = "https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
     const RPC_URL_MAINNET: &str = "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
     const RPC_URL_BASE: &str = "https://base-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
