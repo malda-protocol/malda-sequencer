@@ -19,4 +19,6 @@ log = { workspace = true }
 risc0-steel = { workspace = true }
 risc0-zkvm = { workspace = true, features = ["client"] }
 anyhow = "1.0"
+url = { version = "2.5" }
+tokio = { version = "1.35", features = ["full"] }
 
