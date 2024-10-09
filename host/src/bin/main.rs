@@ -23,9 +23,12 @@ use clap::Parser;
 use host::TxSender;
 use methods::CHECK_LIQUIDITY_ELF;
 use risc0_ethereum_contracts::groth16::encode;
-use risc0_steel::{config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract, EvmBlockHeader};
+use risc0_steel::{ethereum::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract};
 use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, VerifierContext};
 use tracing_subscriber::EnvFilter;
+use url::Url;
+use risc0_steel::host::BlockNumberOrTag;
+use tokio;
 
 // `IEvenNumber` interface automatically generated via the alloy `sol!` macro.
 sol! {
@@ -63,7 +66,8 @@ struct Args {
     account: Address,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Initialize tracing. In order to view logs, run `RUST_LOG=info cargo run`
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -74,7 +78,7 @@ fn main() -> Result<()> {
 
     // Create an EVM environment from an RPC endpoint and a block number. If no block number is
     // provided, the latest block is used.
-    let mut env = EthEvmEnv::from_rpc(&args.rpc_url, None)?;
+    let mut env = EthEvmEnv::from_rpc(Url::parse(&args.rpc_url)?, BlockNumberOrTag::Latest).await?;
 
     //  The `with_chain_spec` method is used to specify the chain configuration.
     env = env.with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
@@ -83,17 +87,17 @@ fn main() -> Result<()> {
 
     // Preflight the call to execute the function in the guest.
     let mut contract = Contract::preflight(args.contract, &mut env);
-    let returns = contract.call_builder(&call).call()?;
+    let returns = contract.call_builder(&call).call().await?;
     println!(
         "For block {} calling `{}` on {} returns: {}",
-        env.header().number(),
+        env.header().inner().number,
         ICompound::getAccountLiquidityCall::SIGNATURE,
         args.contract,
         returns._1
     );
 
     println!("proving...");
-    let view_call_input = env.into_input()?;
+    let view_call_input = env.into_input().await?;
     let env = ExecutorEnv::builder()
         .write(&view_call_input)?
         .write(&args.account)?
