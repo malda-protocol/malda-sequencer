@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloy_primitives::{address, Address, U256, Signature, B256, Sealable, keccak256};
+use alloy_primitives::{address, Address, U256, Signature, B256, keccak256};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
-    config::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmInput,
+    ethereum::{ETH_MAINNET_CHAIN_SPEC, EthEvmInput},
     Contract, SolCommitment,
 };
 use risc0_zkvm::guest::env;
@@ -68,7 +68,7 @@ fn main() {
     // Commit the journal that will be received by the application contract.
     // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
-        commitment: env.block_commitment(),
+        commitment: env.commitment().clone(),
         liquidity: returns._1,
         user: account,
         chain_id: chain_id,
@@ -81,7 +81,7 @@ fn main() {
 fn check_block_validity_and_get_chain_id(header: risc0_steel::ethereum::EthBlockHeader) -> U256 {
     
     // extract sequencer signature from extra data
-    let extra_data = header.extra_data.clone();
+    let extra_data = header.inner().extra_data.clone();
 
     let length = extra_data.len();
     let signature = extra_data.slice(length - 65..length);
@@ -101,7 +101,7 @@ fn check_block_validity_and_get_chain_id(header: risc0_steel::ethereum::EthBlock
 
 
     // hash block without signature
-    let mut header = header.clone();
+    let mut header = header.inner().clone();
     header.extra_data = prefix;
 
     let sighash: [u8; 32] = header.hash_slow().to_vec().try_into().unwrap();
