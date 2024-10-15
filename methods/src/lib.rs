@@ -25,7 +25,7 @@ mod tests {
 
     use risc0_steel::{
         ethereum::EthEvmEnv, Contract,
-        SolCommitment, host::BlockNumberOrTag
+        Commitment, host::BlockNumberOrTag
     };
     use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
     use url::Url;
@@ -47,13 +47,13 @@ mod tests {
         }
 
         struct MainnetJournal {
-            SolCommitment commitment;
+            Commitment commitment;
             uint256 liquidity;
             address user;
         }
 
         struct Journal {
-            SolCommitment commitment;
+            Commitment commitment;
             uint256 liquidity;
             address user;
             uint256 chain_id;
@@ -61,7 +61,7 @@ mod tests {
         }
 
         struct BalanceJournal {
-            SolCommitment commitment;
+            Commitment commitment;
             uint256 balance;
             address user;
             address asset;
