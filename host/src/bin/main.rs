@@ -23,12 +23,12 @@ use clap::Parser;
 use host::TxSender;
 use methods::CHECK_LIQUIDITY_ELF;
 use risc0_ethereum_contracts::groth16::encode;
-use risc0_steel::{ethereum::ETH_MAINNET_CHAIN_SPEC, ethereum::EthEvmEnv, Contract};
+use risc0_steel::host::BlockNumberOrTag;
+use risc0_steel::{ethereum::EthEvmEnv, ethereum::ETH_MAINNET_CHAIN_SPEC, Contract};
 use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, VerifierContext};
+use tokio;
 use tracing_subscriber::EnvFilter;
 use url::Url;
-use risc0_steel::host::BlockNumberOrTag;
-use tokio;
 
 // `IEvenNumber` interface automatically generated via the alloy `sol!` macro.
 sol! {
@@ -55,7 +55,7 @@ struct Args {
 
     /// Ethereum Node endpoint.
     #[clap(long)]
-    rpc_url: String,
+    rpc_url: Url,
 
     /// Application's contract address on Ethereum
     #[clap(long)]
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
 
     // Create an EVM environment from an RPC endpoint and a block number. If no block number is
     // provided, the latest block is used.
-    let mut env = EthEvmEnv::from_rpc(Url::parse(&args.rpc_url)?, BlockNumberOrTag::Latest).await?;
+    let mut env = EthEvmEnv::builder().rpc(args.rpc_url).build().await?;
 
     //  The `with_chain_spec` method is used to specify the chain configuration.
     env = env.with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
@@ -123,7 +123,7 @@ async fn main() -> Result<()> {
     // Create a new transaction sender using the parsed arguments.
     let tx_sender = TxSender::new(
         args.chain_id,
-        &args.rpc_url,
+        args.rpc_url.as_str(),
         &args.eth_wallet_private_key,
         &args.contract.to_string(),
     )?;

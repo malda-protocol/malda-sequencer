@@ -15,11 +15,10 @@
 use alloy_primitives::{address, Address};
 use alloy_sol_types::{sol, SolValue};
 use risc0_steel::{
-    ethereum::{ETH_MAINNET_CHAIN_SPEC, EthEvmInput},
-    Contract, SolCommitment,
+    ethereum::{EthEvmInput, ETH_MAINNET_CHAIN_SPEC},
+    Commitment, Contract,
 };
 use risc0_zkvm::guest::env;
-
 
 sol! {
     /// ERC-20 balance function signature.
@@ -30,15 +29,13 @@ sol! {
 
 sol! {
     struct Journal {
-        SolCommitment commitment;
+        Commitment commitment;
         uint256 liquidity;
         address user;
     }
 }
 
 fn main() {
-
-
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
@@ -46,7 +43,6 @@ fn main() {
     let comptroller_address = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
 
     let env = input.into_env().with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
-
 
     let comptroller = Contract::new(comptroller_address, &env);
 
@@ -58,7 +54,7 @@ fn main() {
     let journal = Journal {
         commitment: env.commitment().clone(),
         liquidity: returns._1,
-        user: account
+        user: account,
     };
     env::commit_slice(&journal.abi_encode());
 }
