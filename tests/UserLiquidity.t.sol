@@ -33,7 +33,7 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
     string public constant mainnetRpcUrl = "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
     uint256 public constant blockNo = 20770922; // number used in cargo tests for the method
     address public constant userWithLiquidity = 0xa66d568cD146C01ac44034A01272C69C2d9e4BaB;
-    address public constant userWithoutLiquidity = address(0x0);
+    address public constant userWithoutLiquidity = 0x3d9819210A31b4961B30eF54Be2AED79b9c9CD2B;
     uint256 public constant liquidity = 16853630641732729601194;
     uint256 public constant ethereumId = 1;
 
@@ -48,10 +48,10 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
     }
 
     function test_Set_WhenLiquidityIsNonZero() public {
-        (bytes memory journal, bytes memory seal) =
+        (bytes memory journalData, bytes memory seal) =
             prove(Elf.CHECK_LIQUIDITY_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
 
-        userLiquidity.set(journal, seal);
+        userLiquidity.set(journalData, seal);
 
         // check that liquidity has been set
         assert(userLiquidity.get(userWithLiquidity) == true);
