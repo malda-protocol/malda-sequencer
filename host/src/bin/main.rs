@@ -55,7 +55,7 @@ struct Args {
 
     /// Ethereum Node endpoint.
     #[clap(long)]
-    rpc_url: Url,
+    rpc_url: String,
 
     /// Application's contract address on Ethereum
     #[clap(long)]
@@ -78,7 +78,10 @@ async fn main() -> Result<()> {
 
     // Create an EVM environment from an RPC endpoint and a block number. If no block number is
     // provided, the latest block is used.
-    let mut env = EthEvmEnv::builder().rpc(args.rpc_url).build().await?;
+    let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(&args.rpc_url)?)
+        .build()
+        .await?;
 
     //  The `with_chain_spec` method is used to specify the chain configuration.
     env = env.with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
@@ -123,7 +126,7 @@ async fn main() -> Result<()> {
     // Create a new transaction sender using the parsed arguments.
     let tx_sender = TxSender::new(
         args.chain_id,
-        args.rpc_url.as_str(),
+        &args.rpc_url,
         &args.eth_wallet_private_key,
         &args.contract.to_string(),
     )?;
