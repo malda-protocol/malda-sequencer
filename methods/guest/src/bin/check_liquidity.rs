@@ -35,7 +35,9 @@ sol! {
     }
 }
 
+
 fn main() {
+
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
     let account: Address = env::read();
