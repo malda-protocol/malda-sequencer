@@ -14,7 +14,7 @@
 
 use alloy_primitives::Address;
 use alloy_sol_types::{sol, SolValue};
-use risc0_steel::{ethereum::EthEvmInput, Commitment, Contract};
+use risc0_steel::{ethereum::EthEvmInput, Contract};
 use risc0_zkvm::guest::env;
 
 sol! {
@@ -26,7 +26,6 @@ sol! {
 
 sol! {
     struct Journal {
-        Commitment commitment;
         uint256 balance;
         address user;
         address asset;
@@ -45,12 +44,8 @@ fn main() {
 
     let call = IERC20::balanceOfCall { account };
     let returns = comptroller.call_builder(&call).call();
-    // let chain_id = check_block_validity_and_get_chain_id(env.header().clone());
 
-    // Commit the journal that will be received by the application contract.
-    // Journal is encoded using Solidity ABI for easy decoding in the app contract.
     let journal = Journal {
-        commitment: env.commitment().clone(),
         balance: returns._0,
         user: account,
         asset: asset_address,

@@ -21,7 +21,7 @@ use alloy_sol_types::{sol, SolCall};
 use anyhow::Result;
 use clap::Parser;
 use host::TxSender;
-use methods::CHECK_LIQUIDITY_ELF;
+use methods::BALANCE_OF_ELF;
 use risc0_ethereum_contracts::groth16::encode;
 use risc0_steel::host::BlockNumberOrTag;
 use risc0_steel::{ethereum::EthEvmEnv, ethereum::ETH_MAINNET_CHAIN_SPEC, Contract};
@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
         .prove_with_ctx(
             env,
             &VerifierContext::default(),
-            CHECK_LIQUIDITY_ELF,
+            BALANCE_OF_ELF,
             &ProverOpts::groth16(),
         )?
         .receipt;

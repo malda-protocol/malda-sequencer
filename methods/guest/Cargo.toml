@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "check-liquidity"
-path = "src/bin/check_liquidity.rs"
+name = "balance-of"
+path = "src/bin/balance_of.rs"
 
 [workspace]
 
