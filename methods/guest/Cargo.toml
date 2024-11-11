@@ -35,7 +35,7 @@ ethereum_ssz = "0.7.0"
 alloy-rlp = "0.3"
 
 [patch.crates-io]
-ethereum_hashing = { git = "https://github.com/Teamo0/ethereum_hashing" }
+ethereum_hashing = { git = "https://github.com/Teamo0/ethereum_hashing/" }
 
 [profile.release]
 lto = "thin"
