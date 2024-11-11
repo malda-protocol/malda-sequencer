@@ -24,6 +24,10 @@ import {Elf} from "./Elf.sol"; // auto-generated contract after running `cargo b
 import {UserLiquidity, Journal} from "../contracts/UserLiquidity.sol";
 import {TestHelper} from "./TestHelper.sol";
 
+interface IAnchor {
+    function blocks(uint256 blocks) external view returns (bytes32);
+}
+
 contract UserLiquidityTest is RiscZeroCheats, TestHelper {
     UserLiquidity public userLiquidity;
     IRiscZeroVerifier public verifier;
@@ -49,7 +53,7 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
 
     function test_Set_WhenLiquidityIsNonZero() public {
         (bytes memory journalData, bytes memory seal) =
-            prove(Elf.CHECK_LIQUIDITY_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
+            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
 
         userLiquidity.set(journalData, seal);
 
@@ -59,7 +63,7 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
 
     function test_Set_ProofRevertsWhenLiquidityIsZero() public {
         (bytes memory journal, bytes memory seal) =
-            prove(Elf.CHECK_LIQUIDITY_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
+            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
 
         userLiquidity.set(journal, seal);
 
@@ -69,7 +73,7 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
 
     function test_Set_ProofRevertsWhenJournalIsModified() public {
         (bytes memory journal, bytes memory seal) =
-            prove(Elf.CHECK_LIQUIDITY_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
+            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
 
         Journal memory journalDecoded = abi.decode(journal, (Journal));
         journalDecoded.liquidity = 1000;

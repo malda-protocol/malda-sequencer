@@ -139,4 +139,68 @@ mod tests {
         default_executor().execute(env, super::BALANCE_OF_ELF)
     }
 
+    // #[tokio::test]
+    // async fn proves_balance_on_optimism() {
+
+    //     let req = format!("{}latest", "https://optimism.operationsolarstorm.org/");
+    //     let commitment = reqwest::get(req)
+    //     .await.unwrap()
+    //     .json::<SequencerCommitment>()
+    //     .await.unwrap();
+
+    //     let block_number = ExecutionPayload::try_from(&commitment).unwrap().block_number;
+
+
+    //     let chain_url = RPC_URL_OPTIMISM;
+    //     let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+    //     let block = block_number; // we fix this in case account removes liquidity
+    //     let comptroller = COMPTROLLER_OPTIMISM;
+
+    //     let mut env = EthEvmEnv::builder()
+    //         .rpc(Url::parse(chain_url).unwrap())
+    //         .block_number_or_tag(BlockNumberOrTag::Number(block))
+    //         .build()
+    //         .await
+    //         .unwrap();
+
+
+    //     let call = ICompound::getAccountLiquidityCall { account: user };
+
+    //     let mut contract = Contract::preflight(comptroller, &mut env);
+    //     let returns = contract.call_builder(&call).call().await.unwrap();
+
+    //     let view_call_input = match env.into_input().await {
+    //         Ok(input) => input,
+    //         Err(e) => {
+    //             println!("Failed to create input: {:?}", e);
+    //             panic!("Unable to proceed due to previous error.");
+    //         }
+    //     };
+
+    //     let env = risc0_zkvm::ExecutorEnv::builder()
+    //     .write(&view_call_input)
+    //         .unwrap()
+    //         .write(&user)
+    //         .unwrap()
+    //         .write(&comptroller)
+    //         .unwrap()
+    //         .write(&commitment)
+    //         .unwrap()
+    //         .build()
+    //         .unwrap();
+
+    //     // NOTE: Use the executor to run tests without proving.
+    //     let start_time = std::time::Instant::now();
+    //     let session_info = default_executor()
+    //         .execute(env, super::CHECK_LIQUIDITY_OPBASE_ELF)
+    //         .unwrap();
+    //     println!("Time taken for proof: {:?}", start_time.elapsed());
+    //     let journal_bytes = session_info.journal.bytes;
+
+    //     let journal = Journal::abi_decode(&journal_bytes, true).unwrap();
+
+    //     assert!(journal.liquidity > U256::from(0));
+
+    // }
+
 }
