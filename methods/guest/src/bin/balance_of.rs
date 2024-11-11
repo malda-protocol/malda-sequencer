@@ -12,25 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod guest_utils;
+
 use alloy_primitives::Address;
-use alloy_sol_types::{sol, SolValue};
+use alloy_sol_types::SolValue;
 use risc0_steel::{ethereum::EthEvmInput, Contract};
 use risc0_zkvm::guest::env;
 
-sol! {
-    /// ERC-20 balance function signature.
-    interface IERC20 {
-        function balanceOf(address account) external view returns (uint256);
-    }
-}
-
-sol! {
-    struct Journal {
-        uint256 balance;
-        address user;
-        address asset;
-    }
-}
+use guest_utils::*;
 
 fn main() {
     // Read the input data for this application.
@@ -45,6 +34,8 @@ fn main() {
     let call = IERC20::balanceOfCall { account };
     let returns = comptroller.call_builder(&call).call();
 
+    check_block_validity_linea(env.header().inner().clone());
+
     let journal = Journal {
         balance: returns._0,
         user: account,
@@ -52,3 +43,5 @@ fn main() {
     };
     env::commit_slice(&journal.abi_encode());
 }
+
+
