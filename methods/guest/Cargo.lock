@@ -1109,6 +1109,7 @@ dependencies = [
 name = "guests"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",
@@ -1317,8 +1318,8 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 [[package]]
 name = "malda_rs"
 version = "0.1.0"
-source = "git+https://github.com/Teamo0/malda_rs#3ad853cd775c3735e9bca0b3e247b5b857bf6dc9"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",

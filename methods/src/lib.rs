@@ -20,65 +20,24 @@ mod tests {
 
     use std::any::Any;
 
-    use alloy_primitives::{address, Address, U256};
+    use alloy_primitives::{address, Address, U256, B256};
     use alloy_sol_types::{sol, SolCall, SolValue};
     use anyhow::Error;
 
-    use risc0_steel::{ethereum::EthEvmEnv, host::BlockNumberOrTag, Commitment, Contract};
+    use risc0_steel::{ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Commitment, Contract, EvmInput};
     use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
-    use tokio;
+    use tokio::{self, time::error::Elapsed};
     use url::Url;
     use malda_rs::*;
-
-
-    sol! {
-
-        interface IERC20 {
-            function balanceOf(address account) external view returns (uint256);
-        }
-
-        struct Journal {
-            uint256 balance;
-            address user;
-            address asset;
-        }
-
-    }
-
-    const COMPTROLLER_MAIN: Address = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
-    const COMPTROLLER_LINEA: Address = address!("43Eac5BFEa14531B8DE0B334E123eA98325de866");
-    // const COMPTROLLER_SCROLL: Address = address!("EC53c830f4444a8A56455c6836b5D2aA794289Aa");
-    const WETH_LINEA: Address = address!("e5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f");
-    const WETH_ARBITRUM: Address = address!("82aF49447D8a07e3bd95BD0d56f35241523fBab1");
-    const WETH_OPTIMISM: Address = address!("4200000000000000000000000000000000000006");
-    const WETH_BASE: Address = address!("4200000000000000000000000000000000000006");
-    const WETH_SCROLL: Address = address!("5300000000000000000000000000000000000004");
-
-    const RPC_URL_LINEA: &str =
-        "https://linea-mainnet.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e";
-    const RPC_URL_SCROLL: &str =
-        "https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
-    const RPC_URL_MAINNET: &str =
-        "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
-    const RPC_URL_BASE: &str =
-        "https://base-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
-    const RPC_URL_OPTIMISM: &str =
-        "https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
-    const RPC_URL_ARBITRUM: &str =
-        "https://arb-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
-
-
+    use alloy_consensus::Header;
 
     #[tokio::test]
     async fn proves_balance_on_linea() {
-        // choose random user with positive liquidity from etherscan
-        let chain_url = RPC_URL_LINEA;
         let user = address!("0A047Ec8c33c7E8e9945662F127A5A32c0730190");
-        let block = 10771599; // we fix this in case account removes liquidity
         let expected_balance = U256::from::<u128>(0); // balance of account at given block
 
         let session_info =
-            get_users_balance_at_block_and_chain_url(user, block, chain_url, WETH_LINEA, LINEA_CHAIN_ID, None)
+            get_user_balance(user, WETH_LINEA, LINEA_CHAIN_ID)
                 .await
                 .unwrap();
 
@@ -87,50 +46,57 @@ mod tests {
     }
 
 
-    // helper function to reuse in both tests
-    async fn get_users_balance_at_block_and_chain_url(
+    async fn get_user_balance(
         user: Address,
-        block: u64,
-        chain_url: &str,
         asset: Address,
         chain_id: u64,
-        sequencer_commitment: Option<SequencerCommitment>,
     ) -> Result<SessionInfo, Error> {
-        println!("User: {}", user);
 
-        let mut env = EthEvmEnv::from_rpc(
-            Url::parse(chain_url)?,
-            BlockNumberOrTag::Number(block), // we fix this in case account removes liquidity
-        )
-        .await?;
-
-        let block_number = env.header().inner().number;
-        println!("block_number: {}", block_number);
-
-        let call = IERC20::balanceOfCall { account: user };
-
-        let mut contract = Contract::preflight(asset, &mut env);
-        let returns = contract.call_builder(&call).call().await?;
-
-        println!(
-            "For block {} calling `{}` on {} returns: {}",
-            env.header().inner().number,
-            IERC20::balanceOfCall::SIGNATURE,
-            asset,
-            returns._0
-        );
-
-        let view_call_input = match env.into_input().await {
-            Ok(input) => input,
-            Err(e) => {
-                println!("Failed to create input: {:?}", e);
-                panic!("Unable to proceed due to previous error.");
-            }
+        let rpc_url = match chain_id {
+            BASE_CHAIN_ID => RPC_URL_BASE,
+            OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
+            LINEA_CHAIN_ID => RPC_URL_LINEA,
+            ETHEREUM_CHAIN_ID => RPC_URL_ETHEREUM,
+            _ => panic!("Invalid chain ID"),
         };
+
+        let (block, commitment) = if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == ETHEREUM_CHAIN_ID {
+            let (commitment, block) = get_current_sequencer_commitment(chain_id).await;
+            (Some(block), Some(commitment))
+        } else {
+            (None, None)
+        };
+
+        
+
+        let (l1_block_call_input, l1_hash, l1_block, linking_blocks, start_block) = if chain_id == ETHEREUM_CHAIN_ID {
+            let (l1_block_call_input, l1_hash, l1_block) = get_l1block_call_input(block.unwrap(), OPTIMISM_CHAIN_ID).await;
+            let (linking_blocks, start_block) = get_linking_blocks_ethereum(l1_block).await;
+            (
+                Some(l1_block_call_input),
+                Some(l1_hash),
+                Some(l1_block),
+                Some(linking_blocks),
+                Some(start_block)
+            )
+        } else {
+            (None, None, None, None, None)
+        };
+
+        let block = match chain_id {
+            BASE_CHAIN_ID => block.unwrap(),
+            OPTIMISM_CHAIN_ID => block.unwrap(),
+            LINEA_CHAIN_ID => BlockNumberOrTag::Latest,
+            ETHEREUM_CHAIN_ID => BlockNumberOrTag::Number(start_block.unwrap()),
+            _ => panic!("Invalid chain ID"),
+        };
+
+        let balance_call_input = get_balance_call_input(rpc_url, block, user, asset).await;
+
 
         let mut env_builder = ExecutorEnv::builder();
             env_builder
-            .write(&view_call_input)
+            .write(&balance_call_input)
             .unwrap()
             .write(&chain_id)
             .unwrap()
@@ -139,19 +105,124 @@ mod tests {
             .write(&asset)
             .unwrap();
 
-        if let Some(sequencer_commitment) = sequencer_commitment {
-            env_builder.write(&sequencer_commitment)
+        if let Some(commitment) = commitment {
+            env_builder.write(&commitment)
             .unwrap();
-        }
+            };
 
+        if let Some(l1_block_input) = l1_block_call_input {
+            env_builder.write(&l1_block_input)
+            .unwrap();
+            };
+
+        if let Some(linking_blocks) = linking_blocks {
+            env_builder.write(&linking_blocks)
+            .unwrap();
+            };
+
+        
         let env = env_builder.build().unwrap();
-
-
-        println!("Env type ID: {:?}", &env.type_id());
 
         // NOTE: Use the executor to run tests without proving.
         default_executor().execute(env, super::BALANCE_OF_ELF)
     }
+
+    async fn get_balance_call_input(chain_url: &str, block: BlockNumberOrTag, user: Address, asset: Address) -> EvmInput<RlpHeader<Header>> {
+        let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(chain_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
+
+        let call = IERC20::balanceOfCall { account: user };
+
+        let mut contract = Contract::preflight(asset, &mut env);
+        let returns = contract.call_builder(&call).call().await.unwrap();
+
+        env.into_input().await.unwrap()
+    }
+
+    async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommitment, BlockNumberOrTag) {
+        let req = match chain_id {
+            BASE_CHAIN_ID => {
+                SEQUENCER_REQUEST_BASE
+            }
+            OPTIMISM_CHAIN_ID => {
+                SEQUENCER_REQUEST_OPTIMISM
+            }
+            _ => {
+                panic!("Invalid chain ID");
+            }
+        };
+        let commitment = reqwest::get(req)
+        .await.unwrap()
+        .json::<SequencerCommitment>()
+        .await.unwrap();
+
+        let block = ExecutionPayload::try_from(&commitment).unwrap().block_number;
+
+        (commitment, BlockNumberOrTag::Number(block))
+    }
+
+    async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmInput<RlpHeader<Header>>, B256, u64) {
+        let rpc_url = match chain_id {
+            BASE_CHAIN_ID => {
+                RPC_URL_BASE
+            }
+            OPTIMISM_CHAIN_ID => {
+                RPC_URL_OPTIMISM
+            }
+            _ => {
+                panic!("Invalid chain ID");
+            }
+        };
+        let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(rpc_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
+
+        let call = IL1Block::hashCall { };
+        let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
+        let l1_block_hash = contract.call_builder(&call).call().await.unwrap()._0;
+        let view_call_input_l1_block = env.into_input().await.unwrap();
+
+        let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(rpc_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
+
+        let call = IL1Block::numberCall { };
+        let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
+        let l1_block = contract.call_builder(&call).call().await.unwrap()._0;
+
+        (view_call_input_l1_block, l1_block_hash, l1_block)
+
+    }
+
+    async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
+
+        let mut linking_blocks = vec![];
+
+        let start_block = current_block - REORG_PROTECTION_DEPTH + 1;
+
+        for block_nr in (start_block)..=(current_block) {
+            let env = EthEvmEnv::builder()
+            .rpc(Url::parse(RPC_URL_ETHEREUM).unwrap())
+            .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
+            .build()
+            .await
+            .unwrap();
+            let header = env.header().inner().clone();
+            linking_blocks.push(header);
+        }
+        (linking_blocks, start_block)
+    }
+
 
     #[tokio::test]
     async fn proves_balance_on_optimism() {
@@ -171,12 +242,39 @@ mod tests {
         let block = block_number; // we fix this in case account removes liquidity
 
         let session_info =
-        get_users_balance_at_block_and_chain_url(user, block, chain_url, WETH_OPTIMISM, OPTIMISM_CHAIN_ID, Some(commitment))
+        get_user_balance(user, WETH_OPTIMISM, OPTIMISM_CHAIN_ID)
             .await
             .unwrap();
 
     let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
     assert_eq!(journal.balance, expected_balance);
+
+    }
+
+    #[tokio::test]
+    async fn proves_balance_on_ethereum_via_op() {
+
+        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let asset = WETH_OPTIMISM;
+        let chain_id = ETHEREUM_CHAIN_ID;
+
+        let session_info =
+        get_user_balance(user, asset, chain_id)
+            .await
+            .unwrap();
+
+        // let mcycles_count = session_info
+        // .segments
+        // .iter()
+        // .map(|segment| 1 << segment.po2)
+        // .sum::<u64>()
+        // .div_ceil(1_000_000);
+        // println!("MCycles count: {:?}", mcycles_count);
+    
+    
+        // println!("{:?}", &session_info.journal.bytes);
+        // let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
+        // assert_eq!(journal.balance, expected_balance);
 
     }
 

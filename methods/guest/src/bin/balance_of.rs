@@ -15,8 +15,9 @@
 use malda_rs::*;
 use alloy_primitives::Address;
 use alloy_sol_types::SolValue;
-use risc0_steel::{ethereum::EthEvmInput, Contract};
+use risc0_steel::{ethereum::EthEvmInput, Contract, serde::RlpHeader};
 use risc0_zkvm::guest::env;
+use alloy_consensus::Header;
 
 fn main() {
     // Read the input data for this application.
@@ -33,10 +34,15 @@ fn main() {
     let returns = comptroller.call_builder(&call).call();
 
     if chain_id == LINEA_CHAIN_ID {
-        check_block_validity_linea(env.header().inner().clone());
+        validate_linea_env(env.header().inner().clone());
     } else if chain_id == OPTIMISM_CHAIN_ID {
         let commitment: SequencerCommitment = env::read();
-        validate_commitment(&commitment, env.commitment().digest);
+        validate_opstack_env(&commitment, env.commitment().digest);
+    } else if chain_id == ETHEREUM_CHAIN_ID {
+        let commitment: SequencerCommitment = env::read();
+        let input_op: EthEvmInput = env::read();
+        let linking_blocks: Vec<RlpHeader<Header>> = env::read();
+        validate_ethereum_env_via_opstack(commitment, env.header().seal(), input_op, linking_blocks);
     }
     
 
@@ -47,5 +53,6 @@ fn main() {
     };
     env::commit_slice(&journal.abi_encode());
 }
+
 
 
