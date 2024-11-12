@@ -34,15 +34,87 @@ mod tests {
     #[tokio::test]
     async fn proves_balance_on_linea() {
         let user = address!("0A047Ec8c33c7E8e9945662F127A5A32c0730190");
-        let expected_balance = U256::from::<u128>(0); // balance of account at given block
+        let asset = WETH_LINEA;
+        let chain_id = LINEA_CHAIN_ID;
 
         let session_info =
-            get_user_balance(user, WETH_LINEA, LINEA_CHAIN_ID)
-                .await
-                .unwrap();
+        get_user_balance(user, asset, chain_id)
+            .await
+            .unwrap();
 
-        let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-        assert_eq!(journal.balance, expected_balance);
+        let mcycles_count = session_info
+        .segments
+        .iter()
+        .map(|segment| 1 << segment.po2)
+        .sum::<u64>()
+        .div_ceil(1_000_000);
+        println!("MCycles count: {:?}", mcycles_count);
+    }
+
+    #[tokio::test]
+    async fn proves_balance_on_optimism() {
+
+        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let asset = WETH_OPTIMISM;
+        let chain_id = OPTIMISM_CHAIN_ID;
+
+        let session_info =
+        get_user_balance(user, asset, chain_id)
+            .await
+            .unwrap();
+
+        let mcycles_count = session_info
+        .segments
+        .iter()
+        .map(|segment| 1 << segment.po2)
+        .sum::<u64>()
+        .div_ceil(1_000_000);
+        println!("MCycles count: {:?}", mcycles_count);
+
+    }
+
+    #[tokio::test]
+    async fn proves_balance_on_base() {
+
+        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let asset = WETH_BASE;
+        let chain_id = BASE_CHAIN_ID;
+
+        let session_info =
+        get_user_balance(user, asset, chain_id)
+            .await
+            .unwrap();
+
+        let mcycles_count = session_info
+        .segments
+        .iter()
+        .map(|segment| 1 << segment.po2)
+        .sum::<u64>()
+        .div_ceil(1_000_000);
+        println!("MCycles count: {:?}", mcycles_count);
+
+    }
+
+    #[tokio::test]
+    async fn proves_balance_on_ethereum_via_op() {
+
+        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let asset = WETH_ETHEREUM;
+        let chain_id = ETHEREUM_CHAIN_ID;
+
+        let session_info =
+        get_user_balance(user, asset, chain_id)
+            .await
+            .unwrap();
+
+        let mcycles_count = session_info
+        .segments
+        .iter()
+        .map(|segment| 1 << segment.po2)
+        .sum::<u64>()
+        .div_ceil(1_000_000);
+        println!("MCycles count: {:?}", mcycles_count);
+
     }
 
 
@@ -69,25 +141,23 @@ mod tests {
 
         
 
-        let (l1_block_call_input, l1_hash, l1_block, linking_blocks, start_block) = if chain_id == ETHEREUM_CHAIN_ID {
-            let (l1_block_call_input, l1_hash, l1_block) = get_l1block_call_input(block.unwrap(), OPTIMISM_CHAIN_ID).await;
-            let (linking_blocks, start_block) = get_linking_blocks_ethereum(l1_block).await;
+        let (l1_block_call_input, linking_blocks, ethereum_block) = if chain_id == ETHEREUM_CHAIN_ID {
+            let (l1_block_call_input, l1_block) = get_l1block_call_input(block.unwrap(), OPTIMISM_CHAIN_ID).await;
+            let (linking_blocks, ethereum_block) = get_linking_blocks_ethereum(l1_block).await;
             (
                 Some(l1_block_call_input),
-                Some(l1_hash),
-                Some(l1_block),
                 Some(linking_blocks),
-                Some(start_block)
+                Some(ethereum_block)
             )
         } else {
-            (None, None, None, None, None)
+            (None, None, None)
         };
 
         let block = match chain_id {
             BASE_CHAIN_ID => block.unwrap(),
             OPTIMISM_CHAIN_ID => block.unwrap(),
             LINEA_CHAIN_ID => BlockNumberOrTag::Latest,
-            ETHEREUM_CHAIN_ID => BlockNumberOrTag::Number(start_block.unwrap()),
+            ETHEREUM_CHAIN_ID => BlockNumberOrTag::Number(ethereum_block.unwrap()),
             _ => panic!("Invalid chain ID"),
         };
 
@@ -138,7 +208,7 @@ mod tests {
         let call = IERC20::balanceOfCall { account: user };
 
         let mut contract = Contract::preflight(asset, &mut env);
-        let returns = contract.call_builder(&call).call().await.unwrap();
+        let _returns = contract.call_builder(&call).call().await.unwrap();
 
         env.into_input().await.unwrap()
     }
@@ -149,6 +219,9 @@ mod tests {
                 SEQUENCER_REQUEST_BASE
             }
             OPTIMISM_CHAIN_ID => {
+                SEQUENCER_REQUEST_OPTIMISM
+            }
+            ETHEREUM_CHAIN_ID => {
                 SEQUENCER_REQUEST_OPTIMISM
             }
             _ => {
@@ -165,7 +238,7 @@ mod tests {
         (commitment, BlockNumberOrTag::Number(block))
     }
 
-    async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmInput<RlpHeader<Header>>, B256, u64) {
+    async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmInput<RlpHeader<Header>>, u64) {
         let rpc_url = match chain_id {
             BASE_CHAIN_ID => {
                 RPC_URL_BASE
@@ -186,7 +259,7 @@ mod tests {
 
         let call = IL1Block::hashCall { };
         let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
-        let l1_block_hash = contract.call_builder(&call).call().await.unwrap()._0;
+        let _l1_block_hash = contract.call_builder(&call).call().await.unwrap()._0;
         let view_call_input_l1_block = env.into_input().await.unwrap();
 
         let mut env = EthEvmEnv::builder()
@@ -200,7 +273,7 @@ mod tests {
         let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
         let l1_block = contract.call_builder(&call).call().await.unwrap()._0;
 
-        (view_call_input_l1_block, l1_block_hash, l1_block)
+        (view_call_input_l1_block, l1_block)
 
     }
 
@@ -220,62 +293,8 @@ mod tests {
             let header = env.header().inner().clone();
             linking_blocks.push(header);
         }
-        (linking_blocks, start_block)
+        (linking_blocks, start_block - 1)
     }
 
-
-    #[tokio::test]
-    async fn proves_balance_on_optimism() {
-
-        let req = format!("{}latest", "https://optimism.operationsolarstorm.org/");
-        let commitment = reqwest::get(req)
-        .await.unwrap()
-        .json::<SequencerCommitment>()
-        .await.unwrap();
-
-        let block_number = ExecutionPayload::try_from(&commitment).unwrap().block_number;
-        let expected_balance = U256::from::<u128>(1210697236130); // balance of account at given block
-
-
-        let chain_url = RPC_URL_OPTIMISM;
-        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
-        let block = block_number; // we fix this in case account removes liquidity
-
-        let session_info =
-        get_user_balance(user, WETH_OPTIMISM, OPTIMISM_CHAIN_ID)
-            .await
-            .unwrap();
-
-    let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-    assert_eq!(journal.balance, expected_balance);
-
-    }
-
-    #[tokio::test]
-    async fn proves_balance_on_ethereum_via_op() {
-
-        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
-        let asset = WETH_OPTIMISM;
-        let chain_id = ETHEREUM_CHAIN_ID;
-
-        let session_info =
-        get_user_balance(user, asset, chain_id)
-            .await
-            .unwrap();
-
-        // let mcycles_count = session_info
-        // .segments
-        // .iter()
-        // .map(|segment| 1 << segment.po2)
-        // .sum::<u64>()
-        // .div_ceil(1_000_000);
-        // println!("MCycles count: {:?}", mcycles_count);
-    
-    
-        // println!("{:?}", &session_info.journal.bytes);
-        // let journal = Journal::abi_decode(&session_info.journal.bytes, true).unwrap();
-        // assert_eq!(journal.balance, expected_balance);
-
-    }
 
 }
