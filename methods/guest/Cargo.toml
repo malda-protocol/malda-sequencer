@@ -33,6 +33,7 @@ ssz_types = "0.8.0"
 ethereum_ssz_derive = "0.7.0"
 ethereum_ssz = "0.7.0"
 alloy-rlp = "0.3"
+malda_rs = { git = "https://github.com/Teamo0/malda_rs" }
 
 [patch.crates-io]
 ethereum_hashing = { git = "https://github.com/Teamo0/ethereum_hashing/" }

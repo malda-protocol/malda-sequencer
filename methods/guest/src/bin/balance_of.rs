@@ -12,24 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[path = "../../../../utils/lib.rs"]
-mod utils;
-
+use malda_rs::*;
 use alloy_primitives::Address;
 use alloy_sol_types::SolValue;
 use risc0_steel::{ethereum::EthEvmInput, Contract};
 use risc0_zkvm::guest::env;
 
-use utils::*;
-
 fn main() {
     // Read the input data for this application.
     let input: EthEvmInput = env::read();
-    let chain_id: u64 = LINEA_CHAIN_ID;
+    let chain_id: u64 = env::read();
     let account: Address = env::read();
     let asset_address = env::read();
-
-    // let commitment: SequencerCommitment = SequencerCommitment::new(&[0; 65]).unwrap();
 
     let env = input.into_env();
 
@@ -41,7 +35,8 @@ fn main() {
     if chain_id == LINEA_CHAIN_ID {
         check_block_validity_linea(env.header().inner().clone());
     } else if chain_id == OPTIMISM_CHAIN_ID {
-        // validate_commitment(&commitment, env.commitment().digest);
+        let commitment: SequencerCommitment = env::read();
+        validate_commitment(&commitment, env.commitment().digest);
     }
     
 

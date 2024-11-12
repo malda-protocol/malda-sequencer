@@ -1117,6 +1117,7 @@ dependencies = [
  "eyre",
  "k256",
  "log",
+ "malda_rs",
  "risc0-steel",
  "risc0-zkvm",
  "secp256k1",
@@ -1312,6 +1313,27 @@ name = "log"
 version = "0.4.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
+
+[[package]]
+name = "malda_rs"
+version = "0.1.0"
+source = "git+https://github.com/Teamo0/malda_rs#3ad853cd775c3735e9bca0b3e247b5b857bf6dc9"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-sol-types",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "eyre",
+ "k256",
+ "log",
+ "risc0-steel",
+ "risc0-zkvm",
+ "secp256k1",
+ "serde",
+ "snap",
+ "ssz_types",
+]
 
 [[package]]
 name = "malloc_buf"
