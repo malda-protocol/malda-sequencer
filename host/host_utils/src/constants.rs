@@ -1,0 +1,27 @@
+use alloy_primitives::{address, Address };
+pub use guest_utils::constants::*;
+
+// RPC URLS
+pub const RPC_URL_LINEA: &str =
+    "https://linea-mainnet.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e";
+pub const RPC_URL_SCROLL: &str =
+    "https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_ETHEREUM: &str =
+    "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
+pub const RPC_URL_BASE: &str =
+    "https://base-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_OPTIMISM: &str =
+    "https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_ARBITRUM: &str =
+    "https://arb-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+
+pub const SEQUENCER_REQUEST_OPTIMISM: &str = "https://optimism.operationsolarstorm.org/latest";
+pub const SEQUENCER_REQUEST_BASE: &str = "https://base.operationsolarstorm.org/latest";
+
+// CONTRACT ADDRESSES
+pub const WETH_ETHEREUM: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+pub const WETH_LINEA: Address = address!("e5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f");
+pub const WETH_ARBITRUM: Address = address!("82aF49447D8a07e3bd95BD0d56f35241523fBab1");
+pub const WETH_OPTIMISM: Address = address!("4200000000000000000000000000000000000006");
+pub const WETH_BASE: Address = address!("4200000000000000000000000000000000000006");
+pub const WETH_SCROLL: Address = address!("5300000000000000000000000000000000000004");

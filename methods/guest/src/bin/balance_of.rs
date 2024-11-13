@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use malda_rs::*;
+use guest_utils::*;
 use alloy_primitives::Address;
 use alloy_sol_types::SolValue;
 use risc0_steel::{ethereum::EthEvmInput, Contract, serde::RlpHeader};
@@ -28,16 +28,16 @@ fn main() {
 
     let env = input.into_env();
 
-    let comptroller = Contract::new(asset_address, &env);
+    let erc20_contract = Contract::new(asset_address, &env);
 
     let call = IERC20::balanceOfCall { account };
-    let returns = comptroller.call_builder(&call).call();
+    let returns = erc20_contract.call_builder(&call).call();
 
     if chain_id == LINEA_CHAIN_ID {
         validate_linea_env(env.header().inner().clone());
     } else if chain_id == OPTIMISM_CHAIN_ID {
         let commitment: SequencerCommitment = env::read();
-        validate_opstack_env(&commitment, env.commitment().digest);
+        validate_opstack_env(chain_id, &commitment, env.commitment().digest);
     } else if chain_id == ETHEREUM_CHAIN_ID {
         let commitment: SequencerCommitment = env::read();
         let input_op: EthEvmInput = env::read();
