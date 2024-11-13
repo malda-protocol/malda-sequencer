@@ -12,18 +12,8 @@ risc0-build = { workspace = true }
 risc0-build-ethereum = { workspace = true }
 risc0-zkp = { workspace = true }
 
-
-
 [dev-dependencies]
 alloy-primitives = { workspace = true }
-alloy-sol-types = { workspace = true }
-log = { workspace = true }
-risc0-steel = { workspace = true }
-risc0-zkvm = { workspace = true, features = ["client"] }
-anyhow = "1.0"
-url = { version = "2.5" }
-tokio = { version = "1.35", features = ["full"] }
+host_utils = { path = "../host/host_utils" }
+tokio = "1.35"
 
-malda_rs = { path = "../malda_rs" }
-reqwest = { version = "0.12.4", features = ["json"] }
-alloy-consensus = "0.4.2"
