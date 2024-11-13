@@ -1,3 +1,10 @@
+//! Ethereum view call utilities for cross-chain balance verification.
+//! 
+//! This module provides functionality to:
+//! - Fetch user token balances across different EVM chains
+//! - Handle sequencer commitments for L2 chains
+//! - Manage L1 block verification
+//! - Process linking blocks for reorg protection
 
 use alloy_primitives::Address;
 use anyhow::Error;
@@ -5,13 +12,30 @@ use anyhow::Error;
 use risc0_steel::{ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput};
 use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
 use url::Url;
-pub use guest_utils::*;
+use guest_utils::*;
 use alloy_consensus::Header;
 
 use crate::constants::*;
 use methods::BALANCE_OF_ELF;
 
-
+/// Retrieves and verifies a user's token balance on specified EVM chain.
+/// 
+/// # Arguments
+/// 
+/// * `user` - The address of the user whose balance is being queried
+/// * `asset` - The token contract address
+/// * `chain_id` - The chain identifier (Ethereum, Optimism, Base, or Linea)
+/// 
+/// # Returns
+/// 
+/// Returns a `SessionInfo` containing the verified balance information
+/// 
+/// # Errors
+/// 
+/// Returns an `Error` if:
+/// - RPC connection fails
+/// - Contract calls fail
+/// - Invalid chain ID is provided
 pub async fn get_user_balance(
     user: Address,
     asset: Address,
@@ -91,6 +115,18 @@ pub async fn get_user_balance(
     default_executor().execute(env, BALANCE_OF_ELF)
 }
 
+/// Constructs an EVM input for a balance query.
+/// 
+/// # Arguments
+/// 
+/// * `chain_url` - RPC endpoint URL for the target chain
+/// * `block` - Block number or tag (latest) to query
+/// * `user` - Address of the user
+/// * `asset` - Token contract address
+/// 
+/// # Returns
+/// 
+/// Returns an `EvmInput` containing the encoded balance call
 async fn get_balance_call_input(chain_url: &str, block: BlockNumberOrTag, user: Address, asset: Address) -> EvmInput<RlpHeader<Header>> {
     let mut env = EthEvmEnv::builder()
     .rpc(Url::parse(chain_url).unwrap())
@@ -107,6 +143,19 @@ async fn get_balance_call_input(chain_url: &str, block: BlockNumberOrTag, user: 
     env.into_input().await.unwrap()
 }
 
+/// Fetches the current sequencer commitment for L2 chains.
+/// 
+/// # Arguments
+/// 
+/// * `chain_id` - The chain identifier (Base or Optimism)
+/// 
+/// # Returns
+/// 
+/// Returns a tuple of (SequencerCommitment, BlockNumberOrTag)
+/// 
+/// # Panics
+/// 
+/// Panics if an invalid chain ID is provided
 async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommitment, BlockNumberOrTag) {
     let req = match chain_id {
         BASE_CHAIN_ID => {
@@ -132,6 +181,20 @@ async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommitment
     (commitment, BlockNumberOrTag::Number(block))
 }
 
+/// Retrieves L1 block information for L2 chains.
+/// 
+/// # Arguments
+/// 
+/// * `block` - Block number or tag to query
+/// * `chain_id` - The chain identifier
+/// 
+/// # Returns
+/// 
+/// Returns a tuple containing the L1 block call input and block number
+/// 
+/// # Panics
+/// 
+/// Panics if an invalid chain ID is provided
 async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmInput<RlpHeader<Header>>, u64) {
     let rpc_url = match chain_id {
         BASE_CHAIN_ID => {
@@ -171,6 +234,17 @@ async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmI
 
 }
 
+/// Fetches a sequence of Ethereum blocks for reorg protection.
+/// 
+/// # Arguments
+/// 
+/// * `current_block` - The latest block number to start from
+/// 
+/// # Returns
+/// 
+/// Returns a tuple containing:
+/// - Vector of block headers for the reorg protection window
+/// - The block number before the start of the window
 async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
 
     let mut linking_blocks = vec![];
