@@ -24,6 +24,6 @@ anyhow = "1.0"
 url = { version = "2.5" }
 tokio = { version = "1.35", features = ["full"] }
 
-malda_rs = { path = "../../malda_rs" }
+malda_rs = { path = "../malda_rs" }
 reqwest = { version = "0.12.4", features = ["json"] }
 alloy-consensus = "0.4.2"
