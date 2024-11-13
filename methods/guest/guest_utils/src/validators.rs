@@ -1,3 +1,11 @@
+//! Validator functions for verifying blockchain environments and commitments.
+//! 
+//! This module provides validation utilities for different blockchain environments including:
+//! - Linea environment validation
+//! - OpStack (Optimism/Base) environment validation
+//! - Ethereum environment validation via OpStack
+//! - Chain length and hash linking validation
+
 use alloy_consensus::Header;
 use alloy_primitives::{B256, Signature, U256};
 use risc0_steel::{ethereum::EthEvmInput, Contract, serde::RlpHeader};
@@ -5,7 +13,13 @@ use crate::types::*;
 use crate::constants::{OPTIMISM_CHAIN_ID, OPTIMISM_SEQUENCER, L1_BLOCK_ADDRESS_OPTIMISM, LINEA_SEQUENCER, BASE_CHAIN_ID, BASE_SEQUENCER, REORG_PROTECTION_DEPTH};
 use crate::cryptography::recover_signer;
 
-
+/// Validates a Linea block header by verifying the sequencer signature.
+///
+/// # Arguments
+/// * `header` - The Linea block header to validate
+///
+/// # Panics
+/// * If the block is not signed by the official Linea sequencer
 pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
     // extract sequencer signature from extra data
     let extra_data = header.inner().extra_data.clone();
@@ -39,6 +53,17 @@ pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
     }
 }
 
+/// Validates an OpStack (Optimism/Base) environment by verifying sequencer commitments.
+///
+/// # Arguments
+/// * `chain_id` - The chain ID to validate against (Optimism or Base)
+/// * `commitment` - The sequencer commitment to verify
+/// * `env_block_hash` - The expected block hash to validate against
+///
+/// # Panics
+/// * If the chain ID is invalid
+/// * If the commitment verification fails
+/// * If the block hash doesn't match the expected hash
 pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env_block_hash: B256) {
 
     if chain_id == OPTIMISM_CHAIN_ID {
@@ -52,6 +77,16 @@ pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env
     assert_eq!(payload.block_hash, env_block_hash, "block hash mismatch");
 }
 
+/// Validates an Ethereum environment through OpStack by verifying block hashes and chain linking.
+///
+/// # Arguments
+/// * `commitment` - The sequencer commitment for validation
+/// * `ethereum_hash` - The Ethereum block hash to verify
+/// * `input_op` - The Ethereum EVM input containing environment data
+/// * `linking_blocks` - Vector of block headers linking the historical block to current block
+///
+/// # Panics
+/// * If any validation step fails
 pub fn validate_ethereum_env_via_opstack(commitment: SequencerCommitment, ethereum_hash: B256, input_op: EthEvmInput, linking_blocks: Vec<RlpHeader<Header>>) {
 
     let env_op = input_op.into_env();
@@ -63,6 +98,22 @@ pub fn validate_ethereum_env_via_opstack(commitment: SequencerCommitment, ethere
     validate_chain_length(ethereum_hash, linking_blocks, l1_hash);
 }
 
+/// Validates the length and integrity of a chain of blocks.
+///
+/// Ensures that:
+/// 1. The chain length meets minimum reorg protection requirements
+/// 2. All blocks are properly hash-linked
+/// 3. The final hash matches the expected current hash
+///
+/// # Arguments
+/// * `historical_hash` - The hash of the historical block to start validation from
+/// * `linking_blocks` - Vector of block headers forming the chain
+/// * `current_hash` - The expected hash of the current block
+///
+/// # Panics
+/// * If the chain length is less than the reorg protection depth
+/// * If blocks are not properly hash-linked
+/// * If the final hash doesn't match the expected current hash
 pub fn validate_chain_length(historical_hash: B256, linking_blocks: Vec<RlpHeader<Header>>, current_hash: B256) {
     let chain_length = linking_blocks.len() as u64;
     assert!(chain_length >= REORG_PROTECTION_DEPTH, "chain length is less than reorg protection");

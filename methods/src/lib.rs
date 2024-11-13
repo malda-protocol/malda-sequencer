@@ -19,7 +19,7 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 mod tests {
 
     use alloy_primitives::address;
-    use host_utils::*;
+    use host_utils::{viewcalls::get_user_balance, constants::*};
 
     #[tokio::test]
     async fn proves_balance_on_linea() {
