@@ -7,11 +7,62 @@
 //! - Chain length and hash linking validation
 
 use alloy_consensus::Header;
-use alloy_primitives::{B256, Signature, U256};
+use alloy_primitives::B256;
 use risc0_steel::{ethereum::EthEvmInput, Contract, serde::RlpHeader};
+use alloy_primitives::Address;
+use alloy_sol_types::SolValue;
+use risc0_zkvm::guest::env;
 use crate::types::*;
-use crate::constants::{OPTIMISM_CHAIN_ID, OPTIMISM_SEQUENCER, L1_BLOCK_ADDRESS_OPTIMISM, LINEA_SEQUENCER, BASE_CHAIN_ID, BASE_SEQUENCER, REORG_PROTECTION_DEPTH};
-use crate::cryptography::recover_signer;
+use crate::constants::*;
+use crate::cryptography::{recover_signer, signature_from_bytes};
+
+/// Validates the balance of a given account for a specific asset across different blockchain environments.
+/// 
+/// This function is the main logic executed in the risc0 guest program. It validates the balance of a given account
+/// for a specific asset across different blockchain environments, including Linea, OpStack (Optimism/Base), and Ethereum.
+/// 
+/// # Arguments
+/// * `chain_id` - The ID of the blockchain network to validate against
+/// * `account` - The address of the account to query the balance for
+/// * `asset` - The address of the asset to query the balance for
+/// * `env_input` - The Ethereum EVM input for the environment
+/// * `sequencer_commitment` - The sequencer commitment for OpStack and Ethereum environments
+/// * `op_env_input` - The Ethereum EVM input for the Optimism environment (used for Ethereum validation)
+/// * `linking_blocks` - The linking blocks for Ethereum environment validation
+///
+/// # Details
+///
+/// This function first constructs an ERC-20 contract instance for the given asset and queries the balance of the given account.
+/// Then, it validates the environment based on the `chain_id`:
+/// - For Linea, it validates the block header by verifying the sequencer signature.
+/// - For OpStack (Optimism/Base), it verifies the sequencer commitment.
+/// - For Ethereum, it validates the environment via OpStack by verifying the sequencer commitment, block seal, and linking blocks.
+/// 
+/// Finally, it constructs a `Journal` entry with the balance, account, and asset information and commits it to the environment.
+pub fn validate_balance_of_call(chain_id: u64, account: Address, asset: Address, env_input: EthEvmInput, sequencer_commitment: Option<SequencerCommitment>, op_env_input: Option<EthEvmInput>, linking_blocks: Option<Vec<RlpHeader<Header>>>) {
+    let env = env_input.into_env();
+
+    let erc20_contract = Contract::new(asset, &env);
+
+    let call = IERC20::balanceOfCall { account: account };
+    let balance = erc20_contract.call_builder(&call).call()._0;
+
+    if chain_id == LINEA_CHAIN_ID {
+        validate_linea_env(env.header().inner().clone());
+    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
+        validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), env.commitment().digest);
+    } else if chain_id == ETHEREUM_CHAIN_ID {
+        validate_ethereum_env_via_opstack(sequencer_commitment.unwrap(), env.header().seal(), op_env_input.unwrap(), linking_blocks.unwrap());
+    }
+    
+
+    let journal = Journal {
+        balance,
+        account,
+        asset,
+    };
+    env::commit_slice(&journal.abi_encode());
+}
 
 /// Validates a Linea block header by verifying the sequencer signature.
 ///
@@ -25,19 +76,10 @@ pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
     let extra_data = header.inner().extra_data.clone();
 
     let length = extra_data.len();
-    let signature = extra_data.slice(length - 65..length);
     let prefix = extra_data.slice(0..length - 65);
+    let signature_bytes = extra_data.slice(length - 65..length);
 
-    let r_array: [u8; 32] = signature.slice(0..32).to_vec().try_into().unwrap();
-    let r = U256::from_be_bytes(r_array);
-
-    let s_array: [u8; 32] = signature.slice(32..64).to_vec().try_into().unwrap();
-    let s = U256::from_be_bytes(s_array);
-
-    let v_array: [u8; 1] = signature.slice(64..65).to_vec().try_into().unwrap();
-    let v = v_array[0] == 1;
-
-    let sig = Signature::from_rs_and_parity(r, s, v).unwrap();
+    let sig = signature_from_bytes(&signature_bytes.try_into().unwrap());
 
     // hash block without signature
     let mut header = header.inner().clone();
@@ -125,3 +167,4 @@ pub fn validate_chain_length(historical_hash: B256, linking_blocks: Vec<RlpHeade
     }
     assert_eq!(previous_hash, current_hash, "last hash doesnt correspond to current l1 hash");
 }
+

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["IERC20","IL1Block"],"struct":["ExecutionPayload","Journal","SequencerCommitment","Withdrawal"],"type":["ExtraData","LogsBloom","Transaction"]};

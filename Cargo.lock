@@ -2751,6 +2751,7 @@ dependencies = [
  "eyre",
  "k256 0.13.4",
  "risc0-steel",
+ "risc0-zkvm",
  "serde",
  "snap",
  "ssz_types",
@@ -2913,36 +2914,6 @@ dependencies = [
  "risc0-steel",
  "risc0-zkvm",
  "tokio",
- "tracing-subscriber 0.3.18",
- "url",
-]
-
-[[package]]
-name = "host_utils"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives 0.8.5",
- "alloy-rlp",
- "alloy-sol-types",
- "anyhow",
- "clap",
- "env_logger",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "ethers",
- "eyre",
- "guest_utils",
- "k256 0.13.4",
- "log",
- "methods",
- "reqwest 0.12.9",
- "risc0-ethereum-contracts",
- "risc0-steel",
- "risc0-zkvm",
- "serde",
- "snap",
- "ssz_types",
  "tracing-subscriber 0.3.18",
  "url",
 ]
@@ -3630,6 +3601,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "malda_rs"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives 0.8.5",
+ "alloy-rlp",
+ "alloy-sol-types",
+ "anyhow",
+ "clap",
+ "env_logger",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "ethers",
+ "eyre",
+ "guest_utils",
+ "k256 0.13.4",
+ "log",
+ "methods",
+ "reqwest 0.12.9",
+ "risc0-ethereum-contracts",
+ "risc0-steel",
+ "risc0-zkvm",
+ "serde",
+ "snap",
+ "ssz_types",
+ "tracing-subscriber 0.3.18",
+ "url",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3695,7 +3696,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives 0.8.5",
  "hex",
- "host_utils",
+ "malda_rs",
  "risc0-build",
  "risc0-build-ethereum",
  "risc0-zkp",

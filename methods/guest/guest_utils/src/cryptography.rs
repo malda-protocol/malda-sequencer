@@ -5,7 +5,7 @@
 //! the secp256k1 elliptic curve.
 
 use k256::ecdsa::{Error, RecoveryId, VerifyingKey};
-use alloy_primitives::{Address, B256, keccak256, Signature};
+use alloy_primitives::{Address, B256, keccak256, Signature, Bytes, U256};
 use crate::constants::SECP256K1N_HALF;
 
 /// Creates a signature message hash following Ethereum's signing scheme.
@@ -121,3 +121,105 @@ fn public_key_to_address(public: VerifyingKey) -> Address {
     let hash = keccak256(&public.to_encoded_point(/* compress = */ false).as_bytes()[1..]);
     Address::from_slice(&hash[12..])
 }
+///
+/// Converts a byte slice representing an Ethereum signature into a `Signature` object.
+///
+/// # Arguments
+///
+/// * `signature` - The byte slice representing the Ethereum signature.
+///
+/// # Returns
+///
+/// Returns a `Signature` object parsed from the input byte slice.
+///
+/// # Notes
+///
+/// This function assumes the input byte slice is a valid Ethereum signature, which is 65 bytes long.
+/// It extracts the `r`, `s`, and `v` components from the signature and constructs a `Signature` object.
+/// The `v` component is interpreted as a boolean value, where `1` represents the parity bit.
+///
+/// # Errors
+///
+/// This function will panic if the input byte slice is not exactly 65 bytes long or if the `r` or `s` components
+/// cannot be parsed into `U256` values.
+pub fn signature_from_bytes(signature: &Bytes) -> Signature {
+    let r_array: [u8; 32] = signature.slice(0..32).to_vec().try_into().unwrap();
+    let r = U256::from_be_bytes(r_array);
+
+    let s_array: [u8; 32] = signature.slice(32..64).to_vec().try_into().unwrap();
+    let s = U256::from_be_bytes(s_array);
+
+    let v_array: [u8; 1] = signature.slice(64..65).to_vec().try_into().unwrap();
+    let v = v_array[0] == 1;
+
+    Signature::from_rs_and_parity(r, s, v).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::hex;
+    use k256::ecdsa::SigningKey;
+
+    #[test]
+    fn test_signature_msg() {
+        let data = b"Hello, World!";
+        let chain_id = 1;
+        let msg = signature_msg(data, chain_id);
+        
+        // Verify the result is deterministic and non-zero
+        assert_ne!(msg, B256::ZERO);
+        
+        // Test with empty data
+        let empty_msg = signature_msg(&[], 1);
+        assert_ne!(empty_msg, B256::ZERO);
+        
+        // Test with different chain IDs
+        let msg1 = signature_msg(data, 1);
+        let msg2 = signature_msg(data, 2);
+        assert_ne!(msg1, msg2);
+    }
+
+    #[test]
+    fn test_recover_signer() {
+        // Test with a known public key and its corresponding address
+        let signing_key = SigningKey::from_slice(
+            &hex::decode("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap()
+        ).unwrap();
+        let verifying_key = signing_key.verifying_key();
+        let expected_address = public_key_to_address(*verifying_key);
+
+        // Create a message and sign it
+        let message = b"Test message";
+        let msg_hash: [u8; 32] = keccak256(message).into();
+        
+        // Sign the message
+        let (sig, recid) = signing_key.sign_prehash_recoverable(&msg_hash).unwrap();
+        let mut sig_bytes = [0u8; 65];
+        sig_bytes[..64].copy_from_slice(&sig.to_bytes());
+        sig_bytes[64] = recid.to_byte();
+
+        
+        // Convert to Signature type
+        let signature = signature_from_bytes(&sig_bytes.into());
+        
+        // Test recovery
+        let recovered_address = recover_signer(signature, msg_hash.into());
+        assert_eq!(Some(expected_address), recovered_address);
+
+        // Test with invalid signature (modified S value)
+        let mut invalid_sig = signature;
+        let invalid_s = SECP256K1N_HALF + U256::from(1);
+
+        invalid_sig = Signature::from_rs_and_parity(
+            invalid_sig.r(),
+            invalid_s,
+            invalid_sig.v(),
+        ).unwrap();
+        let recovered_invalid = recover_signer(invalid_sig, msg_hash.into());
+        assert_eq!(None, recovered_invalid);
+    }
+
+
+}
+

@@ -1137,6 +1137,7 @@ dependencies = [
  "eyre",
  "k256",
  "risc0-steel",
+ "risc0-zkvm",
  "serde",
  "snap",
  "ssz_types",
