@@ -14,6 +14,6 @@ risc0-zkp = { workspace = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true }
-host_utils = { path = "../host/host_utils" }
+malda_rs = { path = "../malda_rs" }
 tokio = "1.35"
 

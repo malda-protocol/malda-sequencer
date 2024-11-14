@@ -41,7 +41,7 @@ sol! {
         /// The balance amount
         uint256 balance;
         /// The user's address
-        address user;
+        address account;
         /// The asset's contract address
         address asset;
     }
