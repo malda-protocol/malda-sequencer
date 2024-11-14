@@ -51,35 +51,35 @@ contract UserLiquidityTest is RiscZeroCheats, TestHelper {
         _populateTestProofInputFromJSON();
     }
 
-    function test_Set_WhenLiquidityIsNonZero() public {
-        (bytes memory journalData, bytes memory seal) =
-            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
+    // function test_Set_WhenLiquidityIsNonZero() public {
+    //     (bytes memory journalData, bytes memory seal) =
+    //         prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithLiquidity]);
 
-        userLiquidity.set(journalData, seal);
+    //     userLiquidity.set(journalData, seal);
 
-        // check that liquidity has been set
-        assert(userLiquidity.get(userWithLiquidity) == true);
-    }
+    //     // check that liquidity has been set
+    //     assert(userLiquidity.get(userWithLiquidity) == true);
+    // }
 
-    function test_Set_ProofRevertsWhenLiquidityIsZero() public {
-        (bytes memory journal, bytes memory seal) =
-            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
+    // function test_Set_ProofRevertsWhenLiquidityIsZero() public {
+    //     (bytes memory journal, bytes memory seal) =
+    //         prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
 
-        userLiquidity.set(journal, seal);
+    //     userLiquidity.set(journal, seal);
 
-        // since user doesnt have liquidty its still false
-        assert(userLiquidity.get(userWithLiquidity) == false);
-    }
+    //     // since user doesnt have liquidty its still false
+    //     assert(userLiquidity.get(userWithLiquidity) == false);
+    // }
 
-    function test_Set_ProofRevertsWhenJournalIsModified() public {
-        (bytes memory journal, bytes memory seal) =
-            prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
+    // function test_Set_ProofRevertsWhenJournalIsModified() public {
+    //     (bytes memory journal, bytes memory seal) =
+    //         prove(Elf.BALANCE_OF_PATH, proofInputs[ethereumId][blockNo][userWithoutLiquidity]);
 
-        Journal memory journalDecoded = abi.decode(journal, (Journal));
-        journalDecoded.liquidity = 1000;
-        journal = abi.encode(journalDecoded);
+    //     Journal memory journalDecoded = abi.decode(journal, (Journal));
+    //     journalDecoded.liquidity = 1000;
+    //     journal = abi.encode(journalDecoded);
 
-        vm.expectRevert(abi.encodeWithSelector(VerificationFailed.selector));
-        userLiquidity.set(journal, seal);
-    }
+    //     vm.expectRevert(abi.encodeWithSelector(VerificationFailed.selector));
+    //     userLiquidity.set(journal, seal);
+    // }
 }

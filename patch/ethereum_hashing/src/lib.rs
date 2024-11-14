@@ -7,18 +7,16 @@
 //! Now this crate serves primarily as a wrapper over two SHA256 crates: `sha2` and `ring` – which
 //! it switches between at runtime based on the availability of SHA intrinsics.
 
-
 #[cfg(feature = "zero_hash_cache")]
 use once_cell::sync::Lazy;
 
-use sha2_impl::Sha2CrateImpl;
 pub use self::DynamicContext as Context;
+use sha2_impl::Sha2CrateImpl;
 
 mod sha2_impl;
 
 /// Length of a SHA256 hash in bytes.
 pub const HASH_LEN: usize = 32;
-
 
 /// Returns the digest of `input` using the best available implementation.
 pub fn hash(input: &[u8]) -> Vec<u8> {

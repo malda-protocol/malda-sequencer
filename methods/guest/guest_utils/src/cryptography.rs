@@ -1,12 +1,12 @@
 //! Cryptographic utilities for Ethereum-style signature operations.
-//! 
+//!
 //! This module provides functionality for signature message creation,
 //! signer recovery, and address derivation from public keys using
 //! the secp256k1 elliptic curve.
 
-use k256::ecdsa::{Error, RecoveryId, VerifyingKey};
-use alloy_primitives::{Address, B256, keccak256, Signature, Bytes, U256};
 use crate::constants::SECP256K1N_HALF;
+use alloy_primitives::{keccak256, Address, Bytes, Signature, B256, U256};
+use k256::ecdsa::{Error, RecoveryId, VerifyingKey};
 
 /// Creates a signature message hash following Ethereum's signing scheme.
 ///
@@ -166,14 +166,14 @@ mod tests {
         let data = b"Hello, World!";
         let chain_id = 1;
         let msg = signature_msg(data, chain_id);
-        
+
         // Verify the result is deterministic and non-zero
         assert_ne!(msg, B256::ZERO);
-        
+
         // Test with empty data
         let empty_msg = signature_msg(&[], 1);
         assert_ne!(empty_msg, B256::ZERO);
-        
+
         // Test with different chain IDs
         let msg1 = signature_msg(data, 1);
         let msg2 = signature_msg(data, 2);
@@ -184,25 +184,26 @@ mod tests {
     fn test_recover_signer() {
         // Test with a known public key and its corresponding address
         let signing_key = SigningKey::from_slice(
-            &hex::decode("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap()
-        ).unwrap();
+            &hex::decode("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                .unwrap(),
+        )
+        .unwrap();
         let verifying_key = signing_key.verifying_key();
         let expected_address = public_key_to_address(*verifying_key);
 
         // Create a message and sign it
         let message = b"Test message";
         let msg_hash: [u8; 32] = keccak256(message).into();
-        
+
         // Sign the message
         let (sig, recid) = signing_key.sign_prehash_recoverable(&msg_hash).unwrap();
         let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig.to_bytes());
         sig_bytes[64] = recid.to_byte();
 
-        
         // Convert to Signature type
         let signature = signature_from_bytes(&sig_bytes.into());
-        
+
         // Test recovery
         let recovered_address = recover_signer(signature, msg_hash.into());
         assert_eq!(Some(expected_address), recovered_address);
@@ -211,15 +212,9 @@ mod tests {
         let mut invalid_sig = signature;
         let invalid_s = SECP256K1N_HALF + U256::from(1);
 
-        invalid_sig = Signature::from_rs_and_parity(
-            invalid_sig.r(),
-            invalid_s,
-            invalid_sig.v(),
-        ).unwrap();
+        invalid_sig =
+            Signature::from_rs_and_parity(invalid_sig.r(), invalid_s, invalid_sig.v()).unwrap();
         let recovered_invalid = recover_signer(invalid_sig, msg_hash.into());
         assert_eq!(None, recovered_invalid);
     }
-
-
 }
-

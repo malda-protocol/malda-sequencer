@@ -1,5 +1,5 @@
 //! Types module containing core data structures and implementations for blockchain payload processing.
-//! 
+//!
 //! This module provides essential types and structures for handling blockchain execution payloads,
 //! sequencer commitments, and related blockchain data structures.
 
@@ -9,18 +9,18 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 
 use alloy_rlp::RlpEncodable;
-use ssz_derive::{Decode, Encode};
-use ssz_types::{FixedVector, VariableList, typenum};
 use ssz::Decode;
+use ssz_derive::{Decode, Encode};
+use ssz_types::{typenum, FixedVector, VariableList};
 
-use alloy_primitives::{Bytes, Address, Signature, B256, U256};
 use crate::cryptography::signature_msg;
+use alloy_primitives::{Address, Bytes, Signature, B256, U256};
 
 sol! {
     /// Interface for querying ERC-20 token balances.
     interface IERC20 {
         /// Returns the token balance of a given account.
-        /// 
+        ///
         /// # Arguments
         /// * `account` - The address to query the balance for
         function balanceOf(address account) external view returns (uint256);
@@ -35,7 +35,7 @@ sol! {
     }
 
     /// Represents a journal entry for tracking asset balances.
-    /// 
+    ///
     /// Contains information about user balances and associated assets.
     struct Journal {
         /// The balance amount
@@ -58,10 +58,10 @@ pub struct SequencerCommitment {
 
 impl SequencerCommitment {
     /// Creates a new SequencerCommitment from compressed data.
-    /// 
+    ///
     /// # Arguments
     /// * `data` - The compressed data bytes
-    /// 
+    ///
     /// # Returns
     /// * `Result<Self>` - The created commitment or an error
     pub fn new(data: &[u8]) -> Result<Self> {
@@ -75,11 +75,11 @@ impl SequencerCommitment {
     }
 
     /// Verifies the commitment signature against a given signer and chain ID.
-    /// 
+    ///
     /// # Arguments
     /// * `signer` - The expected signer's address
     /// * `chain_id` - The blockchain network ID
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Ok if verification succeeds, Error otherwise
     pub fn verify(&self, signer: Address, chain_id: u64) -> Result<()> {
@@ -100,10 +100,10 @@ impl TryFrom<&SequencerCommitment> for ExecutionPayload {
     type Error = eyre::Report;
 
     /// Attempts to convert a SequencerCommitment into an ExecutionPayload.
-    /// 
+    ///
     /// # Arguments
     /// * `value` - The SequencerCommitment to convert
-    /// 
+    ///
     /// # Returns
     /// * `Result<Self>` - The converted payload or an error
     fn try_from(value: &SequencerCommitment) -> Result<Self> {
