@@ -1,5 +1,5 @@
 //! Guest utilities for Risc Zero zkVM methods
-//! 
+//!
 //! This crate provides common utilities, types, and functions used by guest methods
 //! running inside the Risc Zero zkVM. It includes modules for constants, custom types,
 //! cryptographic operations, and validation functions.

@@ -1,5 +1,5 @@
 //! Constants used throughout the project for chain IDs, addresses, and cryptographic values.
-//! 
+//!
 //! This module contains various constant definitions that are used across different chains
 //! and components of the Malda Protocol.
 
@@ -28,7 +28,7 @@ pub const LINEA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe4
 pub const L1_BLOCK_ADDRESS_OPTIMISM: Address = address!("4200000000000000000000000000000000000015");
 
 /// Half of the secp256k1 curve order (n/2).
-/// 
+///
 /// This value is used in signature normalization to ensure s values are in the lower half
 /// of the curve order, which is required by some networks (like Ethereum) as a transaction validity rule.
 pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
@@ -37,7 +37,7 @@ pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 ]);
 
 /// The number of blocks to wait before considering a chain reorganization unlikely.
-/// 
+///
 /// This value is used as a safety measure to ensure transaction finality
 /// across different blockchain networks.
-pub const REORG_PROTECTION_DEPTH: u64 = 3;
+pub const REORG_PROTECTION_DEPTH: u64 = 2;

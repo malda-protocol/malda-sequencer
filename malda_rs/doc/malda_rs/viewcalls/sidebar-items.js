@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["get_user_balance"]};
+window.SIDEBAR_ITEMS = {"fn":["get_user_balance_exec","get_user_balance_prove","get_user_balance_zkvm_env"]};

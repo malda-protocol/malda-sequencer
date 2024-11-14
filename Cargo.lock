@@ -3626,6 +3626,7 @@ dependencies = [
  "serde",
  "snap",
  "ssz_types",
+ "tokio",
  "tracing-subscriber 0.3.18",
  "url",
 ]

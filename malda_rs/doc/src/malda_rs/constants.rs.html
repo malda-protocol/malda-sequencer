@@ -36,19 +36,18 @@
 <a href="#35" id="35">35</a>
 <a href="#36" id="36">36</a>
 <a href="#37" id="37">37</a>
-<a href="#38" id="38">38</a>
-<a href="#39" id="39">39</a></pre></div><pre class="rust"><code><span class="doccomment">//! Constants module containing RPC URLs, contract addresses, and other network-specific constants.
-//! 
+<a href="#38" id="38">38</a></pre></div><pre class="rust"><code><span class="doccomment">//! Constants module containing RPC URLs, contract addresses, and other network-specific constants.
+//!
 //! This module provides centralized access to various network-specific constants, including:
 //! - RPC endpoint URLs for different blockchain networks
 //! - Sequencer request URLs for L2 networks
 //! - WETH contract addresses across supported chains
 //! - Constants used throughout the project for chain IDs, addresses, and cryptographic values.
-//! 
+//!
 //! This module contains a comprehensive set of constant definitions that are used across different chains
 //! and components of the Malda Protocol.
 
-</span><span class="kw">use </span>alloy_primitives::{address, Address };
+</span><span class="kw">use </span>alloy_primitives::{address, Address};
 <span class="kw">pub use </span>guest_utils::constants::<span class="kw-2">*</span>;
 
 <span class="doccomment">/// RPC endpoint URLs for supported networks
@@ -58,8 +57,7 @@
     <span class="string">"https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv"</span>;
 <span class="kw">pub const </span>RPC_URL_ETHEREUM: <span class="kw-2">&amp;</span>str =
     <span class="string">"https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0"</span>;
-<span class="kw">pub const </span>RPC_URL_BASE: <span class="kw-2">&amp;</span>str =
-    <span class="string">"https://mainnet.base.org"</span>;
+<span class="kw">pub const </span>RPC_URL_BASE: <span class="kw-2">&amp;</span>str = <span class="string">"https://mainnet.base.org"</span>;
 <span class="kw">pub const </span>RPC_URL_OPTIMISM: <span class="kw-2">&amp;</span>str =
     <span class="string">"https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv"</span>;
 <span class="kw">pub const </span>RPC_URL_ARBITRUM: <span class="kw-2">&amp;</span>str =
@@ -75,4 +73,5 @@
 <span class="kw">pub const </span>WETH_ARBITRUM: Address = <span class="macro">address!</span>(<span class="string">"82aF49447D8a07e3bd95BD0d56f35241523fBab1"</span>);
 <span class="kw">pub const </span>WETH_OPTIMISM: Address = <span class="macro">address!</span>(<span class="string">"4200000000000000000000000000000000000006"</span>);
 <span class="kw">pub const </span>WETH_BASE: Address = <span class="macro">address!</span>(<span class="string">"4200000000000000000000000000000000000006"</span>);
-<span class="kw">pub const </span>WETH_SCROLL: Address = <span class="macro">address!</span>(<span class="string">"5300000000000000000000000000000000000004"</span>);</code></pre></div></section></main></body></html>
+<span class="kw">pub const </span>WETH_SCROLL: Address = <span class="macro">address!</span>(<span class="string">"5300000000000000000000000000000000000004"</span>);
+</code></pre></div></section></main></body></html>

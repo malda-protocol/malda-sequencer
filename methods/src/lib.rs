@@ -18,93 +18,91 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 #[cfg(test)]
 mod tests {
 
+    use core::panic;
+
     use alloy_primitives::address;
-    use malda_rs::{viewcalls::get_user_balance, constants::*};
+    use malda_rs::{
+        constants::*,
+        viewcalls::{get_user_balance_exec, get_user_balance_prove},
+    };
 
     #[tokio::test]
     async fn proves_balance_on_linea() {
-        let user = address!("0A047Ec8c33c7E8e9945662F127A5A32c0730190");
+        let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
 
-        let session_info =
-        get_user_balance(user, asset, chain_id)
+        let _session_info = get_user_balance_exec(user_linea, asset, chain_id)
             .await
             .unwrap();
-
-        let mcycles_count = session_info
-        .segments
-        .iter()
-        .map(|segment| 1 << segment.po2)
-        .sum::<u64>()
-        .div_ceil(1_000_000);
-        println!("MCycles count: {:?}", mcycles_count);
     }
 
     #[tokio::test]
     async fn proves_balance_on_optimism() {
-
-        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
 
-        let session_info =
-        get_user_balance(user, asset, chain_id)
+        let _session_info = get_user_balance_exec(user_optimism, asset, chain_id)
             .await
             .unwrap();
-
-        let mcycles_count = session_info
-        .segments
-        .iter()
-        .map(|segment| 1 << segment.po2)
-        .sum::<u64>()
-        .div_ceil(1_000_000);
-        println!("MCycles count: {:?}", mcycles_count);
-
     }
 
     #[tokio::test]
     async fn proves_balance_on_base() {
-
-        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
 
-        let session_info =
-        get_user_balance(user, asset, chain_id)
+        let _session_info = get_user_balance_exec(user_base, asset, chain_id)
             .await
             .unwrap();
-
-        let mcycles_count = session_info
-        .segments
-        .iter()
-        .map(|segment| 1 << segment.po2)
-        .sum::<u64>()
-        .div_ceil(1_000_000);
-        println!("MCycles count: {:?}", mcycles_count);
-
     }
 
     #[tokio::test]
     async fn proves_balance_on_ethereum_via_op() {
-
-        let user = address!("C779b1c9B74948623B6048508aB2F1c9b9370791");
+        let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
 
-        let session_info =
-        get_user_balance(user, asset, chain_id)
+        let _session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn benchmark_all() {
+        let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
+        let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
+        let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
+        let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
+
+        println!("Benchmarking Linea...");
+        let asset = WETH_LINEA;
+        let chain_id = LINEA_CHAIN_ID;
+        get_user_balance_prove(user_linea, asset, chain_id)
             .await
             .unwrap();
 
-        let mcycles_count = session_info
-        .segments
-        .iter()
-        .map(|segment| 1 << segment.po2)
-        .sum::<u64>()
-        .div_ceil(1_000_000);
-        println!("MCycles count: {:?}", mcycles_count);
+        println!("Benchmarking Optimism...");
+        let asset = WETH_OPTIMISM;
+        let chain_id = OPTIMISM_CHAIN_ID;
+        get_user_balance_prove(user_optimism, asset, chain_id)
+            .await
+            .unwrap();
 
+        println!("Benchmarking Base...");
+        let asset = WETH_BASE;
+        let chain_id = BASE_CHAIN_ID;
+        get_user_balance_prove(user_base, asset, chain_id)
+            .await
+            .unwrap();
+
+        println!("Benchmarking Ethereum via Optimism...");
+        let asset = WETH_ETHEREUM;
+        let chain_id = ETHEREUM_CHAIN_ID;
+        get_user_balance_prove(user_ethereum, asset, chain_id)
+            .await
+            .unwrap();
     }
-
 }

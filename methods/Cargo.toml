@@ -15,5 +15,5 @@ risc0-zkp = { workspace = true }
 [dev-dependencies]
 alloy-primitives = { workspace = true }
 malda_rs = { path = "../malda_rs" }
-tokio = "1.35"
+tokio = { version = "1.35", features = ["full", "test-util"] }
 

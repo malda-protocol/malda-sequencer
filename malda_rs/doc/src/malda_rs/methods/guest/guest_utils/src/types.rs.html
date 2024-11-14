@@ -171,7 +171,7 @@
 <a href="#170" id="170">170</a>
 <a href="#171" id="171">171</a>
 <a href="#172" id="172">172</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types module containing core data structures and implementations for blockchain payload processing.
-//! 
+//!
 //! This module provides essential types and structures for handling blockchain execution payloads,
 //! sequencer commitments, and related blockchain data structures.
 
@@ -181,18 +181,18 @@
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 
 <span class="kw">use </span>alloy_rlp::RlpEncodable;
-<span class="kw">use </span>ssz_derive::{Decode, Encode};
-<span class="kw">use </span>ssz_types::{FixedVector, VariableList, typenum};
 <span class="kw">use </span>ssz::Decode;
+<span class="kw">use </span>ssz_derive::{Decode, Encode};
+<span class="kw">use </span>ssz_types::{typenum, FixedVector, VariableList};
 
-<span class="kw">use </span>alloy_primitives::{Bytes, Address, Signature, B256, U256};
 <span class="kw">use </span><span class="kw">crate</span>::cryptography::signature_msg;
+<span class="kw">use </span>alloy_primitives::{Address, Bytes, Signature, B256, U256};
 
 <span class="macro">sol!</span> {
     <span class="doccomment">/// Interface for querying ERC-20 token balances.
     </span>interface IERC20 {
         <span class="doccomment">/// Returns the token balance of a given account.
-        /// 
+        ///
         /// # Arguments
         /// * `account` - The address to query the balance for
         </span>function balanceOf(address account) external view returns (uint256);
@@ -207,7 +207,7 @@
     }
 
     <span class="doccomment">/// Represents a journal entry for tracking asset balances.
-    /// 
+    ///
     /// Contains information about user balances and associated assets.
     </span><span class="kw">struct </span>Journal {
         <span class="doccomment">/// The balance amount
@@ -230,10 +230,10 @@
 
 <span class="kw">impl </span>SequencerCommitment {
     <span class="doccomment">/// Creates a new SequencerCommitment from compressed data.
-    /// 
+    ///
     /// # Arguments
     /// * `data` - The compressed data bytes
-    /// 
+    ///
     /// # Returns
     /// * `Result&lt;Self&gt;` - The created commitment or an error
     </span><span class="kw">pub fn </span>new(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
@@ -247,11 +247,11 @@
     }
 
     <span class="doccomment">/// Verifies the commitment signature against a given signer and chain ID.
-    /// 
+    ///
     /// # Arguments
     /// * `signer` - The expected signer's address
     /// * `chain_id` - The blockchain network ID
-    /// 
+    ///
     /// # Returns
     /// * `Result&lt;()&gt;` - Ok if verification succeeds, Error otherwise
     </span><span class="kw">pub fn </span>verify(<span class="kw-2">&amp;</span><span class="self">self</span>, signer: Address, chain_id: u64) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
@@ -272,10 +272,10 @@
     <span class="kw">type </span>Error = eyre::Report;
 
     <span class="doccomment">/// Attempts to convert a SequencerCommitment into an ExecutionPayload.
-    /// 
+    ///
     /// # Arguments
     /// * `value` - The SequencerCommitment to convert
-    /// 
+    ///
     /// # Returns
     /// * `Result&lt;Self&gt;` - The converted payload or an error
     </span><span class="kw">fn </span>try_from(value: <span class="kw-2">&amp;</span>SequencerCommitment) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
@@ -341,4 +341,5 @@
     </span>address: Address,
     <span class="doccomment">/// Amount being withdrawn
     </span>amount: u64,
-}</code></pre></div></section></main></body></html>
+}
+</code></pre></div></section></main></body></html>

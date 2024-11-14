@@ -168,29 +168,59 @@
 <a href="#167" id="167">167</a>
 <a href="#168" id="168">168</a>
 <a href="#169" id="169">169</a>
-<a href="#170" id="170">170</a></pre></div><pre class="rust"><code><span class="doccomment">//! Validator functions for verifying blockchain environments and commitments.
-//! 
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
+<a href="#173" id="173">173</a>
+<a href="#174" id="174">174</a>
+<a href="#175" id="175">175</a>
+<a href="#176" id="176">176</a>
+<a href="#177" id="177">177</a>
+<a href="#178" id="178">178</a>
+<a href="#179" id="179">179</a>
+<a href="#180" id="180">180</a>
+<a href="#181" id="181">181</a>
+<a href="#182" id="182">182</a>
+<a href="#183" id="183">183</a>
+<a href="#184" id="184">184</a>
+<a href="#185" id="185">185</a>
+<a href="#186" id="186">186</a>
+<a href="#187" id="187">187</a>
+<a href="#188" id="188">188</a>
+<a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a>
+<a href="#198" id="198">198</a>
+<a href="#199" id="199">199</a>
+<a href="#200" id="200">200</a></pre></div><pre class="rust"><code><span class="doccomment">//! Validator functions for verifying blockchain environments and commitments.
+//!
 //! This module provides validation utilities for different blockchain environments including:
 //! - Linea environment validation
 //! - OpStack (Optimism/Base) environment validation
 //! - Ethereum environment validation via OpStack
 //! - Chain length and hash linking validation
 
-</span><span class="kw">use </span>alloy_consensus::Header;
-<span class="kw">use </span>alloy_primitives::B256;
-<span class="kw">use </span>risc0_steel::{ethereum::EthEvmInput, Contract, serde::RlpHeader};
-<span class="kw">use </span>alloy_primitives::Address;
-<span class="kw">use </span>alloy_sol_types::SolValue;
-<span class="kw">use </span>risc0_zkvm::guest::env;
-<span class="kw">use </span><span class="kw">crate</span>::types::<span class="kw-2">*</span>;
-<span class="kw">use </span><span class="kw">crate</span>::constants::<span class="kw-2">*</span>;
+</span><span class="kw">use </span><span class="kw">crate</span>::constants::<span class="kw-2">*</span>;
 <span class="kw">use </span><span class="kw">crate</span>::cryptography::{recover_signer, signature_from_bytes};
+<span class="kw">use </span><span class="kw">crate</span>::types::<span class="kw-2">*</span>;
+<span class="kw">use </span>alloy_consensus::Header;
+<span class="kw">use </span>alloy_primitives::Address;
+<span class="kw">use </span>alloy_primitives::B256;
+<span class="kw">use </span>alloy_sol_types::SolValue;
+<span class="kw">use </span>risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
+<span class="kw">use </span>risc0_zkvm::guest::env;
 
 <span class="doccomment">/// Validates the balance of a given account for a specific asset across different blockchain environments.
-/// 
+///
 /// This function is the main logic executed in the risc0 guest program. It validates the balance of a given account
 /// for a specific asset across different blockchain environments, including Linea, OpStack (Optimism/Base), and Ethereum.
-/// 
+///
 /// # Arguments
 /// * `chain_id` - The ID of the blockchain network to validate against
 /// * `account` - The address of the account to query the balance for
@@ -207,9 +237,17 @@
 /// - For Linea, it validates the block header by verifying the sequencer signature.
 /// - For OpStack (Optimism/Base), it verifies the sequencer commitment.
 /// - For Ethereum, it validates the environment via OpStack by verifying the sequencer commitment, block seal, and linking blocks.
-/// 
+///
 /// Finally, it constructs a `Journal` entry with the balance, account, and asset information and commits it to the environment.
-</span><span class="kw">pub fn </span>validate_balance_of_call(chain_id: u64, account: Address, asset: Address, env_input: EthEvmInput, sequencer_commitment: <span class="prelude-ty">Option</span>&lt;SequencerCommitment&gt;, op_env_input: <span class="prelude-ty">Option</span>&lt;EthEvmInput&gt;, linking_blocks: <span class="prelude-ty">Option</span>&lt;Vec&lt;RlpHeader&lt;Header&gt;&gt;&gt;) {
+</span><span class="kw">pub fn </span>validate_balance_of_call(
+    chain_id: u64,
+    account: Address,
+    asset: Address,
+    env_input: EthEvmInput,
+    sequencer_commitment: <span class="prelude-ty">Option</span>&lt;SequencerCommitment&gt;,
+    op_env_input: <span class="prelude-ty">Option</span>&lt;EthEvmInput&gt;,
+    linking_blocks: <span class="prelude-ty">Option</span>&lt;Vec&lt;RlpHeader&lt;Header&gt;&gt;&gt;,
+) {
     <span class="kw">let </span>env = env_input.into_env();
 
     <span class="kw">let </span>erc20_contract = Contract::new(asset, <span class="kw-2">&amp;</span>env);
@@ -220,11 +258,19 @@
     <span class="kw">if </span>chain_id == LINEA_CHAIN_ID {
         validate_linea_env(env.header().inner().clone());
     } <span class="kw">else if </span>chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
-        validate_opstack_env(chain_id, <span class="kw-2">&amp;</span>sequencer_commitment.unwrap(), env.commitment().digest);
+        validate_opstack_env(
+            chain_id,
+            <span class="kw-2">&amp;</span>sequencer_commitment.unwrap(),
+            env.commitment().digest,
+        );
     } <span class="kw">else if </span>chain_id == ETHEREUM_CHAIN_ID {
-        validate_ethereum_env_via_opstack(sequencer_commitment.unwrap(), env.header().seal(), op_env_input.unwrap(), linking_blocks.unwrap());
+        validate_ethereum_env_via_opstack(
+            sequencer_commitment.unwrap(),
+            env.header().seal(),
+            op_env_input.unwrap(),
+            linking_blocks.unwrap(),
+        );
     }
-    
 
     <span class="kw">let </span>journal = Journal {
         balance,
@@ -277,9 +323,10 @@
 /// * If the commitment verification fails
 /// * If the block hash doesn't match the expected hash
 </span><span class="kw">pub fn </span>validate_opstack_env(chain_id: u64, commitment: <span class="kw-2">&amp;</span>SequencerCommitment, env_block_hash: B256) {
-
     <span class="kw">if </span>chain_id == OPTIMISM_CHAIN_ID {
-        commitment.verify(OPTIMISM_SEQUENCER, OPTIMISM_CHAIN_ID).unwrap();
+        commitment
+            .verify(OPTIMISM_SEQUENCER, OPTIMISM_CHAIN_ID)
+            .unwrap();
     } <span class="kw">else if </span>chain_id == BASE_CHAIN_ID {
         commitment.verify(BASE_SEQUENCER, BASE_CHAIN_ID).unwrap();
     } <span class="kw">else </span>{
@@ -299,12 +346,16 @@
 ///
 /// # Panics
 /// * If any validation step fails
-</span><span class="kw">pub fn </span>validate_ethereum_env_via_opstack(commitment: SequencerCommitment, ethereum_hash: B256, input_op: EthEvmInput, linking_blocks: Vec&lt;RlpHeader&lt;Header&gt;&gt;) {
-
+</span><span class="kw">pub fn </span>validate_ethereum_env_via_opstack(
+    commitment: SequencerCommitment,
+    ethereum_hash: B256,
+    input_op: EthEvmInput,
+    linking_blocks: Vec&lt;RlpHeader&lt;Header&gt;&gt;,
+) {
     <span class="kw">let </span>env_op = input_op.into_env();
     validate_opstack_env(OPTIMISM_CHAIN_ID, <span class="kw-2">&amp;</span>commitment, env_op.commitment().digest);
     <span class="kw">let </span>l1_block = Contract::new(L1_BLOCK_ADDRESS_OPTIMISM, <span class="kw-2">&amp;</span>env_op);
-    <span class="kw">let </span>call = IL1Block::hashCall { };
+    <span class="kw">let </span>call = IL1Block::hashCall {};
     <span class="kw">let </span>l1_hash = l1_block.call_builder(<span class="kw-2">&amp;</span>call).call()._0;
 
     validate_chain_length(ethereum_hash, linking_blocks, l1_hash);
@@ -326,16 +377,25 @@
 /// * If the chain length is less than the reorg protection depth
 /// * If blocks are not properly hash-linked
 /// * If the final hash doesn't match the expected current hash
-</span><span class="kw">pub fn </span>validate_chain_length(historical_hash: B256, linking_blocks: Vec&lt;RlpHeader&lt;Header&gt;&gt;, current_hash: B256) {
+</span><span class="kw">pub fn </span>validate_chain_length(
+    historical_hash: B256,
+    linking_blocks: Vec&lt;RlpHeader&lt;Header&gt;&gt;,
+    current_hash: B256,
+) {
     <span class="kw">let </span>chain_length = linking_blocks.len() <span class="kw">as </span>u64;
-    <span class="macro">assert!</span>(chain_length &gt;= REORG_PROTECTION_DEPTH, <span class="string">"chain length is less than reorg protection"</span>);
+    <span class="macro">assert!</span>(
+        chain_length &gt;= REORG_PROTECTION_DEPTH,
+        <span class="string">"chain length is less than reorg protection"
+    </span>);
     <span class="kw">let </span><span class="kw-2">mut </span>previous_hash = historical_hash;
     <span class="kw">for </span>header <span class="kw">in </span>linking_blocks {
         <span class="kw">let </span>parent_hash = header.parent_hash;
         <span class="macro">assert_eq!</span>(parent_hash, previous_hash, <span class="string">"blocks not hashlinked"</span>);
         previous_hash = header.hash_slow();
     }
-    <span class="macro">assert_eq!</span>(previous_hash, current_hash, <span class="string">"last hash doesnt correspond to current l1 hash"</span>);
+    <span class="macro">assert_eq!</span>(
+        previous_hash, current_hash,
+        <span class="string">"last hash doesnt correspond to current l1 hash"
+    </span>);
 }
-
 </code></pre></div></section></main></body></html>

@@ -1,5 +1,5 @@
 //! Ethereum view call utilities for cross-chain view call proof.
-//! 
+//!
 //! This module provides functionality to:
 //! - Fetch user token balances across different EVM chains
 //! - Handle sequencer commitments for L2 chains
@@ -9,39 +9,97 @@
 use alloy_primitives::Address;
 use anyhow::Error;
 
-use risc0_steel::{ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput};
-use risc0_zkvm::{default_executor, ExecutorEnv, SessionInfo};
-use url::Url;
-use guest_utils::{types::SequencerCommitment, types::{IERC20, IL1Block, ExecutionPayload}};
 use alloy_consensus::Header;
+use guest_utils::{
+    types::SequencerCommitment,
+    types::{ExecutionPayload, IL1Block, IERC20},
+};
+use risc0_steel::{
+    ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
+};
+use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo};
+use tokio;
+use url::Url;
 
 use crate::constants::*;
 use methods::BALANCE_OF_ELF;
 
-/// Retrieves and verifies a user's token balance on specified EVM chain.
-/// 
+/// Proves a user's token balance on a specified chain using the RISC Zero prover.
+///
 /// # Arguments
-/// 
-/// * `user` - The address of the user whose balance is being queried
+///
+/// * `user` - The user's address to query
 /// * `asset` - The token contract address
-/// * `chain_id` - The chain identifier (Ethereum, Optimism, Base, or Linea)
-/// 
+/// * `chain_id` - The chain identifier
+///
 /// # Returns
-/// 
-/// Returns a `SessionInfo` containing the verified balance information
-/// 
-/// # Errors
-/// 
-/// Returns an `Error` if:
-/// - RPC connection fails
-/// - Contract calls fail
-/// - Invalid chain ID is provided
-pub async fn get_user_balance(
+///
+/// Returns a `Result` containing the `ProveInfo` or an error
+pub async fn get_user_balance_prove(
+    user: Address,
+    asset: Address,
+    chain_id: u64,
+) -> Result<ProveInfo, Error> {
+    // Move all the work including env creation into the blocking task
+    let prove_info = tokio::task::spawn_blocking(move || {
+        // Create a new runtime for async operations within the blocking task
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // Execute the async env creation in the new runtime
+        let env = rt.block_on(get_user_balance_zkvm_env(user, asset, chain_id));
+
+        // Perform the proving
+        default_prover().prove(env, BALANCE_OF_ELF)
+    })
+    .await?;
+
+    prove_info
+}
+
+/// Executes a user's token balance query on a specified chain using the RISC Zero executor.
+///
+/// # Arguments
+///
+/// * `user` - The user's address to query
+/// * `asset` - The token contract address
+/// * `chain_id` - The chain identifier
+///
+/// # Returns
+///
+/// Returns a `Result` containing the `SessionInfo` or an error
+pub async fn get_user_balance_exec(
     user: Address,
     asset: Address,
     chain_id: u64,
 ) -> Result<SessionInfo, Error> {
+    let env = get_user_balance_zkvm_env(user, asset, chain_id).await;
+    default_executor().execute(env, BALANCE_OF_ELF)
+}
 
+/// Creates a RISC Zero executor environment for token balance queries.
+///
+/// This function sets up the necessary environment for querying token balances,
+/// handling different chain-specific requirements including sequencer commitments,
+/// L1 block verification, and linking blocks for reorg protection.
+///
+/// # Arguments
+///
+/// * `user` - The user's address to query
+/// * `asset` - The token contract address
+/// * `chain_id` - The chain identifier
+///
+/// # Returns
+///
+/// Returns an `ExecutorEnv` configured for the balance query
+///
+/// # Panics
+///
+/// Panics if an invalid chain ID is provided
+pub async fn get_user_balance_zkvm_env(
+    user: Address,
+    asset: Address,
+    chain_id: u64,
+) -> ExecutorEnv<'static> {
     let rpc_url = match chain_id {
         BASE_CHAIN_ID => RPC_URL_BASE,
         OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
@@ -50,22 +108,24 @@ pub async fn get_user_balance(
         _ => panic!("Invalid chain ID"),
     };
 
-    let (block, commitment) = if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == ETHEREUM_CHAIN_ID {
+    let (block, commitment) = if chain_id == OPTIMISM_CHAIN_ID
+        || chain_id == BASE_CHAIN_ID
+        || chain_id == ETHEREUM_CHAIN_ID
+    {
         let (commitment, block) = get_current_sequencer_commitment(chain_id).await;
         (Some(block), Some(commitment))
     } else {
         (None, None)
     };
 
-    
-
     let (l1_block_call_input, linking_blocks, ethereum_block) = if chain_id == ETHEREUM_CHAIN_ID {
-        let (l1_block_call_input, l1_block) = get_l1block_call_input(block.unwrap(), OPTIMISM_CHAIN_ID).await;
+        let (l1_block_call_input, l1_block) =
+            get_l1block_call_input(block.unwrap(), OPTIMISM_CHAIN_ID).await;
         let (linking_blocks, ethereum_block) = get_linking_blocks_ethereum(l1_block).await;
         (
             Some(l1_block_call_input),
             Some(linking_blocks),
-            Some(ethereum_block)
+            Some(ethereum_block),
         )
     } else {
         (None, None, None)
@@ -81,8 +141,7 @@ pub async fn get_user_balance(
 
     let balance_call_input = get_balance_call_input(rpc_url, block, user, asset).await;
 
-
-    let env = ExecutorEnv::builder()
+    ExecutorEnv::builder()
         .write(&balance_call_input)
         .unwrap()
         .write(&chain_id)
@@ -98,32 +157,33 @@ pub async fn get_user_balance(
         .write(&linking_blocks)
         .unwrap()
         .build()
-        .unwrap();
-
-
-    // NOTE: Use the executor to run tests without proving.
-    default_executor().execute(env, BALANCE_OF_ELF)
+        .unwrap()
 }
 
 /// Constructs an EVM input for a balance query.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `chain_url` - RPC endpoint URL for the target chain
 /// * `block` - Block number or tag (latest) to query
 /// * `user` - Address of the user
 /// * `asset` - Token contract address
-/// 
+///
 /// # Returns
-/// 
+///
 /// Returns an `EvmInput` containing the encoded balance call
-async fn get_balance_call_input(chain_url: &str, block: BlockNumberOrTag, user: Address, asset: Address) -> EvmInput<RlpHeader<Header>> {
+async fn get_balance_call_input(
+    chain_url: &str,
+    block: BlockNumberOrTag,
+    user: Address,
+    asset: Address,
+) -> EvmInput<RlpHeader<Header>> {
     let mut env = EthEvmEnv::builder()
-    .rpc(Url::parse(chain_url).unwrap())
-    .block_number_or_tag(block)
-    .build()
-    .await
-    .unwrap();
+        .rpc(Url::parse(chain_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
 
     let call = IERC20::balanceOfCall { account: user };
 
@@ -134,121 +194,118 @@ async fn get_balance_call_input(chain_url: &str, block: BlockNumberOrTag, user: 
 }
 
 /// Fetches the current sequencer commitment for L2 chains.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `chain_id` - The chain identifier (Base or Optimism)
-/// 
+///
 /// # Returns
-/// 
+///
 /// Returns a tuple of (SequencerCommitment, BlockNumberOrTag)
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if an invalid chain ID is provided
-async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommitment, BlockNumberOrTag) {
+async fn get_current_sequencer_commitment(
+    chain_id: u64,
+) -> (SequencerCommitment, BlockNumberOrTag) {
     let req = match chain_id {
-        BASE_CHAIN_ID => {
-            SEQUENCER_REQUEST_BASE
-        }
-        OPTIMISM_CHAIN_ID => {
-            SEQUENCER_REQUEST_OPTIMISM
-        }
-        ETHEREUM_CHAIN_ID => {
-            SEQUENCER_REQUEST_OPTIMISM
-        }
+        BASE_CHAIN_ID => SEQUENCER_REQUEST_BASE,
+        OPTIMISM_CHAIN_ID => SEQUENCER_REQUEST_OPTIMISM,
+        ETHEREUM_CHAIN_ID => SEQUENCER_REQUEST_OPTIMISM,
         _ => {
             panic!("Invalid chain ID");
         }
     };
     let commitment = reqwest::get(req)
-    .await.unwrap()
-    .json::<SequencerCommitment>()
-    .await.unwrap();
+        .await
+        .unwrap()
+        .json::<SequencerCommitment>()
+        .await
+        .unwrap();
 
-    let block = ExecutionPayload::try_from(&commitment).unwrap().block_number;
+    let block = ExecutionPayload::try_from(&commitment)
+        .unwrap()
+        .block_number;
     println!("Block: {:?}", block);
 
     (commitment, BlockNumberOrTag::Number(block))
 }
 
 /// Retrieves L1 block information for L2 chains.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `block` - Block number or tag to query
 /// * `chain_id` - The chain identifier
-/// 
+///
 /// # Returns
-/// 
+///
 /// Returns a tuple containing the L1 block call input and block number
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if an invalid chain ID is provided
-async fn get_l1block_call_input(block: BlockNumberOrTag, chain_id: u64) -> (EvmInput<RlpHeader<Header>>, u64) {
+async fn get_l1block_call_input(
+    block: BlockNumberOrTag,
+    chain_id: u64,
+) -> (EvmInput<RlpHeader<Header>>, u64) {
     let rpc_url = match chain_id {
-        BASE_CHAIN_ID => {
-            RPC_URL_BASE
-        }
-        OPTIMISM_CHAIN_ID => {
-            RPC_URL_OPTIMISM
-        }
+        BASE_CHAIN_ID => RPC_URL_BASE,
+        OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
         _ => {
             panic!("Invalid chain ID");
         }
     };
     let mut env = EthEvmEnv::builder()
-    .rpc(Url::parse(rpc_url).unwrap())
-    .block_number_or_tag(block)
-    .build()
-    .await
-    .unwrap();
+        .rpc(Url::parse(rpc_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
 
-    let call = IL1Block::hashCall { };
+    let call = IL1Block::hashCall {};
     let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
     let _l1_block_hash = contract.call_builder(&call).call().await.unwrap()._0;
     let view_call_input_l1_block = env.into_input().await.unwrap();
 
     let mut env = EthEvmEnv::builder()
-    .rpc(Url::parse(rpc_url).unwrap())
-    .block_number_or_tag(block)
-    .build()
-    .await
-    .unwrap();
+        .rpc(Url::parse(rpc_url).unwrap())
+        .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
 
-    let call = IL1Block::numberCall { };
+    let call = IL1Block::numberCall {};
     let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
     let l1_block = contract.call_builder(&call).call().await.unwrap()._0;
 
     (view_call_input_l1_block, l1_block)
-
 }
 
 /// Fetches a sequence of Ethereum blocks for reorg protection.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `current_block` - The latest block number to start from
-/// 
+///
 /// # Returns
-/// 
+///
 /// Returns a tuple containing:
 /// - Vector of block headers for the reorg protection window
 /// - The block number before the start of the window
 async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
-
     let mut linking_blocks = vec![];
 
     let start_block = current_block - REORG_PROTECTION_DEPTH + 1;
 
     for block_nr in (start_block)..=(current_block) {
         let env = EthEvmEnv::builder()
-        .rpc(Url::parse(RPC_URL_ETHEREUM).unwrap())
-        .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
-        .build()
-        .await
-        .unwrap();
+            .rpc(Url::parse(RPC_URL_ETHEREUM).unwrap())
+            .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
+            .build()
+            .await
+            .unwrap();
         let header = env.header().inner().clone();
         linking_blocks.push(header);
     }
