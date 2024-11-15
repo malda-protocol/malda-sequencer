@@ -223,7 +223,7 @@
 </span><span class="attr">#[derive(Debug, Clone, Serialize, Deserialize)]
 </span><span class="kw">pub struct </span>SequencerCommitment {
     <span class="doccomment">/// The compressed payload data
-    </span>data: Bytes,
+    </span><span class="kw">pub </span>data: Bytes,
     <span class="doccomment">/// The cryptographic signature of the commitment
     </span><span class="kw">pub </span>signature: Signature,
 }

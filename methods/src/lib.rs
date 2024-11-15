@@ -25,7 +25,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn proves_balance_on_linea() {
+    async fn test_guest_proves_balance_on_linea() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
@@ -36,7 +36,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proves_balance_on_optimism() {
+    async fn test_guest_proves_balance_on_optimism() {
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proves_balance_on_base() {
+    async fn test_guest_proves_balance_on_base() {
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proves_balance_on_ethereum_via_op() {
+    async fn test_guest_proves_balance_on_ethereum_via_op() {
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
@@ -69,7 +69,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn benchmark_all() {
+    async fn benchmark_prove_all_chains() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");

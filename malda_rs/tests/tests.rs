@@ -7,8 +7,8 @@ mod tests {
         transports::http::reqwest::Url,
     };
     use alloy_primitives::{address, Address};
-    use malda_rs::{constants::*, types::*, validators::*, viewcalls::*};
-    use risc0_steel::{serde::RlpHeader, host::BlockNumberOrTag as BlockRisc0};
+    use malda_rs::{constants::*, validators::*, viewcalls::*};
+    use risc0_steel::{host::BlockNumberOrTag as BlockRisc0, serde::RlpHeader};
 
     // Arbitrary values for testing
     const USER: Address = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
@@ -51,17 +51,20 @@ mod tests {
         let (sequencer_commitment, block) =
             get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
 
-        let http_url: Url =
-            RPC_URL_OPTIMISM
-                .parse()
-                .unwrap();
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
 
         let block_number: u64 = match block {
             BlockRisc0::Number(n) => n,
             _ => panic!(""),
         };
         let provider = ProviderBuilder::new().on_http(http_url);
-        let correct_hash = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false).await.unwrap().unwrap().header.hash;
+        let correct_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number), false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .hash;
 
         validate_opstack_env(OPTIMISM_CHAIN_ID, &sequencer_commitment, correct_hash);
     }
@@ -71,10 +74,7 @@ mod tests {
         let (sequencer_commitment, block) =
             get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
 
-        let http_url: Url =
-            RPC_URL_OPTIMISM
-                .parse()
-                .unwrap();
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
 
         let block_number: u64 = match block {
             BlockRisc0::Number(n) => n,
@@ -83,7 +83,13 @@ mod tests {
         let provider = ProviderBuilder::new().on_http(http_url);
 
         // get hash of previous block here
-        let wrong_hash = provider.get_block_by_number(BlockNumberOrTag::Number(block_number - 1), false).await.unwrap().unwrap().header.hash;
+        let wrong_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number - 1), false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .hash;
 
         assert!(std::panic::catch_unwind(|| {
             validate_opstack_env(OPTIMISM_CHAIN_ID, &sequencer_commitment, wrong_hash);
@@ -96,10 +102,7 @@ mod tests {
         let (sequencer_commitment, block) =
             get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
 
-        let http_url: Url =
-            RPC_URL_OPTIMISM
-                .parse()
-                .unwrap();
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
 
         let block_number: u64 = match block {
             BlockRisc0::Number(n) => n,
@@ -108,7 +111,13 @@ mod tests {
         let provider = ProviderBuilder::new().on_http(http_url);
 
         // get hash of previous block here
-        let correct_hash = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false).await.unwrap().unwrap().header.hash;
+        let correct_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number), false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .hash;
 
         assert!(std::panic::catch_unwind(|| {
             validate_opstack_env(OPTIMISM_CHAIN_ID + 1, &sequencer_commitment, correct_hash);
@@ -118,15 +127,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_optimism_env_wrong_commitment_panics() {
-
         // get commitment from base chain here
-        let (sequencer_commitment, block) =
-            get_current_sequencer_commitment(BASE_CHAIN_ID).await;
+        let (sequencer_commitment, block) = get_current_sequencer_commitment(BASE_CHAIN_ID).await;
 
-        let http_url: Url =
-            RPC_URL_OPTIMISM
-                .parse()
-                .unwrap();
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
 
         let block_number: u64 = match block {
             BlockRisc0::Number(n) => n,
@@ -135,7 +139,13 @@ mod tests {
         let provider = ProviderBuilder::new().on_http(http_url);
 
         // get hash of previous block here
-        let correct_hash = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false).await.unwrap().unwrap().header.hash;
+        let correct_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number), false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .hash;
 
         assert!(std::panic::catch_unwind(|| {
             validate_opstack_env(OPTIMISM_CHAIN_ID, &sequencer_commitment, correct_hash);
@@ -143,16 +153,13 @@ mod tests {
         .is_err());
     }
 
-
     #[tokio::test]
     async fn test_validate_optimism_env_manipulated_commitment_panics() {
-
         let (sequencer_commitment, block) =
             get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
 
-
         let (wrong_sequencer_commitment, block) =
-        get_current_sequencer_commitment(BASE_CHAIN_ID).await;
+            get_current_sequencer_commitment(BASE_CHAIN_ID).await;
 
         let mut manipulated_commitment_signature = sequencer_commitment.clone();
         manipulated_commitment_signature.signature = wrong_sequencer_commitment.signature;
@@ -160,10 +167,7 @@ mod tests {
         let mut manipulated_commitment_data = sequencer_commitment.clone();
         manipulated_commitment_data.data = wrong_sequencer_commitment.data;
 
-        let http_url: Url =
-            RPC_URL_OPTIMISM
-                .parse()
-                .unwrap();
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
 
         let block_number: u64 = match block {
             BlockRisc0::Number(n) => n,
@@ -172,86 +176,73 @@ mod tests {
         let provider = ProviderBuilder::new().on_http(http_url);
 
         // get hash of previous block here
-        let correct_hash = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false).await.unwrap().unwrap().header.hash;
+        let correct_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number), false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .hash;
 
         // fails when either signature or data has been modified
         assert!(std::panic::catch_unwind(|| {
-            validate_opstack_env(OPTIMISM_CHAIN_ID, &manipulated_commitment_signature, correct_hash);
+            validate_opstack_env(
+                OPTIMISM_CHAIN_ID,
+                &manipulated_commitment_signature,
+                correct_hash,
+            );
         })
         .is_err());
 
         assert!(std::panic::catch_unwind(|| {
-            validate_opstack_env(OPTIMISM_CHAIN_ID, &manipulated_commitment_data, correct_hash);
+            validate_opstack_env(
+                OPTIMISM_CHAIN_ID,
+                &manipulated_commitment_data,
+                correct_hash,
+            );
         })
         .is_err());
     }
 
-    // #[tokio::test]
-    // async fn proves_balance_on_optimism() {
-    //     let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
-    //     let asset = WETH_OPTIMISM;
-    //     let chain_id = OPTIMISM_CHAIN_ID;
+    #[tokio::test]
+    async fn test_validate_chain_length_input_correct() {
+        let block_number = 21193475;
+        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let historical_hash = linking_blocks[0].inner().parent_hash;
+        let current_hash = linking_blocks[linking_blocks.len() - 1].hash_slow();
+        validate_chain_length(historical_hash, linking_blocks, current_hash);
+    }
 
-    //     let _session_info = get_user_balance_exec(user_optimism, asset, chain_id)
-    //         .await
-    //         .unwrap();
-    // }
+    #[tokio::test]
+    async fn test_validate_chain_length_panics_if_chain_too_short() {
+        let block_number = 21193475;
+        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let historical_hash = linking_blocks[0].inner().parent_hash;
+        let current_hash = linking_blocks[linking_blocks.len() - 1].hash_slow();
 
-    // #[tokio::test]
-    // async fn proves_balance_on_base() {
-    //     let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
-    //     let asset = WETH_BASE;
-    //     let chain_id = BASE_CHAIN_ID;
+        assert!(std::panic::catch_unwind(|| {
+            validate_chain_length(
+                historical_hash,
+                linking_blocks[0..linking_blocks.len() - 2].to_vec(),
+                current_hash,
+            );
+        })
+        .is_err());
+    }
 
-    //     let _session_info = get_user_balance_exec(user_base, asset, chain_id)
-    //         .await
-    //         .unwrap();
-    // }
+    #[tokio::test]
+    async fn test_validate_chain_length_panics_if_hash_doesnt_match() {
+        let block_number = 21193475;
+        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let historical_hash = linking_blocks[0].inner().parent_hash;
 
-    // #[tokio::test]
-    // async fn proves_balance_on_ethereum_via_op() {
-    //     let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
-    //     let asset = WETH_ETHEREUM;
-    //     let chain_id = ETHEREUM_CHAIN_ID;
-
-    //     let _session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
-    //         .await
-    //         .unwrap();
-    // }
-
-    // #[tokio::test]
-    // async fn benchmark_all() {
-    //     let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
-    //     let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
-    //     let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
-    //     let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
-
-    //     println!("Benchmarking Linea...");
-    //     let asset = WETH_LINEA;
-    //     let chain_id = LINEA_CHAIN_ID;
-    //     get_user_balance_prove(user_linea, asset, chain_id)
-    //         .await
-    //         .unwrap();
-
-    //     println!("Benchmarking Optimism...");
-    //     let asset = WETH_OPTIMISM;
-    //     let chain_id = OPTIMISM_CHAIN_ID;
-    //     get_user_balance_prove(user_optimism, asset, chain_id)
-    //         .await
-    //         .unwrap();
-
-    //     println!("Benchmarking Base...");
-    //     let asset = WETH_BASE;
-    //     let chain_id = BASE_CHAIN_ID;
-    //     get_user_balance_prove(user_base, asset, chain_id)
-    //         .await
-    //         .unwrap();
-
-    //     println!("Benchmarking Ethereum via Optimism...");
-    //     let asset = WETH_ETHEREUM;
-    //     let chain_id = ETHEREUM_CHAIN_ID;
-    //     get_user_balance_prove(user_ethereum, asset, chain_id)
-    //         .await
-    //         .unwrap();
-    // }
+        assert!(std::panic::catch_unwind(|| {
+            validate_chain_length(
+                historical_hash,
+                linking_blocks[0..linking_blocks.len() - 2].to_vec(),
+                historical_hash,
+            );
+        })
+        .is_err());
+    }
 }
