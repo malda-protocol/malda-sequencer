@@ -308,10 +308,7 @@
 <a href="#307" id="307">307</a>
 <a href="#308" id="308">308</a>
 <a href="#309" id="309">309</a>
-<a href="#310" id="310">310</a>
-<a href="#311" id="311">311</a>
-<a href="#312" id="312">312</a>
-<a href="#313" id="313">313</a></pre></div><pre class="rust"><code><span class="doccomment">//! Ethereum view call utilities for cross-chain view call proof.
+<a href="#310" id="310">310</a></pre></div><pre class="rust"><code><span class="doccomment">//! Ethereum view call utilities for cross-chain view call proof.
 //!
 //! This module provides functionality to:
 //! - Fetch user token balances across different EVM chains
@@ -322,15 +319,12 @@
 </span><span class="kw">use </span>alloy_primitives::Address;
 <span class="kw">use </span>anyhow::Error;
 
+<span class="kw">use </span><span class="kw">crate</span>::types::{ExecutionPayload, IL1Block, SequencerCommitment, IERC20};
 <span class="kw">use </span>alloy_consensus::Header;
-<span class="kw">use </span>guest_utils::{
-    types::SequencerCommitment,
-    types::{ExecutionPayload, IL1Block, IERC20},
-};
 <span class="kw">use </span>risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
-<span class="kw">use </span>risc0_zkvm::{default_executor, default_prover, ExecutorEnv, SessionInfo, ProveInfo};
+<span class="kw">use </span>risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo};
 <span class="kw">use </span>tokio;
 <span class="kw">use </span>url::Url;
 
@@ -353,20 +347,19 @@
     asset: Address,
     chain_id: u64,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;ProveInfo, Error&gt; {
-    
     <span class="comment">// Move all the work including env creation into the blocking task
     </span><span class="kw">let </span>prove_info = tokio::task::spawn_blocking(<span class="kw">move </span>|| {
         <span class="comment">// Create a new runtime for async operations within the blocking task
         </span><span class="kw">let </span>rt = tokio::runtime::Runtime::new().unwrap();
-        
+
         <span class="comment">// Execute the async env creation in the new runtime
         </span><span class="kw">let </span>env = rt.block_on(get_user_balance_zkvm_env(user, asset, chain_id));
-        
+
         <span class="comment">// Perform the proving
         </span>default_prover().prove(env, BALANCE_OF_ELF)
     })
     .<span class="kw">await</span><span class="question-mark">?</span>;
-    
+
     prove_info
 }
 
@@ -409,8 +402,11 @@
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-</span><span class="kw">pub async fn </span>get_user_balance_zkvm_env(user: Address, asset: Address, chain_id: u64) -&gt; ExecutorEnv&lt;<span class="lifetime">'static</span>&gt; {
-
+</span><span class="kw">pub async fn </span>get_user_balance_zkvm_env(
+    user: Address,
+    asset: Address,
+    chain_id: u64,
+) -&gt; ExecutorEnv&lt;<span class="lifetime">'static</span>&gt; {
     <span class="kw">let </span>rpc_url = <span class="kw">match </span>chain_id {
         BASE_CHAIN_ID =&gt; RPC_URL_BASE,
         OPTIMISM_CHAIN_ID =&gt; RPC_URL_OPTIMISM,
@@ -452,7 +448,7 @@
 
     <span class="kw">let </span>balance_call_input = get_balance_call_input(rpc_url, block, user, asset).<span class="kw">await</span>;
 
-        ExecutorEnv::builder()
+    ExecutorEnv::builder()
         .write(<span class="kw-2">&amp;</span>balance_call_input)
         .unwrap()
         .write(<span class="kw-2">&amp;</span>chain_id)
@@ -469,8 +465,6 @@
         .unwrap()
         .build()
         .unwrap()
-
-    
 }
 
 <span class="doccomment">/// Constructs an EVM input for a balance query.
@@ -485,7 +479,7 @@
 /// # Returns
 ///
 /// Returns an `EvmInput` containing the encoded balance call
-</span><span class="kw">async fn </span>get_balance_call_input(
+</span><span class="kw">pub async fn </span>get_balance_call_input(
     chain_url: <span class="kw-2">&amp;</span>str,
     block: BlockNumberOrTag,
     user: Address,
@@ -519,7 +513,7 @@
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-</span><span class="kw">async fn </span>get_current_sequencer_commitment(
+</span><span class="kw">pub async fn </span>get_current_sequencer_commitment(
     chain_id: u64,
 ) -&gt; (SequencerCommitment, BlockNumberOrTag) {
     <span class="kw">let </span>req = <span class="kw">match </span>chain_id {
@@ -559,7 +553,7 @@
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-</span><span class="kw">async fn </span>get_l1block_call_input(
+</span><span class="kw">pub async fn </span>get_l1block_call_input(
     block: BlockNumberOrTag,
     chain_id: u64,
 ) -&gt; (EvmInput&lt;RlpHeader&lt;Header&gt;&gt;, u64) {
@@ -607,7 +601,7 @@
 /// Returns a tuple containing:
 /// - Vector of block headers for the reorg protection window
 /// - The block number before the start of the window
-</span><span class="kw">async fn </span>get_linking_blocks_ethereum(current_block: u64) -&gt; (Vec&lt;RlpHeader&lt;Header&gt;&gt;, u64) {
+</span><span class="kw">pub async fn </span>get_linking_blocks_ethereum(current_block: u64) -&gt; (Vec&lt;RlpHeader&lt;Header&gt;&gt;, u64) {
     <span class="kw">let </span><span class="kw-2">mut </span>linking_blocks = <span class="macro">vec!</span>[];
 
     <span class="kw">let </span>start_block = current_block - REORG_PROTECTION_DEPTH + <span class="number">1</span>;
