@@ -18,8 +18,6 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 #[cfg(test)]
 mod tests {
 
-    use core::panic;
-
     use alloy_primitives::address;
     use malda_rs::{
         constants::*,

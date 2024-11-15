@@ -9,8 +9,12 @@
 //! This module contains a comprehensive set of constant definitions that are used across different chains
 //! and components of the Malda Protocol.
 
+#[path = "../../methods/guest/guest_utils/src/constants.rs"]
+mod constants;
+
 use alloy_primitives::{address, Address};
-pub use guest_utils::constants::*;
+
+pub use constants::*;
 
 /// RPC endpoint URLs for supported networks
 pub const RPC_URL_LINEA: &str =
