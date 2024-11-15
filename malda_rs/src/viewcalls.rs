@@ -9,11 +9,8 @@
 use alloy_primitives::Address;
 use anyhow::Error;
 
+use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment, IERC20};
 use alloy_consensus::Header;
-use guest_utils::{
-    types::SequencerCommitment,
-    types::{ExecutionPayload, IL1Block, IERC20},
-};
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
@@ -172,7 +169,7 @@ pub async fn get_user_balance_zkvm_env(
 /// # Returns
 ///
 /// Returns an `EvmInput` containing the encoded balance call
-async fn get_balance_call_input(
+pub async fn get_balance_call_input(
     chain_url: &str,
     block: BlockNumberOrTag,
     user: Address,
@@ -206,7 +203,7 @@ async fn get_balance_call_input(
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-async fn get_current_sequencer_commitment(
+pub async fn get_current_sequencer_commitment(
     chain_id: u64,
 ) -> (SequencerCommitment, BlockNumberOrTag) {
     let req = match chain_id {
@@ -246,7 +243,7 @@ async fn get_current_sequencer_commitment(
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-async fn get_l1block_call_input(
+pub async fn get_l1block_call_input(
     block: BlockNumberOrTag,
     chain_id: u64,
 ) -> (EvmInput<RlpHeader<Header>>, u64) {
@@ -294,7 +291,7 @@ async fn get_l1block_call_input(
 /// Returns a tuple containing:
 /// - Vector of block headers for the reorg protection window
 /// - The block number before the start of the window
-async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
+pub async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
     let mut linking_blocks = vec![];
 
     let start_block = current_block - REORG_PROTECTION_DEPTH + 1;

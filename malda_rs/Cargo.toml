@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy = "0.4.2"
 alloy-primitives = { workspace = true }
 alloy-sol-types = { workspace = true }
 anyhow = { workspace = true }
@@ -18,7 +19,6 @@ risc0-zkvm = { version = "1.1.2", features = ["client"] }
 tracing-subscriber = { workspace = true }
 url = { version = "2.5" }
 alloy-consensus = "0.4.2"
-guest_utils = { path = "../methods/guest/guest_utils" }
 reqwest = { version = "0.12.4", features = ["json"] }
 serde = { version = "1.0.143", features = ["derive"] }
 k256 = "0.13.4"

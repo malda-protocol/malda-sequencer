@@ -2739,26 +2739,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "guest_utils"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives 0.8.5",
- "alloy-rlp",
- "alloy-sol-types",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "eyre",
- "k256 0.13.4",
- "risc0-steel",
- "risc0-zkvm",
- "serde",
- "snap",
- "ssz_types",
- "url",
-]
-
-[[package]]
 name = "h2"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3604,6 +3584,7 @@ dependencies = [
 name = "malda_rs"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "alloy-consensus",
  "alloy-primitives 0.8.5",
  "alloy-rlp",
@@ -3615,7 +3596,6 @@ dependencies = [
  "ethereum_ssz_derive",
  "ethers",
  "eyre",
- "guest_utils",
  "k256 0.13.4",
  "log",
  "methods",

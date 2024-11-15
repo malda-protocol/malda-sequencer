@@ -51,7 +51,7 @@ sol! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SequencerCommitment {
     /// The compressed payload data
-    data: Bytes,
+    pub data: Bytes,
     /// The cryptographic signature of the commitment
     pub signature: Signature,
 }
