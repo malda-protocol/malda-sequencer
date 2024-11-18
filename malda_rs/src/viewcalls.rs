@@ -224,7 +224,6 @@ pub async fn get_current_sequencer_commitment(
     let block = ExecutionPayload::try_from(&commitment)
         .unwrap()
         .block_number;
-    println!("Block: {:?}", block);
 
     (commitment, BlockNumberOrTag::Number(block))
 }

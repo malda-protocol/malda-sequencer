@@ -18,10 +18,18 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 #[cfg(test)]
 mod tests {
 
+    use core::panic;
+
+    use alloy::{
+        eips::BlockNumberOrTag,
+        providers::{Provider, ProviderBuilder},
+        transports::http::reqwest::Url,
+    };
     use alloy_primitives::address;
+    use risc0_steel::host::BlockNumberOrTag as BlockRisc0;
     use malda_rs::{
         constants::*,
-        viewcalls::{get_user_balance_exec, get_user_balance_prove},
+        viewcalls::{get_user_balance_exec, get_user_balance_prove, get_current_sequencer_commitment},
     };
 
     #[tokio::test]
@@ -102,5 +110,50 @@ mod tests {
         get_user_balance_prove(user_ethereum, asset, chain_id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn benchmark_block_delay_opstack_sequencer_commitment() {
+        let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
+        let provider = ProviderBuilder::new().on_http(http_url);
+        let block_from_provider = provider
+            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .number;
+
+        let (_, block_from_commitment) = get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
+        let block_from_commitment = match block_from_commitment {
+            BlockRisc0::Number(n) => n,
+            _ => panic!("Expected a block number"),
+        };
+        println!("OPTIMISM BLOCKCHAIN:");
+        println!("Block from provider: {}", block_from_provider);
+        println!("Block from commitment: {}", block_from_commitment);
+        println!("Sequencer lag: {}", block_from_provider - block_from_commitment);
+
+
+        let http_url: Url = RPC_URL_BASE.parse().unwrap();
+        let provider = ProviderBuilder::new().on_http(http_url);
+        let block_from_provider = provider
+            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .await
+            .unwrap()
+            .unwrap()
+            .header
+            .number;
+
+        let (_, block_from_commitment) = get_current_sequencer_commitment(BASE_CHAIN_ID).await;
+        let block_from_commitment = match block_from_commitment {
+            BlockRisc0::Number(n) => n,
+            _ => panic!("Expected a block number"),
+        };
+        println!("BASE BLOCKCHAIN:");
+        println!("Block from provider: {}", block_from_provider);
+        println!("Block from commitment: {}", block_from_commitment);
+        println!("Sequencer lag: {}", block_from_provider - block_from_commitment);
+
     }
 }
