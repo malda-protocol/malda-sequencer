@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["host", "methods"]
+members = ["host", "malda_rs", "methods", "patch/ethereum_hashing"]
 exclude = ["lib"]
 
 [workspace.package]
@@ -28,8 +28,9 @@ risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.1.4" 
 risc0-zkvm = { version = "1.1.2", default-features = false }
 risc0-zkp = { version = "1.1.2", default-features = false }
 risc0-core = { version = "1.1.2" }
-serde = { version = "1.0", features = ["derive", "std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
 
 
 [profile.release]

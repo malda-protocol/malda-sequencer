@@ -12,48 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use guest_utils::{validators::validate_balance_of_call, types::SequencerCommitment};
 use alloy_primitives::Address;
-use alloy_sol_types::{sol, SolValue};
-use risc0_steel::{ethereum::EthEvmInput, Commitment, Contract};
+use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;
-
-sol! {
-    /// ERC-20 balance function signature.
-    interface IERC20 {
-        function balanceOf(address account) external view returns (uint256);
-    }
-}
-
-sol! {
-    struct Journal {
-        Commitment commitment;
-        uint256 balance;
-        address user;
-        address asset;
-    }
-}
+use alloy_consensus::Header;
 
 fn main() {
     // Read the input data for this application.
-    let input: EthEvmInput = env::read();
+    let env_input: EthEvmInput = env::read();
+    let chain_id: u64 = env::read();
     let account: Address = env::read();
-    let asset_address = env::read();
+    let asset: Address = env::read();
+    let sequencer_commitment: Option<SequencerCommitment> = env::read();
+    let env_op_input: Option<EthEvmInput> = env::read();
+    let linking_blocks: Option<Vec<RlpHeader<Header>>> = env::read();
 
-    let env = input.into_env();
-
-    let comptroller = Contract::new(asset_address, &env);
-
-    let call = IERC20::balanceOfCall { account };
-    let returns = comptroller.call_builder(&call).call();
-    // let chain_id = check_block_validity_and_get_chain_id(env.header().clone());
-
-    // Commit the journal that will be received by the application contract.
-    // Journal is encoded using Solidity ABI for easy decoding in the app contract.
-    let journal = Journal {
-        commitment: env.commitment().clone(),
-        balance: returns._0,
-        user: account,
-        asset: asset_address,
-    };
-    env::commit_slice(&journal.abi_encode());
+    validate_balance_of_call(chain_id, account, asset, env_input, sequencer_commitment, env_op_input, linking_blocks);
 }
+
+
+

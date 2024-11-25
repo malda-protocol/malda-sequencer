@@ -40,7 +40,7 @@ contract UserLiquidity {
     ///         It uniquely represents the logic of that guest program,
     ///         ensuring that only proofs generated from a pre-defined guest program
     ///         (in this case, checking user has liquidity) are considered valid.
-    bytes32 public constant imageId = ImageID.CHECK_LIQUIDITY_ID;
+    bytes32 public constant imageId = ImageID.BALANCE_OF_ID;
 
     /// @notice True if user liquidity is guaranteed, by the RISC Zero zkVM, to be nonzero.
     ///         It can be set by calling the `set` function.
