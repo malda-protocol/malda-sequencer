@@ -26,11 +26,13 @@ mod tests {
         transports::http::reqwest::Url,
     };
     use alloy_primitives::address;
-    use risc0_steel::host::BlockNumberOrTag as BlockRisc0;
     use malda_rs::{
         constants::*,
-        viewcalls::{get_user_balance_exec, get_user_balance_prove, get_current_sequencer_commitment},
+        viewcalls::{
+            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove,
+        },
     };
+    use risc0_steel::host::BlockNumberOrTag as BlockRisc0;
 
     #[tokio::test]
     async fn test_guest_proves_balance_on_linea() {
@@ -38,9 +40,12 @@ mod tests {
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
 
-        let _session_info = get_user_balance_exec(user_linea, asset, chain_id)
+        let session_info = get_user_balance_exec(user_linea, asset, chain_id)
             .await
             .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]
@@ -49,9 +54,12 @@ mod tests {
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
 
-        let _session_info = get_user_balance_exec(user_optimism, asset, chain_id)
+        let session_info = get_user_balance_exec(user_optimism, asset, chain_id)
             .await
             .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]
@@ -60,9 +68,12 @@ mod tests {
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
 
-        let _session_info = get_user_balance_exec(user_base, asset, chain_id)
+        let session_info = get_user_balance_exec(user_base, asset, chain_id)
             .await
             .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]
@@ -71,9 +82,12 @@ mod tests {
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
 
-        let _session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
+        let session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
             .await
             .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]
@@ -83,33 +97,59 @@ mod tests {
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
 
+        println!("Benchmarking with k256 accelerator");
+        println!("-------------------------------------");
         println!("Benchmarking Linea...");
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
-        get_user_balance_prove(user_linea, asset, chain_id)
+
+        let start_time = std::time::Instant::now();
+        let prove_info = get_user_balance_prove(user_linea, asset, chain_id)
             .await
             .unwrap();
+        let duration = start_time.elapsed();
+
+        println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
+        println!("e2e time: {:?}", duration);
+
 
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
-        get_user_balance_prove(user_optimism, asset, chain_id)
+        let start_time = std::time::Instant::now();
+        let prove_info = get_user_balance_prove(user_optimism, asset, chain_id)
             .await
             .unwrap();
+        let duration = start_time.elapsed();
+
+        println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
+        println!("e2e time: {:?}", duration);
 
         println!("Benchmarking Base...");
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
-        get_user_balance_prove(user_base, asset, chain_id)
+        let start_time = std::time::Instant::now();
+        let prove_info = get_user_balance_prove(user_base, asset, chain_id)
             .await
             .unwrap();
+        let duration = start_time.elapsed();
+
+        println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
+        println!("e2e time: {:?}", duration);
 
         println!("Benchmarking Ethereum via Optimism...");
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
-        get_user_balance_prove(user_ethereum, asset, chain_id)
+        let start_time = std::time::Instant::now();
+        let prove_info = get_user_balance_prove(user_ethereum, asset, chain_id)
             .await
             .unwrap();
+        let duration = start_time.elapsed();
+
+        println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
+        println!("e2e time: {:?}", duration);
+
+        panic!();
     }
 
     #[tokio::test]
@@ -132,8 +172,10 @@ mod tests {
         println!("OPTIMISM BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);
-        println!("Sequencer lag: {}", block_from_provider - block_from_commitment);
-
+        println!(
+            "Sequencer lag: {}",
+            block_from_provider - block_from_commitment
+        );
 
         let http_url: Url = RPC_URL_BASE.parse().unwrap();
         let provider = ProviderBuilder::new().on_http(http_url);
@@ -153,7 +195,9 @@ mod tests {
         println!("BASE BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);
-        println!("Sequencer lag: {}", block_from_provider - block_from_commitment);
-
+        println!(
+            "Sequencer lag: {}",
+            block_from_provider - block_from_commitment
+        );
     }
 }
