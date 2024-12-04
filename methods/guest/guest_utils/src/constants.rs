@@ -16,12 +16,31 @@ pub const SCROLL_CHAIN_ID: u64 = 534352;
 /// Chain ID for the Base network.
 pub const BASE_CHAIN_ID: u64 = 8453;
 
+/// Chain ID for the Ethereum sepolia network.
+pub const ETHEREUM_SEPOLIA_CHAIN_ID: u64 = 11155111;
+/// Chain ID for the Optimism sepolia network.
+pub const OPTIMISM_SEPOLIA_CHAIN_ID: u64 = 11155420;
+/// Chain ID for the Linea sepolia network.
+pub const LINEA_SEPOLIA_CHAIN_ID: u64 = 59141;
+/// Chain ID for the Scroll sepolia network.
+pub const SCROLL_SEPOLIA_CHAIN_ID: u64 = 534351;
+/// Chain ID for the Base network.
+pub const BASE_SEPOLIA_CHAIN_ID: u64 = 84532;
+
 /// The address of the Optimism sequencer contract.
 pub const OPTIMISM_SEQUENCER: Address = address!("AAAA45d9549EDA09E70937013520214382Ffc4A2");
 /// The address of the Base sequencer contract.
 pub const BASE_SEQUENCER: Address = address!("Af6E19BE0F9cE7f8afd49a1824851023A8249e8a");
 /// The address of the Linea sequencer contract.
 pub const LINEA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe476e1c9e");
+
+/// The address of the Optimism sequencer contract on the sepolia network.
+pub const OPTIMISM_SEPOLIA_SEQUENCER: Address =
+    address!("AAAA45d9549EDA09E70937013520214382Ffc4A2");
+/// The address of the Base sequencer contract on the sepolia network.
+pub const BASE_SEPOLIA_SEQUENCER: Address = address!("Af6E19BE0F9cE7f8afd49a1824851023A8249e8a");
+/// The address of the Linea sequencer contract on the sepolia network.
+pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe476e1c9e");
 
 /// The address of the L1Block contract on Optimism.
 /// This contract provides L1 block information to L2.

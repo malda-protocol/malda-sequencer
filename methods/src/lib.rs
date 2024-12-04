@@ -49,10 +49,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sepolia_guest_proves_balance_on_linea() {
+        let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
+        let asset = WETH_LINEA_SEPOLIA;
+        let chain_id = LINEA_SEPOLIA_CHAIN_ID;
+
+        let session_info = get_user_balance_exec(user_linea, asset, chain_id)
+            .await
+            .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+    }
+
+    #[tokio::test]
     async fn test_guest_proves_balance_on_optimism() {
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
+
+        let session_info = get_user_balance_exec(user_optimism, asset, chain_id)
+            .await
+            .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+    }
+
+    #[tokio::test]
+    async fn test_sepolia_guest_proves_balance_on_optimism() {
+        let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
+        let asset = WETH_OPTIMISM_SEPOLIA;
+        let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
         let session_info = get_user_balance_exec(user_optimism, asset, chain_id)
             .await
@@ -91,6 +119,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sepolia_guest_proves_balance_on_ethereum_via_op() {
+        let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
+        let asset = WETH_ETHEREUM_SEPOLIA;
+        let chain_id = ETHEREUM_SEPOLIA_CHAIN_ID;
+
+        let session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
+            .await
+            .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+    }
+
+    #[tokio::test]
     async fn benchmark_prove_all_chains() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
@@ -111,7 +153,6 @@ mod tests {
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
-
 
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;

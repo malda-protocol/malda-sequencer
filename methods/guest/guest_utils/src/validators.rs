@@ -123,14 +123,18 @@ pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
 /// * If the commitment verification fails
 /// * If the block hash doesn't match the expected hash
 pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env_block_hash: B256) {
-    if chain_id == OPTIMISM_CHAIN_ID {
-        commitment
+    match chain_id {
+        OPTIMISM_CHAIN_ID => commitment
             .verify(OPTIMISM_SEQUENCER, OPTIMISM_CHAIN_ID)
-            .unwrap();
-    } else if chain_id == BASE_CHAIN_ID {
-        commitment.verify(BASE_SEQUENCER, BASE_CHAIN_ID).unwrap();
-    } else {
-        panic!("invalid chain id");
+            .unwrap(),
+        BASE_CHAIN_ID => commitment.verify(BASE_SEQUENCER, BASE_CHAIN_ID).unwrap(),
+        OPTIMISM_SEPOLIA_CHAIN_ID => commitment
+            .verify(OPTIMISM_SEPOLIA_SEQUENCER, OPTIMISM_SEPOLIA_CHAIN_ID)
+            .unwrap(),
+        BASE_SEPOLIA_CHAIN_ID => commitment
+            .verify(BASE_SEPOLIA_SEQUENCER, BASE_SEPOLIA_CHAIN_ID)
+            .unwrap(),
+        _ => panic!("invalid chain id"),
     }
     let payload = ExecutionPayload::try_from(commitment).unwrap();
     assert_eq!(payload.block_hash, env_block_hash, "block hash mismatch");
