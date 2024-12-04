@@ -23,15 +23,33 @@ pub const RPC_URL_SCROLL: &str =
     "https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
 pub const RPC_URL_ETHEREUM: &str =
     "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
-pub const RPC_URL_BASE: &str = "https://mainnet.base.org";
+pub const RPC_URL_BASE: &str =
+    "https://base-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
 pub const RPC_URL_OPTIMISM: &str =
     "https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
 pub const RPC_URL_ARBITRUM: &str =
     "https://arb-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
 
+pub const RPC_URL_LINEA_SEPOLIA: &str =
+    "https://linea-sepolia.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e";
+pub const RPC_URL_SCROLL_SEPOLIA: &str =
+    "https://scroll-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_ETHEREUM_SEPOLIA: &str =
+    "https://eth-sepolia.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
+pub const RPC_URL_BASE_SEPOLIA: &str =
+    "https://base-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_OPTIMISM_SEPOLIA: &str =
+    "https://opt-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+pub const RPC_URL_ARBITRUM_SEPOLIA: &str =
+    "https://arb-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+
 /// Sequencer request URLs for Layer 2 networks
 pub const SEQUENCER_REQUEST_OPTIMISM: &str = "https://optimism.operationsolarstorm.org/latest";
 pub const SEQUENCER_REQUEST_BASE: &str = "https://base.operationsolarstorm.org/latest";
+
+/// have to run helios p2p server to get these
+pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str = "http://127.0.0.1:3000/latest";
+pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str = "http://127.0.0.1:3000/latest";
 
 /// Wrapped Ether (WETH) contract addresses for each supported network
 pub const WETH_ETHEREUM: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
@@ -40,3 +58,10 @@ pub const WETH_ARBITRUM: Address = address!("82aF49447D8a07e3bd95BD0d56f35241523
 pub const WETH_OPTIMISM: Address = address!("4200000000000000000000000000000000000006");
 pub const WETH_BASE: Address = address!("4200000000000000000000000000000000000006");
 pub const WETH_SCROLL: Address = address!("5300000000000000000000000000000000000004");
+
+pub const WETH_ETHEREUM_SEPOLIA: Address = address!("7b79995e5f793A07Bc00c21412e50Ecae098E7f9");
+pub const WETH_LINEA_SEPOLIA: Address = address!("f7F895d17DBA17A872041bebbb648F95adE2aEF9");
+pub const WETH_ARBITRUM_SEPOLIA: Address = address!("802CC0F559eBc79DA798bf3F3baB44141a1a06Ed");
+pub const WETH_OPTIMISM_SEPOLIA: Address = address!("4200000000000000000000000000000000000006");
+pub const WETH_BASE_SEPOLIA: Address = address!("4200000000000000000000000000000000000006");
+pub const WETH_SCROLL_SEPOLIA: Address = address!("5300000000000000000000000000000000000004");
