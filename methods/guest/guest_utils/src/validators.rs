@@ -6,6 +6,8 @@
 //! - Ethereum environment validation via OpStack
 //! - Chain length and hash linking validation
 
+use std::hash::Hash;
+
 use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
@@ -56,20 +58,28 @@ pub fn validate_balance_of_call(
     let balance = erc20_contract.call_builder(&call).call()._0;
 
     if chain_id == LINEA_CHAIN_ID {
-        validate_linea_env(env.header().inner().clone());
+        let linking_blocks = linking_blocks.unwrap();
+        let last_block = linking_blocks[linking_blocks.len() - 1].clone();
+        validate_linea_env(last_block.clone());
+        validate_chain_length(env.header().seal(), linking_blocks, last_block.hash_slow());
+        // validate_linea_env(env.header().inner().clone());
     } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
+        let linking_blocks = linking_blocks.unwrap();
+        let last_block = linking_blocks[linking_blocks.len() - 1].clone();
         validate_opstack_env(
             chain_id,
             &sequencer_commitment.unwrap(),
-            env.commitment().digest,
+            last_block.hash_slow(),
         );
+
+        validate_chain_length(env.header().seal(), linking_blocks, last_block.hash_slow());
     } else if chain_id == ETHEREUM_CHAIN_ID {
-        validate_ethereum_env_via_opstack(
+        let linking_blocks = linking_blocks.unwrap();
+        let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
-            env.header().seal(),
             op_env_input.unwrap(),
-            linking_blocks.unwrap(),
         );
+        validate_chain_length(env.header().seal(), linking_blocks, ethereum_hash);
     }
 
     let journal = Journal {
@@ -150,19 +160,15 @@ pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env
 ///
 /// # Panics
 /// * If any validation step fails
-pub fn validate_ethereum_env_via_opstack(
+pub fn get_ethereum_block_hash_via_opstack(
     commitment: SequencerCommitment,
-    ethereum_hash: B256,
     input_op: EthEvmInput,
-    linking_blocks: Vec<RlpHeader<Header>>,
-) {
+) -> B256 {
     let env_op = input_op.into_env();
     validate_opstack_env(OPTIMISM_CHAIN_ID, &commitment, env_op.commitment().digest);
     let l1_block = Contract::new(L1_BLOCK_ADDRESS_OPTIMISM, &env_op);
     let call = IL1Block::hashCall {};
-    let l1_hash = l1_block.call_builder(&call).call()._0;
-
-    validate_chain_length(ethereum_hash, linking_blocks, l1_hash);
+    l1_block.call_builder(&call).call()._0
 }
 
 /// Validates the length and integrity of a chain of blocks.
