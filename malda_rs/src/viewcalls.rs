@@ -119,7 +119,17 @@ pub async fn get_user_balance_zkvm_env(
         let (commitment, block) = get_current_sequencer_commitment(chain_id).await;
         (Some(block), Some(commitment))
     } else {
-        (None, None)
+        let block = EthEvmEnv::builder()
+            .rpc(Url::parse(rpc_url).unwrap())
+            .block_number_or_tag(BlockNumberOrTag::Latest)
+            .build()
+            .await
+            .unwrap()
+            .header()
+            .inner()
+            .inner()
+            .number;
+        (Some(BlockNumberOrTag::Number(block)), None)
     };
 
     let (l1_block_call_input, linking_blocks, ethereum_block) =
@@ -131,25 +141,30 @@ pub async fn get_user_balance_zkvm_env(
             };
             let (l1_block_call_input, l1_block) =
                 get_l1block_call_input(block.unwrap(), chain_id).await;
-            let (linking_blocks, ethereum_block) = get_linking_blocks_ethereum(l1_block).await;
+            let (linking_blocks, ethereum_block) = get_linking_blocks(rpc_url, l1_block).await;
             (
                 Some(l1_block_call_input),
                 Some(linking_blocks),
                 Some(ethereum_block),
             )
         } else {
-            (None, None, None)
+            let block_number = match block.unwrap() {
+                BlockNumberOrTag::Number(n) => n,
+                _ => panic!("Expected a block number"),
+            };
+            let (linking_blocks, _ethereum_block) = get_linking_blocks(rpc_url, block_number).await;
+            (None, Some(linking_blocks), None)
         };
 
     let block = match chain_id {
         BASE_CHAIN_ID => block.unwrap(),
         OPTIMISM_CHAIN_ID => block.unwrap(),
-        LINEA_CHAIN_ID => BlockNumberOrTag::Latest,
+        LINEA_CHAIN_ID => block.unwrap(),
         ETHEREUM_CHAIN_ID => BlockNumberOrTag::Number(ethereum_block.unwrap()),
         ETHEREUM_SEPOLIA_CHAIN_ID => BlockNumberOrTag::Number(ethereum_block.unwrap()),
         BASE_SEPOLIA_CHAIN_ID => block.unwrap(),
         OPTIMISM_SEPOLIA_CHAIN_ID => block.unwrap(),
-        LINEA_SEPOLIA_CHAIN_ID => BlockNumberOrTag::Latest,
+        LINEA_SEPOLIA_CHAIN_ID => block.unwrap(),
         _ => panic!("Invalid chain ID"),
     };
 
@@ -192,9 +207,18 @@ pub async fn get_balance_call_input(
     user: Address,
     asset: Address,
 ) -> EvmInput<RlpHeader<Header>> {
-    let mut env = EthEvmEnv::builder()
+    let env = EthEvmEnv::builder()
         .rpc(Url::parse(chain_url).unwrap())
         .block_number_or_tag(block)
+        .build()
+        .await
+        .unwrap();
+
+    let block = env.header().inner().inner().number - REORG_PROTECTION_DEPTH;
+
+    let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(chain_url).unwrap())
+        .block_number_or_tag(BlockNumberOrTag::Number(block))
         .build()
         .await
         .unwrap();
@@ -313,14 +337,17 @@ pub async fn get_l1block_call_input(
 /// Returns a tuple containing:
 /// - Vector of block headers for the reorg protection window
 /// - The block number before the start of the window
-pub async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<Header>>, u64) {
+pub async fn get_linking_blocks(
+    rpc_url: &str,
+    current_block: u64,
+) -> (Vec<RlpHeader<Header>>, u64) {
     let mut linking_blocks = vec![];
 
     let start_block = current_block - REORG_PROTECTION_DEPTH + 1;
 
     for block_nr in (start_block)..=(current_block) {
         let env = EthEvmEnv::builder()
-            .rpc(Url::parse(RPC_URL_ETHEREUM).unwrap())
+            .rpc(Url::parse(rpc_url).unwrap())
             .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
             .build()
             .await
@@ -328,5 +355,5 @@ pub async fn get_linking_blocks_ethereum(current_block: u64) -> (Vec<RlpHeader<H
         let header = env.header().inner().clone();
         linking_blocks.push(header);
     }
-    (linking_blocks, start_block - 1)
+    (linking_blocks, current_block)
 }

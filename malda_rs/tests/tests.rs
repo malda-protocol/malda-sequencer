@@ -207,7 +207,7 @@ mod tests {
     #[tokio::test]
     async fn test_validate_chain_length_input_correct() {
         let block_number = 21193475;
-        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let (linking_blocks, _) = get_linking_blocks(RPC_URL_ETHEREUM, block_number).await;
         let historical_hash = linking_blocks[0].inner().parent_hash;
         let current_hash = linking_blocks[linking_blocks.len() - 1].hash_slow();
         validate_chain_length(historical_hash, linking_blocks, current_hash);
@@ -216,7 +216,7 @@ mod tests {
     #[tokio::test]
     async fn test_validate_chain_length_panics_if_chain_too_short() {
         let block_number = 21193475;
-        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let (linking_blocks, _) = get_linking_blocks(RPC_URL_ETHEREUM, block_number).await;
         let historical_hash = linking_blocks[0].inner().parent_hash;
         let current_hash = linking_blocks[linking_blocks.len() - 1].hash_slow();
 
@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_validate_chain_length_panics_if_hash_doesnt_match() {
         let block_number = 21193475;
-        let (linking_blocks, _) = get_linking_blocks_ethereum(block_number).await;
+        let (linking_blocks, _) = get_linking_blocks(RPC_URL_ETHEREUM, block_number).await;
         let historical_hash = linking_blocks[0].inner().parent_hash;
 
         assert!(std::panic::catch_unwind(|| {
