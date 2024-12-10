@@ -206,10 +206,7 @@ mod tests {
             .number;
 
         let (_, block_from_commitment) = get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
-        let block_from_commitment = match block_from_commitment {
-            BlockRisc0::Number(n) => n,
-            _ => panic!("Expected a block number"),
-        };
+
         println!("OPTIMISM BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);
@@ -229,10 +226,7 @@ mod tests {
             .number;
 
         let (_, block_from_commitment) = get_current_sequencer_commitment(BASE_CHAIN_ID).await;
-        let block_from_commitment = match block_from_commitment {
-            BlockRisc0::Number(n) => n,
-            _ => panic!("Expected a block number"),
-        };
+
         println!("BASE BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);

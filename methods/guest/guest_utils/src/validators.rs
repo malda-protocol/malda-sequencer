@@ -5,9 +5,6 @@
 //! - OpStack (Optimism/Base) environment validation
 //! - Ethereum environment validation via OpStack
 //! - Chain length and hash linking validation
-
-use std::hash::Hash;
-
 use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
@@ -48,7 +45,7 @@ pub fn validate_balance_of_call(
     env_input: EthEvmInput,
     sequencer_commitment: Option<SequencerCommitment>,
     op_env_input: Option<EthEvmInput>,
-    linking_blocks: Option<Vec<RlpHeader<Header>>>,
+    linking_blocks: Vec<RlpHeader<Header>>,
 ) {
     let env = env_input.into_env();
 
@@ -57,30 +54,31 @@ pub fn validate_balance_of_call(
     let call = IERC20::balanceOfCall { account: account };
     let balance = erc20_contract.call_builder(&call).call()._0;
 
-    if chain_id == LINEA_CHAIN_ID {
-        let linking_blocks = linking_blocks.unwrap();
-        let last_block = linking_blocks[linking_blocks.len() - 1].clone();
-        validate_linea_env(last_block.clone());
-        validate_chain_length(env.header().seal(), linking_blocks, last_block.hash_slow());
-        // validate_linea_env(env.header().inner().clone());
-    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
-        let linking_blocks = linking_blocks.unwrap();
-        let last_block = linking_blocks[linking_blocks.len() - 1].clone();
-        validate_opstack_env(
-            chain_id,
-            &sequencer_commitment.unwrap(),
-            last_block.hash_slow(),
-        );
+    let last_block = linking_blocks[linking_blocks.len() - 1].clone();
 
-        validate_chain_length(env.header().seal(), linking_blocks, last_block.hash_slow());
+    let validated_block_hash = if chain_id == LINEA_CHAIN_ID {
+        validate_linea_env(last_block.clone());
+        last_block.hash_slow()
+    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
+        let last_block_hash = last_block.hash_slow();
+        validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
+        last_block_hash
     } else if chain_id == ETHEREUM_CHAIN_ID {
-        let linking_blocks = linking_blocks.unwrap();
         let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
             op_env_input.unwrap(),
         );
-        validate_chain_length(env.header().seal(), linking_blocks, ethereum_hash);
-    }
+        ethereum_hash
+    } else {
+        panic!("invalid chain id");
+    };
+
+    validate_chain_length(
+        chain_id,
+        env.header().seal(),
+        linking_blocks,
+        validated_block_hash,
+    );
 
     let journal = Journal {
         balance,
@@ -188,13 +186,27 @@ pub fn get_ethereum_block_hash_via_opstack(
 /// * If blocks are not properly hash-linked
 /// * If the final hash doesn't match the expected current hash
 pub fn validate_chain_length(
+    chain_id: u64,
     historical_hash: B256,
     linking_blocks: Vec<RlpHeader<Header>>,
     current_hash: B256,
 ) {
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
     let chain_length = linking_blocks.len() as u64;
     assert!(
-        chain_length >= REORG_PROTECTION_DEPTH,
+        chain_length >= reorg_protection_depth,
         "chain length is less than reorg protection"
     );
     let mut previous_hash = historical_hash;

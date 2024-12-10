@@ -59,4 +59,13 @@ pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 ///
 /// This value is used as a safety measure to ensure transaction finality
 /// across different blockchain networks.
-pub const REORG_PROTECTION_DEPTH: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_OPTIMISM: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_BASE: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_LINEA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_ETHEREUM: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_SCROLL: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_BASE_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_LINEA_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA: u64 = 2;
