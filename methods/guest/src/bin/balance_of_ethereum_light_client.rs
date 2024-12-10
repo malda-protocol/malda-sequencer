@@ -12,56 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-use guest_utils::{validators::validate_balance_of_call, types::SequencerCommitment, l1_validation::read_l1_chain_builder_input};
+use guest_utils::{l1_validation::validate_balance_of_call as validate_balance_of_call_ethereum_light_client, types::SequencerCommitment};
 use alloy_primitives::Address;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;
 use alloy_consensus::Header;
 
-// use consensus_core::types::{Header, Bootstrap, OptimisticUpdate, Update, SyncCommittee, SyncAggregate};
-// use alloy_primitives_old::B256 as OldB256;
-// sol! {
-//     /// ERC-20 balance function signature.
-//     interface ICompound {
-//         function getAccountLiquidity(address account) external view returns (uint256, uint256, uint256);
-//     }
-// }
-
-// sol! {
-//     struct Journal {
-//         Commitment commitment;
-//         uint256 liquidity;
-//         address user;
-//     }
-// }
 
 
 fn main() {
+    // Read the input data for this application.
+    let env_input: EthEvmInput = env::read();
+    let chain_id: u64 = env::read();
+    let account: Address = env::read();
+    let asset: Address = env::read();
+    let sequencer_commitment: Option<SequencerCommitment> = env::read();
+    let env_op_input: Option<EthEvmInput> = env::read();
+    let linking_blocks: Vec<RlpHeader<Header>> = env::read();
 
-    let (input, account, bootstrap, checkpoint, updates, finality_update) = read_l1_chain_builder_input();
-    // let verified_root = L1ChainBuilder::new().build_beacon_chain(bootstrap, checkpoint, updates, finality_update).unwrap();
-
-    // let comptroller_address = address!("3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B");
-
-    // let env = input.into_env().with_chain_spec(&ETH_MAINNET_CHAIN_SPEC);
-
-    // let comptroller = Contract::new(comptroller_address, &env);
-
-    // let call = ICompound::getAccountLiquidityCall { account };
-    // let returns = comptroller.call_builder(&call).call();
-
-    // // assert that the commitment root is the verified root
-    // assert_eq!(env.commitment().digest, verified_root);
-
-    // // Commit the journal that will be received by the application contract.
-    // // Journal is encoded using Solidity ABI for easy decoding in the app contract.
-    // let journal = Journal {
-    //     commitment: env.commitment().clone(),
-    //     liquidity: returns._1,
-    //     user: account,
-    // };
-    // env::commit_slice(&journal.abi_encode());
-
+    validate_balance_of_call_ethereum_light_client(chain_id, account, asset, env_input, sequencer_commitment, env_op_input, linking_blocks);
 }
+
+
+
 
