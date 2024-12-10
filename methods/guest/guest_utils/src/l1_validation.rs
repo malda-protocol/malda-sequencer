@@ -126,7 +126,7 @@ impl L1ChainBuilder {
     }
 }
 
-fn read_l1_chain_builder_input() -> (
+pub fn read_l1_chain_builder_input() -> (
     EthEvmInput,
     Address,
     Bootstrap,
