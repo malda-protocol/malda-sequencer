@@ -26,7 +26,7 @@ fn main() {
     let asset: Address = env::read();
     let sequencer_commitment: Option<SequencerCommitment> = env::read();
     let env_op_input: Option<EthEvmInput> = env::read();
-    let linking_blocks: Option<Vec<RlpHeader<Header>>> = env::read();
+    let linking_blocks: Vec<RlpHeader<Header>> = env::read();
 
     validate_balance_of_call(chain_id, account, asset, env_input, sequencer_commitment, env_op_input, linking_blocks);
 }

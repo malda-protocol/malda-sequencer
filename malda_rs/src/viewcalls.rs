@@ -129,46 +129,38 @@ pub async fn get_user_balance_zkvm_env(
             .inner()
             .inner()
             .number;
-        (Some(BlockNumberOrTag::Number(block)), None)
+        (Some(block), None)
     };
 
-    let (l1_block_call_input, linking_blocks, ethereum_block) =
+    let (l1_block_call_input, ethereum_block) =
         if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
             let chain_id = if chain_id == ETHEREUM_CHAIN_ID {
                 OPTIMISM_CHAIN_ID
             } else {
                 OPTIMISM_SEPOLIA_CHAIN_ID
             };
-            let (l1_block_call_input, l1_block) =
-                get_l1block_call_input(block.unwrap(), chain_id).await;
-            let (linking_blocks, ethereum_block) = get_linking_blocks(rpc_url, l1_block).await;
-            (
-                Some(l1_block_call_input),
-                Some(linking_blocks),
-                Some(ethereum_block),
-            )
+            let (l1_block_call_input, ethereum_block) =
+                get_l1block_call_input(BlockNumberOrTag::Number(block.unwrap()), chain_id).await;
+
+            (Some(l1_block_call_input), Some(ethereum_block))
         } else {
-            let block_number = match block.unwrap() {
-                BlockNumberOrTag::Number(n) => n,
-                _ => panic!("Expected a block number"),
-            };
-            let (linking_blocks, _ethereum_block) = get_linking_blocks(rpc_url, block_number).await;
-            (None, Some(linking_blocks), None)
+            (None, None)
         };
 
     let block = match chain_id {
         BASE_CHAIN_ID => block.unwrap(),
         OPTIMISM_CHAIN_ID => block.unwrap(),
         LINEA_CHAIN_ID => block.unwrap(),
-        ETHEREUM_CHAIN_ID => BlockNumberOrTag::Number(ethereum_block.unwrap()),
-        ETHEREUM_SEPOLIA_CHAIN_ID => BlockNumberOrTag::Number(ethereum_block.unwrap()),
+        ETHEREUM_CHAIN_ID => ethereum_block.unwrap(),
+        ETHEREUM_SEPOLIA_CHAIN_ID => ethereum_block.unwrap(),
         BASE_SEPOLIA_CHAIN_ID => block.unwrap(),
         OPTIMISM_SEPOLIA_CHAIN_ID => block.unwrap(),
         LINEA_SEPOLIA_CHAIN_ID => block.unwrap(),
         _ => panic!("Invalid chain ID"),
     };
 
-    let balance_call_input = get_balance_call_input(rpc_url, block, user, asset).await;
+    let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
+    let balance_call_input = get_balance_call_input(chain_id, rpc_url, block, user, asset).await;
 
     ExecutorEnv::builder()
         .write(&balance_call_input)
@@ -202,23 +194,31 @@ pub async fn get_user_balance_zkvm_env(
 ///
 /// Returns an `EvmInput` containing the encoded balance call
 pub async fn get_balance_call_input(
+    chain_id: u64,
     chain_url: &str,
-    block: BlockNumberOrTag,
+    block: u64,
     user: Address,
     asset: Address,
 ) -> EvmInput<RlpHeader<Header>> {
-    let env = EthEvmEnv::builder()
-        .rpc(Url::parse(chain_url).unwrap())
-        .block_number_or_tag(block)
-        .build()
-        .await
-        .unwrap();
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
 
-    let block = env.header().inner().inner().number - REORG_PROTECTION_DEPTH;
+    let block_reorg_protected = block - reorg_protection_depth;
 
     let mut env = EthEvmEnv::builder()
         .rpc(Url::parse(chain_url).unwrap())
-        .block_number_or_tag(BlockNumberOrTag::Number(block))
+        .block_number_or_tag(BlockNumberOrTag::Number(block_reorg_protected))
         .build()
         .await
         .unwrap();
@@ -244,9 +244,7 @@ pub async fn get_balance_call_input(
 /// # Panics
 ///
 /// Panics if an invalid chain ID is provided
-pub async fn get_current_sequencer_commitment(
-    chain_id: u64,
-) -> (SequencerCommitment, BlockNumberOrTag) {
+pub async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommitment, u64) {
     let req = match chain_id {
         BASE_CHAIN_ID => SEQUENCER_REQUEST_BASE,
         OPTIMISM_CHAIN_ID => SEQUENCER_REQUEST_OPTIMISM,
@@ -269,7 +267,7 @@ pub async fn get_current_sequencer_commitment(
         .unwrap()
         .block_number;
 
-    (commitment, BlockNumberOrTag::Number(block))
+    (commitment, block)
 }
 
 /// Retrieves L1 block information for L2 chains.
@@ -338,12 +336,27 @@ pub async fn get_l1block_call_input(
 /// - Vector of block headers for the reorg protection window
 /// - The block number before the start of the window
 pub async fn get_linking_blocks(
+    chain_id: u64,
     rpc_url: &str,
     current_block: u64,
-) -> (Vec<RlpHeader<Header>>, u64) {
+) -> Vec<RlpHeader<Header>> {
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
+
     let mut linking_blocks = vec![];
 
-    let start_block = current_block - REORG_PROTECTION_DEPTH + 1;
+    let start_block = current_block - reorg_protection_depth + 1;
 
     for block_nr in (start_block)..=(current_block) {
         let env = EthEvmEnv::builder()
@@ -355,5 +368,5 @@ pub async fn get_linking_blocks(
         let header = env.header().inner().clone();
         linking_blocks.push(header);
     }
-    (linking_blocks, current_block)
+    linking_blocks
 }
