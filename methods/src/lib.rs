@@ -25,7 +25,7 @@ mod tests {
         providers::{Provider, ProviderBuilder},
         transports::http::reqwest::Url,
     };
-    use alloy_primitives::address;
+    use alloy_primitives::{address, B256};
     use malda_rs::{
         constants::*,
         viewcalls::{
@@ -139,13 +139,25 @@ mod tests {
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
 
-        let session_info =
-            get_user_balance_exec_ethereum_light_client(user_ethereum, asset, chain_id)
-                .await
-                .unwrap();
+        let trusted_hash_bytes: [u8; 32] = [
+            0xe5, 0x73, 0xae, 0x24, 0xd2, 0xb8, 0x28, 0xb0, 0x1c, 0x9f, 0xf9, 0x31, 0xf7, 0xb0,
+            0xe3, 0xfe, 0xde, 0x9d, 0x03, 0xfd, 0xf5, 0x86, 0x6a, 0xfd, 0xc0, 0x52, 0x30, 0x29,
+            0x81, 0x98, 0x24, 0x1b,
+        ];
+        let trusted_hash = B256::from(trusted_hash_bytes);
+
+        let session_info = get_user_balance_exec_ethereum_light_client(
+            user_ethereum,
+            asset,
+            chain_id,
+            trusted_hash,
+        )
+        .await
+        .unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
+        panic!();
     }
 
     #[tokio::test]

@@ -17,6 +17,14 @@ use risc0_zkvm::guest::env;
 
 use consensus_core::types::{Header, SyncAggregate, SyncCommittee};
 
+use crate::constants::*;
+use crate::cryptography::{recover_signer, signature_from_bytes};
+use crate::types::*;
+use alloy_sol_types::SolValue;
+use risc0_steel::{serde::RlpHeader, Contract};
+use alloy_consensus::Header as ConsensusHeader;
+
+
 #[derive(Debug)]
 pub struct L1ChainBuilder {
     pub store: LightClientStore,
@@ -119,25 +127,9 @@ impl L1ChainBuilder {
         }
     }
 
-    pub fn expected_current_slot(&self) -> u64 {
-        let now = SystemTime::now();
-
-        expected_current_slot(now, self.genesis_time)
-    }
 }
 
-pub fn read_l1_chain_builder_input() -> (
-    EthEvmInput,
-    Address,
-    Bootstrap,
-    OldB256,
-    Vec<Update>,
-    OptimisticUpdate,
-) {
-    // Read the input data for this application.
-    let input: EthEvmInput = env::read();
-    let account: Address = env::read();
-
+pub fn read_l1_chain_builder_input() -> (Bootstrap, OldB256, Vec<Update>, OptimisticUpdate, EthEvmInput) {
     let bootstrap_header: Header = env::read();
     let bootstrap_current_sync_committee: SyncCommittee = env::read();
     let bootstrap_current_sync_committee_branch: Vec<OldB256> = env::read();
@@ -145,8 +137,6 @@ pub fn read_l1_chain_builder_input() -> (
     let checkpoint: OldB256 = env::read();
 
     let finality_update_attested_header: Header = env::read();
-    // let finality_update_finalized_header: Header = env::read();
-    // let finality_update_finality_branch: Vec<OldB256> = env::read();
     let finality_update_sync_aggregate: SyncAggregate = env::read();
     let finality_update_signature_slot: u64 = env::read();
 
@@ -187,14 +177,54 @@ pub fn read_l1_chain_builder_input() -> (
         signature_slot: finality_update_signature_slot,
     };
 
-    (
-        input,
+    let beacon_input: EthEvmInput = env::read();
+
+    (bootstrap, checkpoint, updates, finality_update, beacon_input)
+}
+
+pub fn validate_balance_of_call(
+    chain_id: u64,
+    account: Address,
+    asset: Address,
+    env_input: EthEvmInput,
+    sequencer_commitment: Option<SequencerCommitment>,
+    op_env_input: Option<EthEvmInput>,
+    linking_blocks: Vec<RlpHeader<ConsensusHeader>>,
+) {
+    let env = env_input.into_env();
+
+    let erc20_contract = Contract::new(asset, &env);
+
+    let call = IERC20::balanceOfCall { account: account };
+    let balance = erc20_contract.call_builder(&call).call()._0;
+
+    let last_block = linking_blocks[linking_blocks.len() - 1].clone();
+
+    let (bootstrap, checkpoint, updates, finality_update, beacon_input) = read_l1_chain_builder_input();
+
+    // let (current_beacon_hash, new_checkpoint) = validate_ethereum_env_via_sync_committee(bootstrap, checkpoint, updates, finality_update);
+    let current_beacon_hash = B256::new(finality_update.attested_header.tree_hash_root().0);
+    validate_chain_length(
+        chain_id,
+        env.header().seal(),
+        linking_blocks,
+        last_block.hash_slow(),
+    );
+
+    let env = beacon_input.into_env();
+    let exec_commit = env.header().seal();
+    let beacon_commit = env.commitment().digest;
+
+    assert_eq!(beacon_commit, current_beacon_hash, "beacon commit doesnt correspond to current beacon hash");
+    assert_eq!(exec_commit, last_block.hash_slow(), "exec commit doesnt correspond to last block hash");
+
+
+    let journal = Journal {
+        balance,
         account,
-        bootstrap,
-        checkpoint,
-        updates,
-        finality_update,
-    )
+        asset,
+    };
+    env::commit_slice(&journal.abi_encode());
 }
 
 pub fn validate_ethereum_env_via_sync_committee(
@@ -202,51 +232,52 @@ pub fn validate_ethereum_env_via_sync_committee(
     checkpoint: OldB256,
     updates: Vec<Update>,
     optimistic_update: OptimisticUpdate,
-    beacon_hash: B256,
-) {
-    let verified_root = L1ChainBuilder::new()
+) -> (B256, B256) {
+    let mut l1_chain_builder = L1ChainBuilder::new();
+    let verified_root = l1_chain_builder
         .build_beacon_chain(bootstrap, checkpoint, updates, optimistic_update)
         .unwrap();
 
-    assert_eq!(beacon_hash, verified_root, "beacon hash mismatch");
+    let verified_root = B256::new(verified_root.0);
 
-    // validate_chain_length(ethereum_hash, linking_blocks, l1_hash);
+    let new_checkpoint = B256::new(l1_chain_builder.last_checkpoint.unwrap().0);
+
+    (verified_root, new_checkpoint)
 }
 
-// /// Validates the length and integrity of a chain of blocks.
-// ///
-// /// Ensures that:
-// /// 1. The chain length meets minimum reorg protection requirements
-// /// 2. All blocks are properly hash-linked
-// /// 3. The final hash matches the expected current hash
-// ///
-// /// # Arguments
-// /// * `historical_hash` - The hash of the historical block to start validation from
-// /// * `linking_blocks` - Vector of block headers forming the chain
-// /// * `current_hash` - The expected hash of the current block
-// ///
-// /// # Panics
-// /// * If the chain length is less than the reorg protection depth
-// /// * If blocks are not properly hash-linked
-// /// * If the final hash doesn't match the expected current hash
-// pub fn validate_chain_length(
-//     historical_hash: B256,
-//     linking_blocks: Vec<RlpHeader<Header>>,
-//     current_hash: B256,
-// ) {
-//     let chain_length = linking_blocks.len() as u64;
-//     assert!(
-//         chain_length >= REORG_PROTECTION_DEPTH,
-//         "chain length is less than reorg protection"
-//     );
-//     let mut previous_hash = historical_hash;
-//     for header in linking_blocks {
-//         let parent_hash = header.parent_hash;
-//         assert_eq!(parent_hash, previous_hash, "blocks not hashlinked");
-//         previous_hash = header.hash_slow();
-//     }
-//     assert_eq!(
-//         previous_hash, current_hash,
-//         "last hash doesnt correspond to current l1 hash"
-//     );
-// }
+pub fn validate_chain_length(
+    chain_id: u64,
+    historical_hash: B256,
+    linking_blocks: Vec<RlpHeader<ConsensusHeader>>,
+    current_hash: B256,
+) {
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
+    let chain_length = linking_blocks.len() as u64;
+    assert!(
+        chain_length >= reorg_protection_depth,
+        "chain length is less than reorg protection"
+    );
+    let mut previous_hash = historical_hash;
+    for header in linking_blocks {
+        let parent_hash = header.parent_hash;
+        assert_eq!(parent_hash, previous_hash, "blocks not hashlinked");
+        println!("check passed");
+        previous_hash = header.hash_slow();
+    }
+    assert_eq!(
+        previous_hash, current_hash,
+        "last hash doesnt correspond to current l1 hash"
+    );
+}
