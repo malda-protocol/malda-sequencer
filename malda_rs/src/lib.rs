@@ -7,6 +7,8 @@ pub mod constants;
 
 pub mod viewcalls;
 
+pub mod viewcalls_ethereum_light_client;
+
 #[path = "../../methods/guest/guest_utils/src/cryptography.rs"]
 pub mod cryptography;
 

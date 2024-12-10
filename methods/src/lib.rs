@@ -31,6 +31,7 @@ mod tests {
         viewcalls::{
             get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove,
         },
+        viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
     };
     use risc0_steel::host::BlockNumberOrTag as BlockRisc0;
 
@@ -127,6 +128,21 @@ mod tests {
         let session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
             .await
             .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+    }
+
+    #[tokio::test]
+    async fn test_guest_proves_balance_on_ethereum_via_light_client() {
+        let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
+        let asset = WETH_ETHEREUM;
+        let chain_id = ETHEREUM_CHAIN_ID;
+
+        let session_info =
+            get_user_balance_exec_ethereum_light_client(user_ethereum, asset, chain_id)
+                .await
+                .unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
