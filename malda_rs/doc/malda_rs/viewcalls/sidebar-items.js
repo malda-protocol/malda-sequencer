@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["get_balance_call_input","get_current_sequencer_commitment","get_l1block_call_input","get_linking_blocks_ethereum","get_user_balance_exec","get_user_balance_prove","get_user_balance_zkvm_env"]};
