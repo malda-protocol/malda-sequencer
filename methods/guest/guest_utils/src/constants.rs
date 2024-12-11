@@ -40,7 +40,7 @@ pub const OPTIMISM_SEPOLIA_SEQUENCER: Address =
 /// The address of the Base sequencer contract on the sepolia network.
 pub const BASE_SEPOLIA_SEQUENCER: Address = address!("Af6E19BE0F9cE7f8afd49a1824851023A8249e8a");
 /// The address of the Linea sequencer contract on the sepolia network.
-pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe476e1c9e");
+pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("a27342f1b74c0cfb2cda74bac1628d0c1a9752f2");
 
 /// The address of the L1Block contract on Optimism.
 /// This contract provides L1 block information to L2.

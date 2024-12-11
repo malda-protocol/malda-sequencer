@@ -1,10 +1,11 @@
 //! Ethereum view call utilities for cross-chain view call proof.
 //!
 //! This module provides functionality to:
-//! - Fetch user token balances across different EVM chains
-//! - Handle sequencer commitments for L2 chains
-//! - Manage L1 block verification
-//! - Process linking blocks for reorg protection
+//! - Generate zero-knowledge proofs for token balance queries across EVM chains
+//! - Execute and verify token balance queries using RISC Zero
+//! - Handle Ethereum consensus layer (beacon chain) data verification
+//! - Process block headers for reorg protection
+//! - Build execution environments for zero-knowledge proofs
 
 use alloy_primitives::{Address, B256};
 use alloy_primitives_old::B256 as OldB256;
@@ -29,17 +30,18 @@ use methods::BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF;
 
 pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 
-/// Proves a user's token balance on a specified chain using the RISC Zero prover.
+/// Generates a zero-knowledge proof for a user's token balance query.
 ///
 /// # Arguments
 ///
-/// * `user` - The user's address to query
-/// * `asset` - The token contract address
-/// * `chain_id` - The chain identifier
+/// * `user` - The user's Ethereum address
+/// * `asset` - The token contract address to query
+/// * `chain_id` - The target chain identifier
+/// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing the `ProveInfo` or an error
+/// Returns a `Result` containing the zero-knowledge `ProveInfo` or an error
 pub async fn get_user_balance_prove(
     user: Address,
     asset: Address,
@@ -67,17 +69,20 @@ pub async fn get_user_balance_prove(
     prove_info
 }
 
-/// Executes a user's token balance query on a specified chain using the RISC Zero executor.
+/// Executes a token balance query without generating a proof.
+///
+/// Useful for testing and debugging balance queries before generating proofs.
 ///
 /// # Arguments
 ///
-/// * `user` - The user's address to query
-/// * `asset` - The token contract address
-/// * `chain_id` - The chain identifier
+/// * `user` - The user's Ethereum address
+/// * `asset` - The token contract address to query
+/// * `chain_id` - The target chain identifier
+/// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing the `SessionInfo` or an error
+/// Returns a `Result` containing the execution `SessionInfo` or an error
 pub async fn get_user_balance_exec(
     user: Address,
     asset: Address,
@@ -90,23 +95,26 @@ pub async fn get_user_balance_exec(
 
 /// Creates a RISC Zero executor environment for token balance queries.
 ///
-/// This function sets up the necessary environment for querying token balances,
-/// handling different chain-specific requirements including sequencer commitments,
-/// L1 block verification, and linking blocks for reorg protection.
+/// This function:
+/// 1. Fetches and validates beacon chain consensus data
+/// 2. Retrieves necessary block headers for reorg protection
+/// 3. Prepares the balance query call data
+/// 4. Builds a complete environment for zero-knowledge proof generation
 ///
 /// # Arguments
 ///
-/// * `user` - The user's address to query
-/// * `asset` - The token contract address
-/// * `chain_id` - The chain identifier
+/// * `user` - The user's Ethereum address
+/// * `asset` - The token contract address to query
+/// * `chain_id` - The target chain identifier
+/// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
 /// # Returns
 ///
-/// Returns an `ExecutorEnv` configured for the balance query
+/// Returns an `ExecutorEnv` configured for generating balance query proofs
 ///
 /// # Panics
 ///
-/// Panics if an invalid chain ID is provided
+/// Panics if an unsupported chain ID is provided
 pub async fn get_user_balance_zkvm_env(
     user: Address,
     asset: Address,
@@ -154,16 +162,20 @@ pub async fn get_user_balance_zkvm_env(
 
 /// Constructs an EVM input for a balance query.
 ///
+/// Prepares the encoded EVM call data for querying an ERC20 token's balanceOf function,
+/// taking into account chain-specific reorg protection depths.
+///
 /// # Arguments
 ///
+/// * `chain_id` - The target chain identifier
 /// * `chain_url` - RPC endpoint URL for the target chain
-/// * `block` - Block number or tag (latest) to query
-/// * `user` - Address of the user
-/// * `asset` - Token contract address
+/// * `block` - Block number to query the balance at
+/// * `user` - Address of the user to query
+/// * `asset` - Token contract address to query
 ///
 /// # Returns
 ///
-/// Returns an `EvmInput` containing the encoded balance call
+/// Returns an `EvmInput` containing the encoded balance call and block header data
 pub async fn get_balance_call_input(
     chain_id: u64,
     chain_url: &str,
@@ -205,15 +217,23 @@ pub async fn get_balance_call_input(
 
 /// Fetches a sequence of Ethereum blocks for reorg protection.
 ///
+/// Retrieves a continuous sequence of block headers starting from a given block,
+/// going back by the chain-specific reorg protection depth. This ensures the
+/// balance proof remains valid even if a chain reorganization occurs.
+///
 /// # Arguments
 ///
+/// * `chain_id` - The target chain identifier
+/// * `rpc_url` - RPC endpoint URL for the target chain
 /// * `current_block` - The latest block number to start from
 ///
 /// # Returns
 ///
-/// Returns a tuple containing:
-/// - Vector of block headers for the reorg protection window
-/// - The block number before the start of the window
+/// Returns a vector of block headers covering the reorg protection window
+///
+/// # Panics
+///
+/// Panics if an unsupported chain ID is provided
 pub async fn get_linking_blocks(
     chain_id: u64,
     rpc_url: &str,
@@ -250,6 +270,18 @@ pub async fn get_linking_blocks(
     linking_blocks
 }
 
+/// Builds a complete RISC Zero environment for L1 chain verification.
+///
+/// Assembles all necessary components for verifying L1 data, including:
+/// - View call inputs and chain identification
+/// - User and asset addresses
+/// - Sequencer commitments (for L2 chains)
+/// - Block headers for reorg protection
+/// - Beacon chain consensus data
+/// - Additional verification data for the beacon chain
+///
+/// This environment enables zero-knowledge proofs that demonstrate valid
+/// token balance queries while ensuring consensus-layer security.
 pub fn build_l1_chain_builder_environment(
     view_call_input: EvmInput<RlpHeader<Header>>,
     chain_id: u64,

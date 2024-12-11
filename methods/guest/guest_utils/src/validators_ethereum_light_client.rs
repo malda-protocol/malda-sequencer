@@ -1,3 +1,11 @@
+//! Validator functions for Ethereum light client verification.
+//!
+//! This module provides validation utilities for Ethereum light client proofs including:
+//! - Light client store management
+//! - Beacon chain bootstrapping and updates
+//! - Sync committee verification
+//! - Balance validation using light client proofs
+
 use consensus_core::{
     apply_bootstrap, apply_optimistic_update, apply_update,
     verify_bootstrap, verify_optimistic_update, verify_update,
@@ -24,6 +32,10 @@ use risc0_steel::{serde::RlpHeader, Contract};
 use alloy_consensus::Header as ConsensusHeader;
 
 
+/// Builder for managing Ethereum L1 light client state.
+///
+/// Maintains the light client store and handles beacon chain updates through
+/// bootstrap, sync committee updates, and optimistic updates.
 #[derive(Debug)]
 pub struct L1ChainBuilder {
     pub store: LightClientStore,
@@ -34,6 +46,12 @@ pub struct L1ChainBuilder {
 }
 
 impl L1ChainBuilder {
+    /// Creates a new L1ChainBuilder with default settings for mainnet.
+    ///
+    /// Initializes with:
+    /// - Empty light client store
+    /// - Deneb fork configuration
+    /// - Mainnet genesis parameters
     pub fn new() -> Self {
         let store = LightClientStore::default();
 
@@ -53,6 +71,16 @@ impl L1ChainBuilder {
         }
     }
 
+    /// Builds a beacon chain from bootstrap data and updates.
+    ///
+    /// # Arguments
+    /// * `bootstrap` - Initial bootstrap data
+    /// * `checkpoint` - Trust checkpoint hash
+    /// * `updates` - Vector of light client updates
+    /// * `optimistic_update` - Latest optimistic update
+    ///
+    /// # Returns
+    /// * Latest beacon chain root after applying all updates
     pub fn build_beacon_chain(
         &mut self,
         bootstrap: Bootstrap,
@@ -67,12 +95,21 @@ impl L1ChainBuilder {
         Ok(B256::new(latest_beacon_root.0))
     }
 
+    /// Bootstraps the light client with initial data.
+    ///
+    /// # Arguments
+    /// * `bootstrap` - Bootstrap data containing initial header and sync committee
+    /// * `checkpoint` - Trust checkpoint to verify against
     pub fn bootstrap(&mut self, bootstrap: Bootstrap, checkpoint: OldB256) -> Result<()> {
         verify_bootstrap(&bootstrap, checkpoint).unwrap();
         apply_bootstrap(&mut self.store, &bootstrap);
         Ok(())
     }
 
+    /// Processes a sequence of light client updates.
+    ///
+    /// # Arguments
+    /// * `updates` - Vector of updates to apply
     pub fn advance_updates(&mut self, updates: Vec<Update>) -> Result<()> {
         for update in updates {
             let res = self.verify_update(&update);
@@ -84,6 +121,10 @@ impl L1ChainBuilder {
         Ok(())
     }
 
+    /// Processes an optimistic update.
+    ///
+    /// # Arguments
+    /// * `update` - Optimistic update to apply
     pub fn advance_optimistic_update(&mut self, update: OptimisticUpdate) -> Result<()> {
         let res = self.verify_optimistic_update(&update);
         if res.is_ok() {
@@ -92,6 +133,10 @@ impl L1ChainBuilder {
         Ok(())
     }
 
+    /// Verifies a light client update.
+    ///
+    /// # Arguments
+    /// * `update` - Update to verify
     pub fn verify_update(&self, update: &Update) -> Result<()> {
         verify_update(
             update,
@@ -102,6 +147,10 @@ impl L1ChainBuilder {
         )
     }
 
+    /// Verifies an optimistic update.
+    ///
+    /// # Arguments
+    /// * `update` - Optimistic update to verify
     fn verify_optimistic_update(&self, update: &OptimisticUpdate) -> Result<()> {
         verify_optimistic_update(
             update,
@@ -112,6 +161,10 @@ impl L1ChainBuilder {
         )
     }
 
+    /// Applies a verified update to the light client store.
+    ///
+    /// # Arguments
+    /// * `update` - Verified update to apply
     pub fn apply_update(&mut self, update: &Update) {
         let new_checkpoint = apply_update(&mut self.store, update);
         if new_checkpoint.is_some() {
@@ -119,6 +172,10 @@ impl L1ChainBuilder {
         }
     }
 
+    /// Applies a verified optimistic update to the light client store.
+    ///
+    /// # Arguments
+    /// * `update` - Verified optimistic update to apply
     fn apply_optimistic_update(&mut self, update: &OptimisticUpdate) {
         let new_checkpoint = apply_optimistic_update(&mut self.store, update);
         if new_checkpoint.is_some() {
@@ -128,6 +185,17 @@ impl L1ChainBuilder {
 
 }
 
+/// Reads light client input data from the guest environment.
+///
+/// Deserializes the following data:
+/// - Bootstrap data (header, sync committee, proof)
+/// - Trust checkpoint
+/// - Update sequence
+/// - Finality update
+/// - Ethereum environment input
+///
+/// # Returns
+/// Tuple containing all deserialized components needed for light client verification
 pub fn read_l1_chain_builder_input() -> (Bootstrap, OldB256, Vec<Update>, OptimisticUpdate, EthEvmInput) {
     let bootstrap_header: Header = env::read();
     let bootstrap_current_sync_committee: SyncCommittee = env::read();
@@ -196,6 +264,26 @@ sol!{
     }
 }
 
+/// Validates an ERC20 balance query using light client proofs.
+///
+/// # Arguments
+/// * `chain_id` - The chain ID to validate against
+/// * `account` - Account address to query
+/// * `asset` - ERC20 token address
+/// * `env_input` - Ethereum environment input
+/// * `_sequencer_commitment` - Optional sequencer commitment
+/// * `_op_env_input` - Optional optimistic environment input
+/// * `linking_blocks` - Chain of blocks for verification
+///
+/// # Details
+/// 
+/// Performs the following validations:
+/// 1. Verifies the light client chain via sync committee
+/// 2. Validates block linking and chain length
+/// 3. Verifies beacon chain commitments
+/// 4. Executes and validates the balance query
+///
+/// Commits the results including balance and checkpoints to the guest environment.
 pub fn validate_balance_of_call(
     chain_id: u64,
     account: Address,
@@ -243,6 +331,16 @@ pub fn validate_balance_of_call(
     env::commit_slice(&journal.abi_encode());
 }
 
+/// Validates Ethereum environment using sync committee proofs.
+///
+/// # Arguments
+/// * `bootstrap` - Initial bootstrap data
+/// * `checkpoint` - Trust checkpoint
+/// * `updates` - Sequence of light client updates
+/// * `optimistic_update` - Latest optimistic update
+///
+/// # Returns
+/// Tuple of (current beacon root, new checkpoint)
 pub fn validate_ethereum_env_via_sync_committee(
     bootstrap: Bootstrap,
     checkpoint: OldB256,
@@ -261,6 +359,18 @@ pub fn validate_ethereum_env_via_sync_committee(
     (verified_root, new_checkpoint)
 }
 
+/// Validates chain length and block linking.
+///
+/// # Arguments
+/// * `chain_id` - Chain ID to determine reorg protection depth
+/// * `historical_hash` - Starting block hash
+/// * `linking_blocks` - Chain of blocks to verify
+/// * `current_hash` - Expected final block hash
+///
+/// # Panics
+/// * If chain length is insufficient for reorg protection
+/// * If blocks are not properly linked
+/// * If final hash doesn't match expected hash
 pub fn validate_chain_length(
     chain_id: u64,
     historical_hash: B256,
