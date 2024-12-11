@@ -7,17 +7,17 @@
 //! - Balance validation using light client proofs
 
 use consensus_core::{
-    apply_bootstrap, apply_optimistic_update, apply_update,
-    verify_bootstrap, verify_optimistic_update, verify_update,
+    apply_bootstrap, apply_optimistic_update, apply_update, verify_bootstrap,
+    verify_optimistic_update, verify_update,
 };
 
 pub use consensus_core::types::{Bootstrap, Forks, LightClientStore, OptimisticUpdate, Update};
 
 use alloy_primitives::{b256, B256};
 pub use alloy_primitives_old::{fixed_bytes as old_fixed_bytes, B256 as OldB256};
+use alloy_sol_types::sol;
 use eyre::Result;
 use tree_hash::TreeHash;
-use alloy_sol_types::sol;
 
 use alloy_primitives::Address;
 use risc0_steel::ethereum::EthEvmInput;
@@ -27,10 +27,9 @@ use consensus_core::types::{Header, SyncAggregate, SyncCommittee};
 
 use crate::constants::*;
 use crate::types::*;
+use alloy_consensus::Header as ConsensusHeader;
 use alloy_sol_types::SolValue;
 use risc0_steel::{serde::RlpHeader, Contract};
-use alloy_consensus::Header as ConsensusHeader;
-
 
 /// Builder for managing Ethereum L1 light client state.
 ///
@@ -182,7 +181,6 @@ impl L1ChainBuilder {
             self.last_checkpoint = Some(B256::new(new_checkpoint.unwrap().0));
         }
     }
-
 }
 
 /// Reads light client input data from the guest environment.
@@ -196,7 +194,13 @@ impl L1ChainBuilder {
 ///
 /// # Returns
 /// Tuple containing all deserialized components needed for light client verification
-pub fn read_l1_chain_builder_input() -> (Bootstrap, OldB256, Vec<Update>, OptimisticUpdate, EthEvmInput) {
+pub fn read_l1_chain_builder_input() -> (
+    Bootstrap,
+    OldB256,
+    Vec<Update>,
+    OptimisticUpdate,
+    EthEvmInput,
+) {
     let bootstrap_header: Header = env::read();
     let bootstrap_current_sync_committee: SyncCommittee = env::read();
     let bootstrap_current_sync_committee_branch: Vec<OldB256> = env::read();
@@ -246,10 +250,16 @@ pub fn read_l1_chain_builder_input() -> (Bootstrap, OldB256, Vec<Update>, Optimi
 
     let beacon_input: EthEvmInput = env::read();
 
-    (bootstrap, checkpoint, updates, finality_update, beacon_input)
+    (
+        bootstrap,
+        checkpoint,
+        updates,
+        finality_update,
+        beacon_input,
+    )
 }
 
-sol!{
+sol! {
     struct Journal {
         /// The balance amount
         uint256 balance;
@@ -276,7 +286,7 @@ sol!{
 /// * `linking_blocks` - Chain of blocks for verification
 ///
 /// # Details
-/// 
+///
 /// Performs the following validations:
 /// 1. Verifies the light client chain via sync committee
 /// 2. Validates block linking and chain length
@@ -302,9 +312,11 @@ pub fn validate_balance_of_call(
 
     let last_block = linking_blocks[linking_blocks.len() - 1].clone();
 
-    let (bootstrap, checkpoint, updates, finality_update, beacon_input) = read_l1_chain_builder_input();
+    let (bootstrap, checkpoint, updates, finality_update, beacon_input) =
+        read_l1_chain_builder_input();
 
-    let (current_beacon_hash, new_checkpoint) = validate_ethereum_env_via_sync_committee(bootstrap, checkpoint, updates, finality_update);
+    let (current_beacon_hash, new_checkpoint) =
+        validate_ethereum_env_via_sync_committee(bootstrap, checkpoint, updates, finality_update);
 
     validate_chain_length(
         chain_id,
@@ -317,16 +329,22 @@ pub fn validate_balance_of_call(
     let exec_commit = env.header().seal();
     let beacon_commit = env.commitment().digest;
 
-    assert_eq!(beacon_commit, current_beacon_hash, "beacon commit doesnt correspond to current beacon hash");
-    assert_eq!(exec_commit, last_block.hash_slow(), "exec commit doesnt correspond to last block hash");
-
+    assert_eq!(
+        beacon_commit, current_beacon_hash,
+        "beacon commit doesnt correspond to current beacon hash"
+    );
+    assert_eq!(
+        exec_commit,
+        last_block.hash_slow(),
+        "exec commit doesnt correspond to last block hash"
+    );
 
     let journal = Journal {
         balance,
         account,
         asset,
         checkpoint: B256::new(checkpoint.0),
-        new_checkpoint
+        new_checkpoint,
     };
     env::commit_slice(&journal.abi_encode());
 }

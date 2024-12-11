@@ -7,26 +7,31 @@
 //! - Process block headers for reorg protection
 //! - Build execution environments for zero-knowledge proofs
 
+use alloy_consensus::Header;
 use alloy_primitives::{Address, B256};
 use alloy_primitives_old::B256 as OldB256;
-use alloy_consensus::Header;
 
-use consensus_core::{calc_sync_period, types::{Bootstrap, OptimisticUpdate, Update}};
-use consensus::rpc::{ConsensusRpc, nimbus_rpc::NimbusRpc};
+use consensus::rpc::{nimbus_rpc::NimbusRpc, ConsensusRpc};
+use consensus_core::{
+    calc_sync_period,
+    types::{Bootstrap, OptimisticUpdate, Update},
+};
 
-use risc0_steel::{serde::RlpHeader, ethereum::{EthEvmInput, EthEvmEnv}, host::BlockNumberOrTag, Contract, EvmInput};
+use risc0_steel::{
+    ethereum::{EthEvmEnv, EthEvmInput},
+    host::BlockNumberOrTag,
+    serde::RlpHeader,
+    Contract, EvmInput,
+};
 use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo};
 
+use anyhow::Error;
 use tokio;
 use url::Url;
-use anyhow::Error;
 
-use crate::types::{SequencerCommitment, IERC20};
 use crate::constants::*;
+use crate::types::{SequencerCommitment, IERC20};
 use methods::BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF;
-
-
-
 
 pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 
@@ -142,7 +147,14 @@ pub async fn get_user_balance_zkvm_env(
     let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
     let balance_call_input = get_balance_call_input(chain_id, rpc_url, block, user, asset).await;
 
-    let beacon_input = get_balance_call_input(chain_id, rpc_url, block + REORG_PROTECTION_DEPTH_ETHEREUM, user, asset).await;
+    let beacon_input = get_balance_call_input(
+        chain_id,
+        rpc_url,
+        block + REORG_PROTECTION_DEPTH_ETHEREUM,
+        user,
+        asset,
+    )
+    .await;
 
     build_l1_chain_builder_environment(
         balance_call_input,
