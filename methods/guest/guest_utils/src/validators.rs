@@ -56,8 +56,8 @@ pub fn validate_balance_of_call(
 
     let last_block = linking_blocks[linking_blocks.len() - 1].clone();
 
-    let validated_block_hash = if chain_id == LINEA_CHAIN_ID {
-        validate_linea_env(last_block.clone());
+    let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
+        validate_linea_env(chain_id, last_block.clone());
         last_block.hash_slow()
     } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
         let last_block_hash = last_block.hash_slow();
@@ -95,7 +95,7 @@ pub fn validate_balance_of_call(
 ///
 /// # Panics
 /// * If the block is not signed by the official Linea sequencer
-pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
+pub fn validate_linea_env(chain_id: u64, header: risc0_steel::ethereum::EthBlockHeader) {
     // extract sequencer signature from extra data
     let extra_data = header.inner().extra_data.clone();
 
@@ -114,7 +114,16 @@ pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
 
     let sequencer = recover_signer(sig, sighash).unwrap();
 
-    if sequencer != LINEA_SEQUENCER {
+    let expected_sequencer = match chain_id {
+        LINEA_CHAIN_ID => LINEA_SEQUENCER,
+        LINEA_SEPOLIA_CHAIN_ID => LINEA_SEPOLIA_SEQUENCER,
+        _ => panic!("invalid chain id"),
+    };
+
+    println!("sequencer: {:?}", sequencer);
+    println!("expected_sequencer: {:?}", expected_sequencer);
+
+    if sequencer != expected_sequencer {
         panic!("Block not signed by linea sequencer");
     }
 }

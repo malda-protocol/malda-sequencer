@@ -38,7 +38,7 @@ mod tests {
         .await;
 
         let env = balance_call_input.into_env();
-        validate_linea_env(env.header().inner().clone());
+        validate_linea_env(LINEA_CHAIN_ID, env.header().inner().clone());
     }
 
     #[tokio::test]
@@ -65,7 +65,7 @@ mod tests {
 
         let env = balance_call_input.into_env();
         assert!(std::panic::catch_unwind(|| {
-            validate_linea_env(env.header().inner().clone());
+            validate_linea_env(LINEA_CHAIN_ID, env.header().inner().clone());
         })
         .is_err());
     }
@@ -95,7 +95,7 @@ mod tests {
         let mut header = env.header().inner().inner().clone();
         header.number = 1;
         assert!(std::panic::catch_unwind(|| {
-            validate_linea_env(RlpHeader::new(header));
+            validate_linea_env(LINEA_CHAIN_ID, RlpHeader::new(header));
         })
         .is_err());
     }
@@ -193,7 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_optimism_env_manipulated_commitment_panics() {
-        let (sequencer_commitment, block) =
+        let (sequencer_commitment, _block) =
             get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
 
         let (wrong_sequencer_commitment, block) =
