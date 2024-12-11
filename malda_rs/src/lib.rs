@@ -18,5 +18,5 @@ pub mod types;
 #[path = "../../methods/guest/guest_utils/src/validators.rs"]
 pub mod validators;
 
-#[path = "../../methods/guest/guest_utils/src/l1_validation.rs"]
-pub mod l1_validation;
+#[path = "../../methods/guest/guest_utils/src/validators_ethereum_light_client.rs"]
+pub mod validators_ethereum_light_client;

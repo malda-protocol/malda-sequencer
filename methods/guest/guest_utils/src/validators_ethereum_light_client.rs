@@ -1,5 +1,5 @@
 use consensus_core::{
-    apply_bootstrap, apply_optimistic_update, apply_update, expected_current_slot,
+    apply_bootstrap, apply_optimistic_update, apply_update,
     verify_bootstrap, verify_optimistic_update, verify_update,
 };
 
@@ -8,8 +8,8 @@ pub use consensus_core::types::{Bootstrap, Forks, LightClientStore, OptimisticUp
 use alloy_primitives::{b256, B256};
 pub use alloy_primitives_old::{fixed_bytes as old_fixed_bytes, B256 as OldB256};
 use eyre::Result;
-use std::time::SystemTime;
 use tree_hash::TreeHash;
+use alloy_sol_types::sol;
 
 use alloy_primitives::Address;
 use risc0_steel::ethereum::EthEvmInput;
@@ -18,7 +18,6 @@ use risc0_zkvm::guest::env;
 use consensus_core::types::{Header, SyncAggregate, SyncCommittee};
 
 use crate::constants::*;
-use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
 use alloy_sol_types::SolValue;
 use risc0_steel::{serde::RlpHeader, Contract};
@@ -182,13 +181,28 @@ pub fn read_l1_chain_builder_input() -> (Bootstrap, OldB256, Vec<Update>, Optimi
     (bootstrap, checkpoint, updates, finality_update, beacon_input)
 }
 
+sol!{
+    struct Journal {
+        /// The balance amount
+        uint256 balance;
+        /// The user's address
+        address account;
+        /// The asset's contract address
+        address asset;
+        /// trusted beacon root
+        bytes32 checkpoint;
+        /// new checkpoint
+        bytes32 new_checkpoint;
+    }
+}
+
 pub fn validate_balance_of_call(
     chain_id: u64,
     account: Address,
     asset: Address,
     env_input: EthEvmInput,
-    sequencer_commitment: Option<SequencerCommitment>,
-    op_env_input: Option<EthEvmInput>,
+    _sequencer_commitment: Option<SequencerCommitment>,
+    _op_env_input: Option<EthEvmInput>,
     linking_blocks: Vec<RlpHeader<ConsensusHeader>>,
 ) {
     let env = env_input.into_env();
@@ -202,8 +216,8 @@ pub fn validate_balance_of_call(
 
     let (bootstrap, checkpoint, updates, finality_update, beacon_input) = read_l1_chain_builder_input();
 
-    // let (current_beacon_hash, new_checkpoint) = validate_ethereum_env_via_sync_committee(bootstrap, checkpoint, updates, finality_update);
-    let current_beacon_hash = B256::new(finality_update.attested_header.tree_hash_root().0);
+    let (current_beacon_hash, new_checkpoint) = validate_ethereum_env_via_sync_committee(bootstrap, checkpoint, updates, finality_update);
+
     validate_chain_length(
         chain_id,
         env.header().seal(),
@@ -223,6 +237,8 @@ pub fn validate_balance_of_call(
         balance,
         account,
         asset,
+        checkpoint: B256::new(checkpoint.0),
+        new_checkpoint
     };
     env::commit_slice(&journal.abi_encode());
 }
@@ -273,7 +289,6 @@ pub fn validate_chain_length(
     for header in linking_blocks {
         let parent_hash = header.parent_hash;
         assert_eq!(parent_hash, previous_hash, "blocks not hashlinked");
-        println!("check passed");
         previous_hash = header.hash_slow();
     }
     assert_eq!(

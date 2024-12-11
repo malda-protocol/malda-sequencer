@@ -7,34 +7,25 @@
 //! - Process linking blocks for reorg protection
 
 use alloy_primitives::{Address, B256};
-use anyhow::Error;
-
-use consensus_core::calc_sync_period;
-use consensus_core::types::{BeaconBlock, Bootstrap, OptimisticUpdate, Update};
-use risc0_steel::{ethereum::EthEvmEnv, host::BlockNumberOrTag, Contract};
-use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo};
-use tokio;
-use url::Url;
-
-use consensus::rpc::nimbus_rpc::NimbusRpc;
-use consensus::rpc::ConsensusRpc;
-
 use alloy_primitives_old::B256 as OldB256;
-
-use alloy::providers::ProviderBuilder;
-
-use risc0_steel::serde::RlpHeader;
-use risc0_steel::EvmInput;
-
 use alloy_consensus::Header;
 
-use risc0_zkvm;
+use consensus_core::{calc_sync_period, types::{Bootstrap, OptimisticUpdate, Update}};
+use consensus::rpc::{ConsensusRpc, nimbus_rpc::NimbusRpc};
+
+use risc0_steel::{serde::RlpHeader, ethereum::{EthEvmInput, EthEvmEnv}, host::BlockNumberOrTag, Contract, EvmInput};
+use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo};
+
+use tokio;
+use url::Url;
+use anyhow::Error;
 
 use crate::types::{SequencerCommitment, IERC20};
-use risc0_steel::ethereum::EthEvmInput;
-
 use crate::constants::*;
 use methods::BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF;
+
+
+
 
 pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 
@@ -126,10 +117,6 @@ pub async fn get_user_balance_zkvm_env(
         ETHEREUM_CHAIN_ID => (RPC_URL_ETHEREUM, RPC_URL_BEACON),
         _ => panic!("Invalid chain ID"),
     };
-
-    // let provider = ProviderBuilder::new()
-    // .with_recommended_fillers()
-    // .on_http(Url::parse(chain_url).unwrap());
 
     let beacon_rpc = NimbusRpc::new(rpc_url_beacon);
     let beacon_root = OldB256::from(trusted_hash.0);

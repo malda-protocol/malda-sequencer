@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use guest_utils::{l1_validation::validate_balance_of_call as validate_balance_of_call_ethereum_light_client, types::SequencerCommitment};
+use guest_utils::{validators_ethereum_light_client::validate_balance_of_call as validate_balance_of_call_ethereum_light_client, types::SequencerCommitment};
 use alloy_primitives::Address;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;

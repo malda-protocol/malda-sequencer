@@ -17,4 +17,4 @@ pub mod validators;
 pub mod cryptography;
 
 /// L1 validation
-pub mod l1_validation;
+pub mod validators_ethereum_light_client;
