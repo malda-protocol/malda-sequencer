@@ -166,7 +166,7 @@ mod tests {
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
 
-        println!("Benchmarking with k256 accelerator");
+        println!("Benchmarking with new k256 accelerator");
         println!("-------------------------------------");
         println!("Benchmarking Linea...");
         let asset = WETH_LINEA;
@@ -180,6 +180,7 @@ mod tests {
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
+
 
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;
