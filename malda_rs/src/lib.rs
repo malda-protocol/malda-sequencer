@@ -7,6 +7,8 @@ pub mod constants;
 
 pub mod viewcalls;
 
+pub mod viewcalls_ethereum_light_client;
+
 #[path = "../../methods/guest/guest_utils/src/cryptography.rs"]
 pub mod cryptography;
 
@@ -15,3 +17,6 @@ pub mod types;
 
 #[path = "../../methods/guest/guest_utils/src/validators.rs"]
 pub mod validators;
+
+#[path = "../../methods/guest/guest_utils/src/validators_ethereum_light_client.rs"]
+pub mod validators_ethereum_light_client;

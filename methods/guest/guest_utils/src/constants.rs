@@ -40,7 +40,7 @@ pub const OPTIMISM_SEPOLIA_SEQUENCER: Address =
 /// The address of the Base sequencer contract on the sepolia network.
 pub const BASE_SEPOLIA_SEQUENCER: Address = address!("Af6E19BE0F9cE7f8afd49a1824851023A8249e8a");
 /// The address of the Linea sequencer contract on the sepolia network.
-pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe476e1c9e");
+pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("a27342f1b74c0cfb2cda74bac1628d0c1a9752f2");
 
 /// The address of the L1Block contract on Optimism.
 /// This contract provides L1 block information to L2.
@@ -59,4 +59,13 @@ pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 ///
 /// This value is used as a safety measure to ensure transaction finality
 /// across different blockchain networks.
-pub const REORG_PROTECTION_DEPTH: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_OPTIMISM: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_BASE: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_LINEA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_ETHEREUM: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_SCROLL: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_BASE_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_LINEA_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA: u64 = 2;
+pub const REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA: u64 = 2;

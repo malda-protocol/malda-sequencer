@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use guest_utils::{validators::validate_balance_of_call, types::SequencerCommitment};
+use guest_utils::{validators_ethereum_light_client::validate_balance_of_call as validate_balance_of_call_ethereum_light_client, types::SequencerCommitment};
 use alloy_primitives::Address;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;
@@ -30,7 +30,7 @@ fn main() {
     let env_op_input: Option<EthEvmInput> = env::read();
     let linking_blocks: Vec<RlpHeader<Header>> = env::read();
 
-    validate_balance_of_call(chain_id, account, asset, env_input, sequencer_commitment, env_op_input, linking_blocks);
+    validate_balance_of_call_ethereum_light_client(chain_id, account, asset, env_input, sequencer_commitment, env_op_input, linking_blocks);
 }
 
 

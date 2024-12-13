@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["validate_balance_of_call","validate_chain_length","validate_ethereum_env_via_opstack","validate_linea_env","validate_opstack_env"]};
