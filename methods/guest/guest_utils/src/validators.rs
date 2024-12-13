@@ -120,9 +120,6 @@ pub fn validate_linea_env(chain_id: u64, header: risc0_steel::ethereum::EthBlock
         _ => panic!("invalid chain id"),
     };
 
-    println!("sequencer: {:?}", sequencer);
-    println!("expected_sequencer: {:?}", expected_sequencer);
-
     if sequencer != expected_sequencer {
         panic!("Block not signed by linea sequencer");
     }
