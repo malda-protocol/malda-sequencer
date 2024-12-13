@@ -21,11 +21,11 @@ ethers = { version = "2.0" }
 hex = { version = "0.4" }
 log = { version = "0.4" }
 methods = { path = "./methods" }
-risc0-build = { version = "1.1.2", features = ["docker"] }
+risc0-build = { version = "1.2", features = ["docker", "unstable"] }
 risc0-build-ethereum = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.1.2" }
 risc0-ethereum-contracts = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.1.4" }
 risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.1.4" }
-risc0-zkvm = { version = "1.1.2", default-features = false }
+risc0-zkvm = { version = "1.2", default-features = false, features = ['unstable'] }
 risc0-zkp = { version = "1.1.2", default-features = false }
 risc0-core = { version = "1.1.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
