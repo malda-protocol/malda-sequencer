@@ -182,6 +182,7 @@ mod tests {
         println!("e2e time: {:?}", duration);
 
 
+
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
