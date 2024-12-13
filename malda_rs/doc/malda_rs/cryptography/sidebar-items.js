@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["recover_signer","signature_from_bytes","signature_msg"]};

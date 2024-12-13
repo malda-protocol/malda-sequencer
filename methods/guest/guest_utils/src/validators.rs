@@ -5,7 +5,6 @@
 //! - OpStack (Optimism/Base) environment validation
 //! - Ethereum environment validation via OpStack
 //! - Chain length and hash linking validation
-
 use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
@@ -46,7 +45,7 @@ pub fn validate_balance_of_call(
     env_input: EthEvmInput,
     sequencer_commitment: Option<SequencerCommitment>,
     op_env_input: Option<EthEvmInput>,
-    linking_blocks: Option<Vec<RlpHeader<Header>>>,
+    linking_blocks: Vec<RlpHeader<Header>>,
 ) {
     let env = env_input.into_env();
 
@@ -55,22 +54,31 @@ pub fn validate_balance_of_call(
     let call = IERC20::balanceOfCall { account: account };
     let balance = erc20_contract.call_builder(&call).call()._0;
 
-    if chain_id == LINEA_CHAIN_ID {
-        validate_linea_env(env.header().inner().clone());
+    let last_block = linking_blocks[linking_blocks.len() - 1].clone();
+
+    let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
+        validate_linea_env(chain_id, last_block.clone());
+        last_block.hash_slow()
     } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
-        validate_opstack_env(
-            chain_id,
-            &sequencer_commitment.unwrap(),
-            env.commitment().digest,
-        );
+        let last_block_hash = last_block.hash_slow();
+        validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
+        last_block_hash
     } else if chain_id == ETHEREUM_CHAIN_ID {
-        validate_ethereum_env_via_opstack(
+        let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
-            env.header().seal(),
             op_env_input.unwrap(),
-            linking_blocks.unwrap(),
         );
-    }
+        ethereum_hash
+    } else {
+        panic!("invalid chain id");
+    };
+
+    validate_chain_length(
+        chain_id,
+        env.header().seal(),
+        linking_blocks,
+        validated_block_hash,
+    );
 
     let journal = Journal {
         balance,
@@ -87,7 +95,7 @@ pub fn validate_balance_of_call(
 ///
 /// # Panics
 /// * If the block is not signed by the official Linea sequencer
-pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
+pub fn validate_linea_env(chain_id: u64, header: risc0_steel::ethereum::EthBlockHeader) {
     // extract sequencer signature from extra data
     let extra_data = header.inner().extra_data.clone();
 
@@ -106,7 +114,16 @@ pub fn validate_linea_env(header: risc0_steel::ethereum::EthBlockHeader) {
 
     let sequencer = recover_signer(sig, sighash).unwrap();
 
-    if sequencer != LINEA_SEQUENCER {
+    let expected_sequencer = match chain_id {
+        LINEA_CHAIN_ID => LINEA_SEQUENCER,
+        LINEA_SEPOLIA_CHAIN_ID => LINEA_SEPOLIA_SEQUENCER,
+        _ => panic!("invalid chain id"),
+    };
+
+    println!("sequencer: {:?}", sequencer);
+    println!("expected_sequencer: {:?}", expected_sequencer);
+
+    if sequencer != expected_sequencer {
         panic!("Block not signed by linea sequencer");
     }
 }
@@ -150,19 +167,15 @@ pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env
 ///
 /// # Panics
 /// * If any validation step fails
-pub fn validate_ethereum_env_via_opstack(
+pub fn get_ethereum_block_hash_via_opstack(
     commitment: SequencerCommitment,
-    ethereum_hash: B256,
     input_op: EthEvmInput,
-    linking_blocks: Vec<RlpHeader<Header>>,
-) {
+) -> B256 {
     let env_op = input_op.into_env();
     validate_opstack_env(OPTIMISM_CHAIN_ID, &commitment, env_op.commitment().digest);
     let l1_block = Contract::new(L1_BLOCK_ADDRESS_OPTIMISM, &env_op);
     let call = IL1Block::hashCall {};
-    let l1_hash = l1_block.call_builder(&call).call()._0;
-
-    validate_chain_length(ethereum_hash, linking_blocks, l1_hash);
+    l1_block.call_builder(&call).call()._0
 }
 
 /// Validates the length and integrity of a chain of blocks.
@@ -182,13 +195,27 @@ pub fn validate_ethereum_env_via_opstack(
 /// * If blocks are not properly hash-linked
 /// * If the final hash doesn't match the expected current hash
 pub fn validate_chain_length(
+    chain_id: u64,
     historical_hash: B256,
     linking_blocks: Vec<RlpHeader<Header>>,
     current_hash: B256,
 ) {
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
     let chain_length = linking_blocks.len() as u64;
     assert!(
-        chain_length >= REORG_PROTECTION_DEPTH,
+        chain_length >= reorg_protection_depth,
         "chain length is less than reorg protection"
     );
     let mut previous_hash = historical_hash;

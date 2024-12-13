@@ -25,14 +25,14 @@ mod tests {
         providers::{Provider, ProviderBuilder},
         transports::http::reqwest::Url,
     };
-    use alloy_primitives::address;
+    use alloy_primitives::{address, B256};
     use malda_rs::{
         constants::*,
         viewcalls::{
             get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove,
         },
+        viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
     };
-    use risc0_steel::host::BlockNumberOrTag as BlockRisc0;
 
     #[tokio::test]
     async fn test_guest_proves_balance_on_linea() {
@@ -133,6 +133,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_guest_proves_balance_on_ethereum_via_light_client() {
+        let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
+        let asset = WETH_ETHEREUM;
+        let chain_id = ETHEREUM_CHAIN_ID;
+
+        let trusted_hash_bytes: [u8; 32] = [
+            0xbe, 0xb9, 0x03, 0xb1, 0x56, 0xb5, 0x40, 0x32, 0x8a, 0x1d, 0x57, 0x3f, 0xcf, 0x92,
+            0xf1, 0x9e, 0x2e, 0x70, 0x8b, 0x3e, 0x2c, 0xe1, 0x9e, 0xb0, 0x3d, 0xbc, 0x91, 0x41,
+            0xe3, 0x51, 0x3e, 0x22,
+        ];
+        let trusted_hash = B256::from(trusted_hash_bytes);
+
+        let session_info = get_user_balance_exec_ethereum_light_client(
+            user_ethereum,
+            asset,
+            chain_id,
+            trusted_hash,
+        )
+        .await
+        .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+        panic!();
+    }
+
+    #[tokio::test]
     async fn benchmark_prove_all_chains() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
@@ -206,10 +233,7 @@ mod tests {
             .number;
 
         let (_, block_from_commitment) = get_current_sequencer_commitment(OPTIMISM_CHAIN_ID).await;
-        let block_from_commitment = match block_from_commitment {
-            BlockRisc0::Number(n) => n,
-            _ => panic!("Expected a block number"),
-        };
+
         println!("OPTIMISM BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);
@@ -229,10 +253,7 @@ mod tests {
             .number;
 
         let (_, block_from_commitment) = get_current_sequencer_commitment(BASE_CHAIN_ID).await;
-        let block_from_commitment = match block_from_commitment {
-            BlockRisc0::Number(n) => n,
-            _ => panic!("Expected a block number"),
-        };
+
         println!("BASE BLOCKCHAIN:");
         println!("Block from provider: {}", block_from_provider);
         println!("Block from commitment: {}", block_from_commitment);
