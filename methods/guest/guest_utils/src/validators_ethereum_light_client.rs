@@ -372,7 +372,7 @@ pub fn validate_ethereum_env_via_sync_committee(
 
     let verified_root = B256::new(verified_root.0);
 
-    let new_checkpoint = B256::new(l1_chain_builder.last_checkpoint.unwrap().0);
+    let new_checkpoint = l1_chain_builder.last_checkpoint.map_or_else(|| B256::from(checkpoint.0), |last| B256::new(last.0));
 
     (verified_root, new_checkpoint)
 }
