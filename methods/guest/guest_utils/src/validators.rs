@@ -54,7 +54,11 @@ pub fn validate_balance_of_call(
     let call = IERC20::balanceOfCall { account: account };
     let balance = erc20_contract.call_builder(&call).call()._0;
 
-    let last_block = linking_blocks[linking_blocks.len() - 1].clone();
+    let last_block = if linking_blocks.is_empty() {
+        env.header().inner().clone()
+    } else {
+        linking_blocks[linking_blocks.len() - 1].clone()
+    };
 
     let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
         validate_linea_env(chain_id, last_block.clone());
