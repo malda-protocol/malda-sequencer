@@ -242,8 +242,6 @@ pub fn read_l1_chain_builder_input() -> (
 
     let finality_update = OptimisticUpdate {
         attested_header: finality_update_attested_header,
-        // finalized_header: finality_update_finalized_header,
-        // finality_branch: finality_update_finality_branch,
         sync_aggregate: finality_update_sync_aggregate,
         signature_slot: finality_update_signature_slot,
     };
@@ -310,7 +308,11 @@ pub fn validate_balance_of_call(
     let call = IERC20::balanceOfCall { account: account };
     let balance = erc20_contract.call_builder(&call).call()._0;
 
-    let last_block = linking_blocks[linking_blocks.len() - 1].clone();
+    let last_block = if linking_blocks.is_empty() {
+        env.header().inner().clone()
+    } else {
+        linking_blocks[linking_blocks.len() - 1].clone()
+    };
 
     let (bootstrap, checkpoint, updates, finality_update, beacon_input) =
         read_l1_chain_builder_input();
