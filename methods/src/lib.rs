@@ -140,9 +140,9 @@ mod tests {
 
         // update this to recent available checkpoint
         let trusted_hash_bytes: [u8; 32] = [
-            0xec, 0x00, 0x6a, 0x34, 0x19, 0x2a, 0x3f, 0x07, 0x2e, 0x7a, 0x50, 0x23, 0xa7, 0x5d, 0xb3,
-            0xc6, 0x36, 0xf1, 0x8c, 0x48, 0xc4, 0x33, 0x51, 0xa3, 0x31, 0x10, 0xff, 0xad, 0x85, 0xa2,
-            0xd4, 0x83,
+            0xec, 0x00, 0x6a, 0x34, 0x19, 0x2a, 0x3f, 0x07, 0x2e, 0x7a, 0x50, 0x23, 0xa7, 0x5d,
+            0xb3, 0xc6, 0x36, 0xf1, 0x8c, 0x48, 0xc4, 0x33, 0x51, 0xa3, 0x31, 0x10, 0xff, 0xad,
+            0x85, 0xa2, 0xd4, 0x83,
         ];
         let trusted_hash = B256::from(trusted_hash_bytes);
 
@@ -155,7 +155,11 @@ mod tests {
         .await
         .unwrap();
 
-        let cycles = session_info.segments.iter().map(|s| {s.cycles as u64}).sum::<u64>();
+        let cycles = session_info
+            .segments
+            .iter()
+            .map(|s| s.cycles as u64)
+            .sum::<u64>();
         println!("Cycles: {}", cycles);
     }
 
@@ -181,7 +185,7 @@ mod tests {
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
 
-
+        panic!();
 
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;
@@ -227,7 +231,7 @@ mod tests {
         let http_url: Url = RPC_URL_OPTIMISM.parse().unwrap();
         let provider = ProviderBuilder::new().on_http(http_url);
         let block_from_provider = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .get_block_by_number(BlockNumberOrTag::Latest, false.into())
             .await
             .unwrap()
             .unwrap()
@@ -247,7 +251,7 @@ mod tests {
         let http_url: Url = RPC_URL_BASE.parse().unwrap();
         let provider = ProviderBuilder::new().on_http(http_url);
         let block_from_provider = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .get_block_by_number(BlockNumberOrTag::Latest, false.into())
             .await
             .unwrap()
             .unwrap()

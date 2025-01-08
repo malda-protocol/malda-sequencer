@@ -109,7 +109,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().on_http(http_url);
         let correct_hash = provider
-            .get_block_by_number(BlockNumberOrTag::Number(block), false)
+            .get_block_by_number(BlockNumberOrTag::Number(block), false.into())
             .await
             .unwrap()
             .unwrap()
@@ -130,7 +130,7 @@ mod tests {
 
         // get hash of previous block here
         let wrong_hash = provider
-            .get_block_by_number(BlockNumberOrTag::Number(block - 1), false)
+            .get_block_by_number(BlockNumberOrTag::Number(block - 1), false.into())
             .await
             .unwrap()
             .unwrap()
@@ -154,7 +154,7 @@ mod tests {
 
         // get hash of previous block here
         let correct_hash = provider
-            .get_block_by_number(BlockNumberOrTag::Number(block), false)
+            .get_block_by_number(BlockNumberOrTag::Number(block), false.into())
             .await
             .unwrap()
             .unwrap()
@@ -178,7 +178,7 @@ mod tests {
 
         // get hash of previous block here
         let correct_hash = provider
-            .get_block_by_number(BlockNumberOrTag::Number(block), false)
+            .get_block_by_number(BlockNumberOrTag::Number(block), false.into())
             .await
             .unwrap()
             .unwrap()
@@ -211,7 +211,7 @@ mod tests {
 
         // get hash of previous block here
         let correct_hash = provider
-            .get_block_by_number(BlockNumberOrTag::Number(block), false)
+            .get_block_by_number(BlockNumberOrTag::Number(block), false.into())
             .await
             .unwrap()
             .unwrap()
