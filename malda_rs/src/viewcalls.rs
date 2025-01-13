@@ -18,7 +18,7 @@ use tokio;
 use url::Url;
 
 use crate::constants::*;
-use methods::{BALANCE_OF_ELF, BALANCE_OF_ID};
+use methods::{BALANCE_OF_ELF, BALANCE_OF_ID, BALANCE_OF_BATCH_ELF};
 
 use std::time::Duration;
 
@@ -197,6 +197,34 @@ pub async fn get_user_balance_exec(
     default_executor().execute(env, BALANCE_OF_ELF)
 }
 
+pub async fn get_user_balance_batch_exec(
+    users: Vec<Address>,
+    assets: Vec<Address>,
+    chain_ids: Vec<u64>,
+) -> Result<SessionInfo, Error> {
+    // Verify input arrays have same length
+    assert_eq!(users.len(), assets.len());
+    assert_eq!(users.len(), chain_ids.len());
+
+    // Pre-allocate vector to store all inputs
+    let mut all_inputs = Vec::new();
+    
+    // Generate input for each set of parameters
+    for i in 0..users.len() {
+        let input = get_user_balance_zkvm_input(users[i], assets[i], chain_ids[i]).await;
+        all_inputs.extend_from_slice(&input);
+    }
+    let users_len = users.len() as u64;
+    // Create environment with combined inputs
+    let env = ExecutorEnv::builder()
+        .write(&users_len)
+        .unwrap()
+        .write_slice(&all_inputs)
+        .build()?;
+
+    default_executor().execute(env, BALANCE_OF_BATCH_ELF)
+}
+
 /// Creates a RISC Zero executor environment for token balance queries.
 ///
 /// This is a wrapper function that creates the executor environment by getting the necessary
@@ -222,7 +250,10 @@ pub async fn get_user_balance_zkvm_env(
 ) -> ExecutorEnv<'static> {
     let input = get_user_balance_zkvm_input(user, asset, chain_id).await;
 
-    ExecutorEnv::builder().write_slice(&input).build().unwrap()
+    ExecutorEnv::builder()
+        .write_slice(&input)
+        .build()
+        .unwrap()
 }
 
 /// Prepares the input data required for token balance verification in RISC Zero.
