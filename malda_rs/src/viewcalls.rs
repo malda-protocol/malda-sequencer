@@ -33,6 +33,8 @@ use boundless_market::{
     storage::StorageProviderConfig,
 };
 use clap::Parser;
+use either::Either;
+use std::time::Instant;
 
 
 /// Timeout for the transaction to be confirmed.
@@ -227,6 +229,43 @@ pub async fn get_user_balance_batch_exec(
 
     default_executor().execute(env, BALANCE_OF_BATCH_ELF)
 }
+
+pub async fn get_user_balance_batch_prove(
+    users: Vec<Vec<Address>>,
+    assets: Vec<Vec<Address>>,
+    chain_ids: Vec<u64>,
+) -> Result<ProveInfo, Error> {
+    // Verify outer arrays have same length
+    assert_eq!(users.len(), assets.len());
+    assert_eq!(users.len(), chain_ids.len());
+
+    // Pre-allocate vector to store all inputs
+    let mut all_inputs = Vec::new();
+    
+    // Generate input for each set of parameters
+    for i in 0..chain_ids.len() {
+        let input = get_user_balance_zkvm_input_batch(users[i].clone(), assets[i].clone(), chain_ids[i]).await;
+        all_inputs.extend_from_slice(&input);
+    }
+
+    // Create environment with:
+    // 1. Number of batches
+    // 2. Size of each batch
+    // 3. Concatenated inputs
+    let env = ExecutorEnv::builder()
+        .write(&(chain_ids.len() as u64))
+        .unwrap()
+        .write_slice(&all_inputs)
+        .build()?;
+
+    let start = Instant::now();
+    let result = default_prover().prove(env, BALANCE_OF_BATCH_ELF);
+    let duration = start.elapsed();
+    println!("Real Bonsaii Time: {:?}", duration);
+    result
+}
+
+
 
 /// Creates a RISC Zero executor environment for token balance queries.
 ///
@@ -540,6 +579,7 @@ pub async fn get_balance_call_input_batch(
 
     // Loop through all users and assets
     for (user, asset) in users.iter().zip(assets.iter()) {
+        println!("asset: {:?}", asset);
         let call = IERC20::balanceOfCall { account: *user };
         let mut contract = Contract::preflight(*asset, &mut env);
         let _returns = contract.call_builder(&call).call().await.unwrap();
