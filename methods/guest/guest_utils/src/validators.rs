@@ -92,6 +92,70 @@ pub fn validate_balance_of_call(
     env::commit_slice(&journal.abi_encode());
 }
 
+pub fn validate_balance_of_call_batch(
+    chain_id: u64,
+    accounts: Vec<Address>,
+    assets: Vec<Address>,
+    env_input: EthEvmInput,
+    sequencer_commitment: Option<SequencerCommitment>,
+    op_env_input: Option<EthEvmInput>,
+    linking_blocks: Vec<RlpHeader<Header>>,
+) {
+    assert_eq!(
+        accounts.len(),
+        assets.len(),
+        "accounts and assets must have the same length"
+    );
+    
+    let env = env_input.into_env();
+
+    // Get balances for paired accounts and assets
+    let mut balances = Vec::new();
+    for (account, asset) in accounts.iter().zip(assets.iter()) {
+        let erc20_contract = Contract::new(*asset, &env);
+        let call = IERC20::balanceOfCall { account: *account };
+        let balance = erc20_contract.call_builder(&call).call()._0;
+        balances.push(balance);
+    }
+
+    let last_block = if linking_blocks.is_empty() {
+        env.header().inner().clone()
+    } else {
+        linking_blocks[linking_blocks.len() - 1].clone()
+    };
+
+    let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
+        validate_linea_env(chain_id, last_block.clone());
+        last_block.hash_slow()
+    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == BASE_SEPOLIA_CHAIN_ID || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID {
+        let last_block_hash = last_block.hash_slow();
+        validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
+        last_block_hash
+    } else if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+        let ethereum_hash = get_ethereum_block_hash_via_opstack(
+            sequencer_commitment.unwrap(),
+            op_env_input.unwrap(),
+        );
+        ethereum_hash
+    } else {
+        panic!("invalid chain id");
+    };
+
+    validate_chain_length(
+        chain_id,
+        env.header().seal(),
+        linking_blocks,
+        validated_block_hash,
+    );
+
+    let journal = Journal {
+        balance: balances[0],
+        account: accounts[0],
+        asset: assets[0],
+    };
+    env::commit_slice(&journal.abi_encode());
+}
+
 /// Validates a Linea block header by verifying the sequencer signature.
 ///
 /// # Arguments

@@ -125,11 +125,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_guest_proves_balance_batch() {
-        let users = vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")];
-        let asset = vec![WETH_LINEA];
-        let chain_id = vec![LINEA_CHAIN_ID];
+        // Single chain test (Linea)
+        let users = vec![vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")]];
+        let assets = vec![vec![WETH_LINEA]];
+        let chain_ids = vec![LINEA_CHAIN_ID];
 
-        let session_info = get_user_balance_batch_exec(users, asset, chain_id)
+        let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -138,26 +139,12 @@ mod tests {
         println!("Linea");
         println!("Cycles: {}", cycles);
 
-
-        let user_base = vec![address!("6446021F4E396dA3df4235C62537431372195D38")];
-        let asset = vec![WETH_BASE];
-        let chain_id = vec![BASE_CHAIN_ID];
-
-        let session_info = get_user_balance_batch_exec(user_base, asset, chain_id)
-            .await
-            .unwrap();
-
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("");
-        println!("Cycles: {}", cycles);
-
-
         // Test with Linea + Optimism
         let users = vec![
-            address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3"),
-            address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8"),
+            vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")],
+            vec![address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8")],
         ];
-        let assets = vec![WETH_LINEA, WETH_OPTIMISM];
+        let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID];
 
         let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
@@ -170,11 +157,11 @@ mod tests {
 
         // Test with Linea + Optimism + Base
         let users = vec![
-            address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3"),
-            address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8"),
-            address!("6446021F4E396dA3df4235C62537431372195D38"),
+            vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")],
+            vec![address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8")],
+            vec![address!("6446021F4E396dA3df4235C62537431372195D38")],
         ];
-        let assets = vec![WETH_LINEA, WETH_OPTIMISM, WETH_BASE];
+        let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM], vec![WETH_BASE]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID];
 
         let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
@@ -187,12 +174,17 @@ mod tests {
 
         // Test with Linea + Optimism + Base + Ethereum
         let users = vec![
-            address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3"),
-            address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8"),
-            address!("6446021F4E396dA3df4235C62537431372195D38"),
-            address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E"),
+            vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")],
+            vec![address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8")],
+            vec![address!("6446021F4E396dA3df4235C62537431372195D38")],
+            vec![address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E")],
         ];
-        let assets = vec![WETH_LINEA, WETH_OPTIMISM, WETH_BASE, WETH_ETHEREUM];
+        let assets = vec![
+            vec![WETH_LINEA],
+            vec![WETH_OPTIMISM],
+            vec![WETH_BASE],
+            vec![WETH_ETHEREUM],
+        ];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID, ETHEREUM_CHAIN_ID];
 
         let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
@@ -200,7 +192,7 @@ mod tests {
             .unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("\nLinea + Optimism + Base + Ethereum");
+        println!("\nLinea + Optimism + Base + Ethereum via OP");
         println!("Cycles: {}", cycles);
 
         panic!();
