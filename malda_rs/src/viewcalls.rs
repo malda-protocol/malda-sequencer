@@ -198,11 +198,11 @@ pub async fn get_user_balance_exec(
 }
 
 pub async fn get_user_balance_batch_exec(
-    users: Vec<Address>,
-    assets: Vec<Address>,
+    users: Vec<Vec<Address>>,
+    assets: Vec<Vec<Address>>,
     chain_ids: Vec<u64>,
 ) -> Result<SessionInfo, Error> {
-    // Verify input arrays have same length
+    // Verify outer arrays have same length
     assert_eq!(users.len(), assets.len());
     assert_eq!(users.len(), chain_ids.len());
 
@@ -210,14 +210,17 @@ pub async fn get_user_balance_batch_exec(
     let mut all_inputs = Vec::new();
     
     // Generate input for each set of parameters
-    for i in 0..users.len() {
-        let input = get_user_balance_zkvm_input(users[i], assets[i], chain_ids[i]).await;
+    for i in 0..chain_ids.len() {
+        let input = get_user_balance_zkvm_input_batch(users[i].clone(), assets[i].clone(), chain_ids[i]).await;
         all_inputs.extend_from_slice(&input);
     }
-    let users_len = users.len() as u64;
-    // Create environment with combined inputs
+
+    // Create environment with:
+    // 1. Number of batches
+    // 2. Size of each batch
+    // 3. Concatenated inputs
     let env = ExecutorEnv::builder()
-        .write(&users_len)
+        .write(&(chain_ids.len() as u64))
         .unwrap()
         .write_slice(&all_inputs)
         .build()?;
@@ -372,6 +375,89 @@ pub async fn get_user_balance_zkvm_input(user: Address, asset: Address, chain_id
     input
 }
 
+
+pub async fn get_user_balance_zkvm_input_batch(users: Vec<Address>, assets: Vec<Address>, chain_id: u64) -> Vec<u8> {
+    let rpc_url = match chain_id {
+        BASE_CHAIN_ID => RPC_URL_BASE,
+        OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
+        LINEA_CHAIN_ID => RPC_URL_LINEA,
+        ETHEREUM_CHAIN_ID => RPC_URL_ETHEREUM,
+        OPTIMISM_SEPOLIA_CHAIN_ID => RPC_URL_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => RPC_URL_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => RPC_URL_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => RPC_URL_ETHEREUM_SEPOLIA,
+        _ => panic!("Invalid chain ID"),
+    };
+
+    let (block, commitment) = if chain_id == OPTIMISM_CHAIN_ID
+        || chain_id == BASE_CHAIN_ID
+        || chain_id == ETHEREUM_CHAIN_ID
+        || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID
+        || chain_id == BASE_SEPOLIA_CHAIN_ID
+        || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID
+    {
+        let (commitment, block) = get_current_sequencer_commitment(chain_id).await;
+        (Some(block), Some(commitment))
+    } else {
+        let block = EthEvmEnv::builder()
+            .rpc(Url::parse(rpc_url).unwrap())
+            .block_number_or_tag(BlockNumberOrTag::Latest)
+            .build()
+            .await
+            .unwrap()
+            .header()
+            .inner()
+            .inner()
+            .number;
+        (Some(block), None)
+    };
+
+    let (l1_block_call_input, ethereum_block) =
+        if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+            let chain_id = if chain_id == ETHEREUM_CHAIN_ID {
+                OPTIMISM_CHAIN_ID
+            } else {
+                OPTIMISM_SEPOLIA_CHAIN_ID
+            };
+            let (l1_block_call_input, ethereum_block) =
+                get_l1block_call_input(BlockNumberOrTag::Number(block.unwrap()), chain_id).await;
+
+            (Some(l1_block_call_input), Some(ethereum_block))
+        } else {
+            (None, None)
+        };
+
+    let block = match chain_id {
+        BASE_CHAIN_ID => block.unwrap(),
+        OPTIMISM_CHAIN_ID => block.unwrap(),
+        LINEA_CHAIN_ID => block.unwrap(),
+        ETHEREUM_CHAIN_ID => ethereum_block.unwrap(),
+        ETHEREUM_SEPOLIA_CHAIN_ID => ethereum_block.unwrap(),
+        BASE_SEPOLIA_CHAIN_ID => block.unwrap(),
+        OPTIMISM_SEPOLIA_CHAIN_ID => block.unwrap(),
+        LINEA_SEPOLIA_CHAIN_ID => block.unwrap(),
+        _ => panic!("Invalid chain ID"),
+    };
+
+    let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
+    let balance_call_input = get_balance_call_input_batch(chain_id, rpc_url, block, users.clone(), assets.clone()).await;
+
+    let input: Vec<u8> = bytemuck::pod_collect_to_vec(
+        &risc0_zkvm::serde::to_vec(&(
+            &balance_call_input,
+            &chain_id,
+            &users,
+            &assets,
+            &commitment,
+            &l1_block_call_input,
+            &linking_blocks,
+        ))
+        .unwrap(),
+    );
+
+    input
+}
+
 /// Constructs an EVM input for a balance query.
 ///
 /// # Arguments
@@ -418,6 +504,46 @@ pub async fn get_balance_call_input(
 
     let mut contract = Contract::preflight(asset, &mut env);
     let _returns = contract.call_builder(&call).call().await.unwrap();
+
+    env.into_input().await.unwrap()
+}
+
+pub async fn get_balance_call_input_batch(
+    chain_id: u64,
+    chain_url: &str,
+    block: u64,
+    users: Vec<Address>,
+    assets: Vec<Address>,
+) -> EvmInput<RlpHeader<Header>> {
+    let reorg_protection_depth = match chain_id {
+        OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+        BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+        LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+        ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
+        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
+        OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+        BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
+        LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+        ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
+        _ => panic!("invalid chain id"),
+    };
+
+    let block_reorg_protected = block - reorg_protection_depth;
+
+    let mut env = EthEvmEnv::builder()
+        .rpc(Url::parse(chain_url).unwrap())
+        .block_number_or_tag(BlockNumberOrTag::Number(block_reorg_protected))
+        .build()
+        .await
+        .unwrap();
+
+    // Loop through all users and assets
+    for (user, asset) in users.iter().zip(assets.iter()) {
+        let call = IERC20::balanceOfCall { account: *user };
+        let mut contract = Contract::preflight(*asset, &mut env);
+        let _returns = contract.call_builder(&call).call().await.unwrap();
+    }
 
     env.into_input().await.unwrap()
 }
