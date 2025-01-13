@@ -39,3 +39,4 @@ bytemuck = { version = "1.16" }
 boundless-market = "0.4"
 dotenvy = "0.15"
 tracing = "0.1"
+either = "1.8.1"

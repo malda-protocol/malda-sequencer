@@ -25,14 +25,71 @@ mod tests {
         providers::{Provider, ProviderBuilder},
         transports::http::reqwest::Url,
     };
-    use alloy_primitives::{address, B256};
+    use alloy_primitives::{address, B256, Address};
     use malda_rs::{
         constants::*,
         viewcalls::{
-            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove, get_user_balance_batch_exec
+            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove, get_user_balance_batch_exec, get_user_balance_batch_prove
         },
         viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
     };
+
+    // Common ERC20 tokens on Optimism
+    const ASSETS_OPTIMISM: [Address; 10] = [
+        address!("4200000000000000000000000000000000000006"), // WETH
+        address!("7F5c764cBc14f9669B88837ca1490cCa17c31607"), // USDC
+        address!("94b008aA00579c1307B0EF2c499aD98a8ce58e58"), // USDT
+        address!("DA10009cBd5D07dd0CeCc66161FC93D7c9000da1"), // DAI
+        address!("4200000000000000000000000000000000000042"), // OP
+        address!("B0B195aEFA3650A6908f15CdaC7D92F8a5791B0B"), // BOB
+        address!("350a791Bfc2C21F9Ed5d10980Dad2e2638ffa7f6"), // LINK
+        address!("8700dAec35aF8Ff88c16BdF0418774CB3D7599B4"), // SNX
+        address!("99C59ACeBFEF3BBFB7129DC90D1a11DB0E91187f"), // rETH
+        address!("1F32b1c2345538c0c6f582fCB022739c4A194Ebb"), // wstETH
+    ];
+
+    // Common ERC20 tokens on Base
+    const ASSETS_BASE: [Address; 10] = [
+        address!("4200000000000000000000000000000000000006"), // WETH
+        address!("833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"), // USDC
+        address!("50c5725949A6F0c72E6C4a641F24049A917DB0Cb"), // DAI
+        address!("A99F6e6785Da0F5d6fB42495Fe424BCE029Eeb3E"), // USDbC
+        address!("d9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA"), // USDBC
+        address!("940181a94A35A4569E4529A3CDfB74e38FD98631"), // USDT
+        address!("3992B27dA26848C2b19CeA6Fd25ad5568B68AB98"), // TBTC
+        address!("ecAc9C5F704e954931349Da37F60E39f515c11c1"), // cbETH
+        address!("b79dd08ea68a908a97220c76d19a6aa9cbde4376"), // UNI
+        address!("d07379a755A8f11B57610154861D694b2A0f615a"), // COMP
+    ];
+
+
+    // Common ERC20 tokens on Linea
+    const ASSETS_LINEA: [Address; 10] = [
+        address!("e5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f"), // WETH
+        address!("176211869cA2b568f2A7D4EE941E073a821EE1ff"), // USDC
+        address!("A219439258ca9da29E9Cc4cE5596924745e12B93"), // USDT
+        address!("43E8809ea748EFf3204ee01F08872F063e44065f"), // DAI
+        address!("7d43AABC515C356145049227CeE54B608342c0ad"), // BUSD
+        address!("B97F21D1f2508fF5c73E7B5AF02847640B1ff75d"), // LINK
+        address!("74A0EEA77e342323aA463098e959612d3Fe6E686"), // BNB
+        address!("3aab2285ddcddad8edf438c1bab47e1a9d05a9b4"), // WBTC
+        address!("0e076aafd86a71dceac65508daf975425c9d0cb6"), // MATIC
+        address!("150b1e51738CdF0cCfe472594C62d7D6074921CA"), // UNI
+    ];
+
+    // Common ERC20 tokens on Ethereum
+    const ASSETS_ETHEREUM: [Address; 10] = [
+        address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), // WETH
+        address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), // USDC
+        address!("dAC17F958D2ee523a2206206994597C13D831ec7"), // USDT
+        address!("6B175474E89094C44Da98b954EedeAC495271d0F"), // DAI
+        address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"), // WBTC
+        address!("514910771AF9Ca656af840dff83E8264EcF986CA"), // LINK
+        address!("7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0"), // MATIC
+        address!("1f9840a85d5aF5bf1D1762F925BDADdC4201F984"), // UNI
+        address!("7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9"), // AAVE
+        address!("ae7ab96520DE3A18E5e111B5EaAb095312D7fE84"), // stETH
+    ];
 
     #[tokio::test]
     async fn test_guest_proves_balance_on_linea() {
@@ -90,41 +147,9 @@ mod tests {
         println!("Cycles: {}", cycles);
     }
 
-    #[tokio::test]
-    async fn test_guest_proves_balance_on_base_batch() {
-        let user_base = vec![address!("6446021F4E396dA3df4235C62537431372195D38")];
-        let asset = vec![WETH_BASE];
-        let chain_id = vec![BASE_CHAIN_ID];
-
-        let session_info = get_user_balance_batch_exec(user_base, asset, chain_id)
-            .await
-            .unwrap();
-
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("only Base");
-        println!("Cycles: {}", cycles);
-
-
-        let user_base = vec![address!("6446021F4E396dA3df4235C62537431372195D38")];
-        let asset = vec![WETH_BASE];
-        let chain_id = vec![BASE_CHAIN_ID];
-
-        let session_info = get_user_balance_batch_exec(user_base, asset, chain_id)
-            .await
-            .unwrap();
-
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("");
-        println!("Cycles: {}", cycles);
-
-
-
-
-        panic!();
-    }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_batch() {
+    async fn test_guest_proves_balance_ba1tch() {
         // Single chain test (Linea)
         let users = vec![vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")]];
         let assets = vec![vec![WETH_LINEA]];
@@ -196,6 +221,77 @@ mod tests {
         println!("Cycles: {}", cycles);
 
         panic!();
+    }
+
+    #[tokio::test]
+    async fn test_guest_proves_balance_batch_stats() {
+        use rand::Rng;
+        use std::time::Instant;
+
+        let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID, ETHEREUM_CHAIN_ID];
+        let mut rng = rand::thread_rng();
+
+        // Print header
+        println!("chain_id,num_users,num_unique_assets,cycles,time_ms");
+
+        // Generate all test data first
+        let test_cases = (0..5).map(|_| {
+            let sizes: Vec<usize> = (0..4).map(|_| rng.gen_range(1..=10)).collect();
+            
+            let mut users = Vec::new();
+            let mut assets = Vec::new();
+
+            for (idx, &chain_id) in chain_ids.iter().enumerate() {
+                let size = sizes[idx];
+                
+                let available_assets = match chain_id {
+                    LINEA_CHAIN_ID => &ASSETS_LINEA,
+                    OPTIMISM_CHAIN_ID => &ASSETS_OPTIMISM,
+                    BASE_CHAIN_ID => &ASSETS_BASE,
+                    ETHEREUM_CHAIN_ID => &ASSETS_ETHEREUM,
+                    _ => panic!("Unknown chain ID"),
+                };
+
+                let chain_users: Vec<Address> = (0..size)
+                    .map(|_| {
+                        let random_bytes: [u8; 20] = rng.gen();
+                        Address::from(random_bytes)
+                    })
+                    .collect();
+
+                let chain_assets: Vec<Address> = (0..size)
+                    .map(|_| available_assets[rng.gen_range(0..available_assets.len())])
+                    .collect();
+
+                users.push(chain_users);
+                assets.push(chain_assets);
+            }
+            (users, assets)
+        }).collect::<Vec<_>>();
+
+        // Run tests sequentially
+        for (users, assets) in test_cases {
+            let start_time = Instant::now();
+            let session_info = get_user_balance_batch_prove(users.clone(), assets.clone(), chain_ids.clone())
+                .await
+                .unwrap();
+            let duration = start_time.elapsed();
+
+            // Print results for each chain
+            for (idx, &chain_id) in chain_ids.iter().enumerate() {
+                let num_users = users[idx].len();
+                let num_unique_assets = assets[idx].iter().collect::<std::collections::HashSet<_>>().len();
+                
+                println!(
+                    "{},{},{},{},{}",
+                    chain_id,
+                    num_users,
+                    num_unique_assets,
+                    0,
+                    duration.as_millis()
+                );
+            }
+        }
     }
 
     #[tokio::test]
