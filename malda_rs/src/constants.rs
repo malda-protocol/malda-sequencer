@@ -48,8 +48,8 @@ pub const SEQUENCER_REQUEST_OPTIMISM: &str = "https://optimism.operationsolarsto
 pub const SEQUENCER_REQUEST_BASE: &str = "https://base.operationsolarstorm.org/latest";
 
 /// have to run helios p2p server to get these
-pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str = "http://127.0.0.1:3000/latest";
-pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str = "http://127.0.0.1:3000/latest";
+pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str = "http://127.0.0.1:9547/gossip_getSequencerCommitment";
+pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str = "http://127.0.0.1:9545/gossip_getSequencerCommitment";
 
 /// Wrapped Ether (WETH) contract addresses for each supported network
 pub const WETH_ETHEREUM: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");

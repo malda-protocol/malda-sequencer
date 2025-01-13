@@ -24,5 +24,6 @@ boundless-market = "0.4"
 alloy = "0.6.4"
 dotenvy = "0.15"
 tracing = "0.1"
+rand = "0.8"
 malda_rs = { path = "../malda_rs" }
 

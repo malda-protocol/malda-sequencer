@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
+use std::{time::Duration, sync::Arc};
+use tokio::time::Instant;
+use rand::{thread_rng, Rng};
+use tracing::{info, error};
 
 use alloy::{
     primitives::{address, utils::parse_ether, Address},
@@ -37,11 +40,43 @@ use malda_rs::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
     let asset = WETH_LINEA;
     let chain_id = LINEA_CHAIN_ID;
 
-    let (journal, seal) = get_user_balance_prove_boundless(user_linea, asset, chain_id).await?;
+    let mut handles = vec![];
+
+    for i in 0..20 {
+        let random_bytes: [u8; 20] = thread_rng().gen();
+        let random_address = Address::from(random_bytes);
+        let request_id = i;
+        let addr = random_address;
+
+        let handle = tokio::spawn(async move {
+            let start_time = Instant::now();
+            println!("Request #{} started for address: {:?}", request_id, addr);
+
+            match get_user_balance_prove_boundless(addr, asset, chain_id).await {
+                Ok(_) => {
+                    let duration = start_time.elapsed();
+                    println!("Request #{} completed successfully after {:?} for address: {:?}", 
+                        request_id, duration, addr);
+                },
+                Err(e) => {
+                    eprintln!("Request #{} failed after {:?} for address {:?}: {:?}", 
+                        request_id, start_time.elapsed(), addr, e);
+                }
+            }
+        });
+
+        handles.push(handle);
+        tokio::time::sleep(Duration::from_millis(700)).await;
+    }
+
+    for handle in handles {
+        if let Err(e) = handle.await {
+            eprintln!("Task join error: {:?}", e);
+        }
+    }
 
     Ok(())
 }
