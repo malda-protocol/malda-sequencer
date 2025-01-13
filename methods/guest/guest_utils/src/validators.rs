@@ -63,11 +63,11 @@ pub fn validate_balance_of_call(
     let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
         validate_linea_env(chain_id, last_block.clone());
         last_block.hash_slow()
-    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
+    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == BASE_SEPOLIA_CHAIN_ID || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID {
         let last_block_hash = last_block.hash_slow();
         validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
         last_block_hash
-    } else if chain_id == ETHEREUM_CHAIN_ID {
+    } else if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
         let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
             op_env_input.unwrap(),

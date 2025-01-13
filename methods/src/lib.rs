@@ -102,6 +102,21 @@ mod tests {
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
+        
+    }
+
+    #[tokio::test]
+    async fn test_sepolia_guest_proves_balance_on_base() {
+        let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
+        let asset = WETH_BASE_SEPOLIA;
+        let chain_id = BASE_SEPOLIA_CHAIN_ID;
+
+        let session_info = get_user_balance_exec(user_base, asset, chain_id)
+            .await
+            .unwrap();
+
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]

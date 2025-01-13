@@ -36,9 +36,9 @@ pub const LINEA_SEQUENCER: Address = address!("8f81e2e3f8b46467523463835f965ffe4
 
 /// The address of the Optimism sequencer contract on the sepolia network.
 pub const OPTIMISM_SEPOLIA_SEQUENCER: Address =
-    address!("AAAA45d9549EDA09E70937013520214382Ffc4A2");
+    address!("57CACBB0d30b01eb2462e5dC940c161aff3230D3");
 /// The address of the Base sequencer contract on the sepolia network.
-pub const BASE_SEPOLIA_SEQUENCER: Address = address!("Af6E19BE0F9cE7f8afd49a1824851023A8249e8a");
+pub const BASE_SEPOLIA_SEQUENCER: Address = address!("b830b99c95Ea32300039624Cb567d324D4b1D83C");
 /// The address of the Linea sequencer contract on the sepolia network.
 pub const LINEA_SEPOLIA_SEQUENCER: Address = address!("a27342f1b74c0cfb2cda74bac1628d0c1a9752f2");
 
