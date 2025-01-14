@@ -45,6 +45,33 @@ sol! {
         /// The asset's contract address
         address asset;
     }
+
+    /// @title Multicall3 interface for batch calling contracts
+    /// @dev Allows batching multiple calls in a single transaction
+    struct Call3 {
+        /// @dev Target contract to call
+        address target;
+        /// @dev If true, allows the call to fail without reverting the entire transaction
+        bool allowFailure;
+        /// @dev Calldata to execute on the target contract
+        bytes callData;
+    }
+
+    /// @dev Result of an individual call within the batch
+    struct CallResult {
+        /// @dev Indicates if the call was successful
+        bool success;
+        /// @dev Contains the return data (if successful) or revert data (if failed)
+        bytes returnData;
+    }
+
+    /// @title Interface for batched contract calls
+    interface IMulticall3 {
+        /// @notice Executes a batch of function calls on various contracts
+        /// @param calls Array of Call3 structs containing call parameters
+        /// @return results Array of CallResult structs containing call results
+        function aggregate3(Call3[] calldata calls) external payable returns (CallResult[] memory results);
+    }
 }
 
 /// Represents a commitment made by a sequencer, containing signed payload data.

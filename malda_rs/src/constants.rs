@@ -18,38 +18,40 @@ pub use constants::*;
 
 /// RPC endpoint URLs for supported networks
 pub const RPC_URL_LINEA: &str =
-    "https://linea-mainnet.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e";
+    "https://linea-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_SCROLL: &str =
-    "https://scroll-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://scroll-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ETHEREUM: &str =
-    "https://eth-mainnet.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
+    "https://eth-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_BASE: &str =
-    "https://base-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://base-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_OPTIMISM: &str =
-    "https://opt-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://opt-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ARBITRUM: &str =
-    "https://arb-mainnet.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://arb-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
 pub const RPC_URL_LINEA_SEPOLIA: &str =
-    "https://linea-sepolia.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e";
+    "https://linea-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_SCROLL_SEPOLIA: &str =
-    "https://scroll-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://scroll-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ETHEREUM_SEPOLIA: &str =
-    "https://eth-sepolia.g.alchemy.com/v2/scFv-881VOeTp7qHT88HEZ_EmsJqrGQ0";
+    "https://eth-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_BASE_SEPOLIA: &str =
-    "https://base-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://base-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_OPTIMISM_SEPOLIA: &str =
-    "https://opt-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://opt-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ARBITRUM_SEPOLIA: &str =
-    "https://arb-sepolia.g.alchemy.com/v2/vmrjfc4W2PsqVyDmvEHsZeNAQpRI5icv";
+    "https://arb-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
 /// Sequencer request URLs for Layer 2 networks
 pub const SEQUENCER_REQUEST_OPTIMISM: &str = "https://optimism.operationsolarstorm.org/latest";
 pub const SEQUENCER_REQUEST_BASE: &str = "https://base.operationsolarstorm.org/latest";
 
 /// have to run helios p2p server to get these
-pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str = "http://127.0.0.1:9547/gossip_getSequencerCommitment";
-pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str = "http://127.0.0.1:9545/gossip_getSequencerCommitment";
+pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str =
+    "http://127.0.0.1:9547/gossip_getSequencerCommitment";
+pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str =
+    "http://127.0.0.1:9545/gossip_getSequencerCommitment";
 
 /// Wrapped Ether (WETH) contract addresses for each supported network
 pub const WETH_ETHEREUM: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");

@@ -13,12 +13,15 @@ use alloy_consensus::Header;
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
-use risc0_zkvm::{default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, sha::Digestible};
+use risc0_zkvm::{
+    default_executor, default_prover, sha::Digestible, ExecutorEnv, ProveInfo, SessionInfo,
+};
 use tokio;
 use url::Url;
 
 use crate::constants::*;
-use methods::{BALANCE_OF_ELF, BALANCE_OF_ID, BALANCE_OF_BATCH_ELF};
+use crate::types::{Call3, CallResult, IMulticall3};
+use methods::{BALANCE_OF_BATCH_ELF, BALANCE_OF_ELF, BALANCE_OF_ID};
 
 use std::time::Duration;
 
@@ -35,7 +38,7 @@ use boundless_market::{
 use clap::Parser;
 use either::Either;
 use std::time::Instant;
-
+use futures::future::join_all;
 
 /// Timeout for the transaction to be confirmed.
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
@@ -122,7 +125,9 @@ pub async fn get_user_balance_prove_boundless(
         .with_rpc_url(args.rpc_url)
         .with_boundless_market_address(args.boundless_market_address)
         .with_set_verifier_address(args.set_verifier_address)
-        .with_order_stream_url(Some(Url::parse("https://order-stream.beboundless.xyz").unwrap()))
+        .with_order_stream_url(Some(
+            Url::parse("https://order-stream.beboundless.xyz").unwrap(),
+        ))
         .with_storage_provider_config(args.storage_config)
         .with_private_key(args.wallet_private_key)
         .build()
@@ -210,41 +215,12 @@ pub async fn get_user_balance_batch_exec(
 
     // Pre-allocate vector to store all inputs
     let mut all_inputs = Vec::new();
-    
+
     // Generate input for each set of parameters
     for i in 0..chain_ids.len() {
-        let input = get_user_balance_zkvm_input_batch(users[i].clone(), assets[i].clone(), chain_ids[i]).await;
-        all_inputs.extend_from_slice(&input);
-    }
-
-    // Create environment with:
-    // 1. Number of batches
-    // 2. Size of each batch
-    // 3. Concatenated inputs
-    let env = ExecutorEnv::builder()
-        .write(&(chain_ids.len() as u64))
-        .unwrap()
-        .write_slice(&all_inputs)
-        .build()?;
-
-    default_executor().execute(env, BALANCE_OF_BATCH_ELF)
-}
-
-pub async fn get_user_balance_batch_prove(
-    users: Vec<Vec<Address>>,
-    assets: Vec<Vec<Address>>,
-    chain_ids: Vec<u64>,
-) -> Result<ProveInfo, Error> {
-    // Verify outer arrays have same length
-    assert_eq!(users.len(), assets.len());
-    assert_eq!(users.len(), chain_ids.len());
-
-    // Pre-allocate vector to store all inputs
-    let mut all_inputs = Vec::new();
-    
-    // Generate input for each set of parameters
-    for i in 0..chain_ids.len() {
-        let input = get_user_balance_zkvm_input_batch(users[i].clone(), assets[i].clone(), chain_ids[i]).await;
+        let input =
+            get_user_balance_zkvm_input_batch(users[i].clone(), assets[i].clone(), chain_ids[i])
+                .await;
         all_inputs.extend_from_slice(&input);
     }
 
@@ -259,13 +235,63 @@ pub async fn get_user_balance_batch_prove(
         .build()?;
 
     let start = Instant::now();
-    let result = default_prover().prove(env, BALANCE_OF_BATCH_ELF);
+    let result = default_executor().execute(env, BALANCE_OF_BATCH_ELF);
     let duration = start.elapsed();
-    println!("Real Bonsaii Time: {:?}", duration);
+    println!("Real Execution Time: {:?}", duration);
+
     result
 }
 
+pub async fn get_user_balance_batch_prove(
+    users: Vec<Vec<Address>>,
+    assets: Vec<Vec<Address>>,
+    chain_ids: Vec<u64>,
+) -> Result<ProveInfo, Error> {
+    // Move all the work including env creation into the blocking task
+    let prove_info = tokio::task::spawn_blocking(move || {
+        // Create a new runtime for async operations within the blocking task
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
+        // Execute all async operations in the new runtime
+        let env = rt.block_on(async {
+            // Verify outer arrays have same length
+            assert_eq!(users.len(), assets.len());
+            assert_eq!(users.len(), chain_ids.len());
+
+            // Create futures for parallel execution
+            let futures: Vec<_> = (0..chain_ids.len())
+                .map(|i| get_user_balance_zkvm_input_batch(
+                    users[i].clone(),
+                    assets[i].clone(),
+                    chain_ids[i],
+                ))
+                .collect();
+
+            // Execute all futures in parallel
+            let results = join_all(futures).await;
+            
+            // Combine all results into a single vector
+            let all_inputs = results.into_iter().flat_map(|input| input).collect::<Vec<_>>();
+
+            // Create environment with inputs
+            ExecutorEnv::builder()
+                .write(&(chain_ids.len() as u64))
+                .unwrap()
+                .write_slice(&all_inputs)
+                .build()
+                .unwrap()
+        });
+        panic!("test");
+        let start = Instant::now();
+        let result = default_prover().prove(env, BALANCE_OF_BATCH_ELF);
+        let duration = start.elapsed();
+        println!("Real Bonsai Time: {:?}", duration);
+        result
+    })
+    .await?;
+
+    prove_info
+}
 
 /// Creates a RISC Zero executor environment for token balance queries.
 ///
@@ -292,10 +318,7 @@ pub async fn get_user_balance_zkvm_env(
 ) -> ExecutorEnv<'static> {
     let input = get_user_balance_zkvm_input(user, asset, chain_id).await;
 
-    ExecutorEnv::builder()
-        .write_slice(&input)
-        .build()
-        .unwrap()
+    ExecutorEnv::builder().write_slice(&input).build().unwrap()
 }
 
 /// Prepares the input data required for token balance verification in RISC Zero.
@@ -414,8 +437,11 @@ pub async fn get_user_balance_zkvm_input(user: Address, asset: Address, chain_id
     input
 }
 
-
-pub async fn get_user_balance_zkvm_input_batch(users: Vec<Address>, assets: Vec<Address>, chain_id: u64) -> Vec<u8> {
+pub async fn get_user_balance_zkvm_input_batch(
+    users: Vec<Address>,
+    assets: Vec<Address>,
+    chain_id: u64,
+) -> Vec<u8> {
     let rpc_url = match chain_id {
         BASE_CHAIN_ID => RPC_URL_BASE,
         OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
@@ -479,7 +505,8 @@ pub async fn get_user_balance_zkvm_input_batch(users: Vec<Address>, assets: Vec<
     };
 
     let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
-    let balance_call_input = get_balance_call_input_batch(chain_id, rpc_url, block, users.clone(), assets.clone()).await;
+    let balance_call_input =
+        get_balance_call_input_batch(chain_id, rpc_url, block, users.clone(), assets.clone()).await;
 
     let input: Vec<u8> = bytemuck::pod_collect_to_vec(
         &risc0_zkvm::serde::to_vec(&(
@@ -577,15 +604,39 @@ pub async fn get_balance_call_input_batch(
         .await
         .unwrap();
 
-    // Loop through all users and assets
+    // Create array of Call3 structs for each balance check
+    let start_time = Instant::now();
+    let mut calls = Vec::with_capacity(users.len());
+
     for (user, asset) in users.iter().zip(assets.iter()) {
-        println!("asset: {:?}", asset);
-        let call = IERC20::balanceOfCall { account: *user };
-        let mut contract = Contract::preflight(*asset, &mut env);
-        let _returns = contract.call_builder(&call).call().await.unwrap();
+        // Create function selector for balanceOf(address)
+        let selector = [0x70, 0xa0, 0x82, 0x31]; // keccak256("balanceOf(address)")[:4]
+        let user_bytes: [u8; 32] = user.into_word().into();
+
+        // Create calldata by concatenating selector and encoded address
+        let mut call_data = Vec::with_capacity(36); // 4 bytes selector + 32 bytes address
+        call_data.extend_from_slice(&selector);
+        call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
+        call_data.extend_from_slice(&user_bytes);
+
+        calls.push(Call3 {
+            target: *asset,
+            allowFailure: false,
+            callData: call_data.into(),
+        });
     }
 
-    env.into_input().await.unwrap()
+    // Make single multicall
+    let multicall = IMulticall3::aggregate3Call { calls };
+
+    let mut contract = Contract::preflight(MULTICALL, &mut env);
+    let _returns = contract.call_builder(&multicall).call().await.unwrap();
+
+    let x = env.into_input().await.unwrap();
+    let end_time = Instant::now();
+    println!("chain_url: {}", chain_url);
+    println!("time to init multicall: {:?}", end_time.duration_since(start_time));
+    x
 }
 
 /// Fetches the current sequencer commitment for L2 chains.

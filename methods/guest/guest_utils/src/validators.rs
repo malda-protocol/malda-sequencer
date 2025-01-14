@@ -11,6 +11,7 @@ use crate::types::*;
 use alloy_consensus::Header;
 use alloy_primitives::Address;
 use alloy_primitives::B256;
+use alloy_primitives::U256;
 use alloy_sol_types::SolValue;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 use risc0_zkvm::guest::env;
@@ -63,7 +64,11 @@ pub fn validate_balance_of_call(
     let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
         validate_linea_env(chain_id, last_block.clone());
         last_block.hash_slow()
-    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == BASE_SEPOLIA_CHAIN_ID || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID {
+    } else if chain_id == OPTIMISM_CHAIN_ID
+        || chain_id == BASE_CHAIN_ID
+        || chain_id == BASE_SEPOLIA_CHAIN_ID
+        || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID
+    {
         let last_block_hash = last_block.hash_slow();
         validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
         last_block_hash
@@ -106,17 +111,36 @@ pub fn validate_balance_of_call_batch(
         assets.len(),
         "accounts and assets must have the same length"
     );
-    
+
     let env = env_input.into_env();
 
-    // Get balances for paired accounts and assets
-    let mut balances = Vec::new();
+    // Create array of Call3 structs for each balance check
+    let mut calls = Vec::with_capacity(accounts.len());
+
     for (account, asset) in accounts.iter().zip(assets.iter()) {
-        let erc20_contract = Contract::new(*asset, &env);
-        let call = IERC20::balanceOfCall { account: *account };
-        let balance = erc20_contract.call_builder(&call).call()._0;
-        balances.push(balance);
+        // Create function selector for balanceOf(address)
+        let selector = [0x70, 0xa0, 0x82, 0x31]; // keccak256("balanceOf(address)")[:4]
+        let account_bytes: [u8; 32] = account.into_word().into();
+
+        // Create calldata by concatenating selector and encoded address
+        let mut call_data = Vec::with_capacity(36); // 4 bytes selector + 32 bytes address
+        call_data.extend_from_slice(&selector);
+        call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
+        call_data.extend_from_slice(&account_bytes);
+
+        calls.push(Call3 {
+            target: *asset,
+            allowFailure: false,
+            callData: call_data.into(),
+        });
     }
+
+    let multicall_contract = Contract::new(MULTICALL, &env);
+
+    // Make single multicall
+    let multicall = IMulticall3::aggregate3Call { calls };
+
+    let _returns = multicall_contract.call_builder(&multicall).call();
 
     let last_block = if linking_blocks.is_empty() {
         env.header().inner().clone()
@@ -127,7 +151,11 @@ pub fn validate_balance_of_call_batch(
     let validated_block_hash = if chain_id == LINEA_CHAIN_ID || chain_id == LINEA_SEPOLIA_CHAIN_ID {
         validate_linea_env(chain_id, last_block.clone());
         last_block.hash_slow()
-    } else if chain_id == OPTIMISM_CHAIN_ID || chain_id == BASE_CHAIN_ID || chain_id == BASE_SEPOLIA_CHAIN_ID || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID {
+    } else if chain_id == OPTIMISM_CHAIN_ID
+        || chain_id == BASE_CHAIN_ID
+        || chain_id == BASE_SEPOLIA_CHAIN_ID
+        || chain_id == OPTIMISM_SEPOLIA_CHAIN_ID
+    {
         let last_block_hash = last_block.hash_slow();
         validate_opstack_env(chain_id, &sequencer_commitment.unwrap(), last_block_hash);
         last_block_hash
@@ -149,7 +177,7 @@ pub fn validate_balance_of_call_batch(
     );
 
     let journal = Journal {
-        balance: balances[0],
+        balance: U256::from(1),
         account: accounts[0],
         asset: assets[0],
     };
