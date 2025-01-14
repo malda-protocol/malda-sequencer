@@ -5,6 +5,8 @@
 
 use alloy_primitives::{address, Address, U256};
 
+pub const MULTICALL: Address = address!("cA11bde05977b3631167028862bE2a173976CA11");
+
 /// Chain ID for the Ethereum Mainnet network.
 pub const ETHEREUM_CHAIN_ID: u64 = 1;
 /// Chain ID for the Optimism network.

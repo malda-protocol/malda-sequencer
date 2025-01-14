@@ -25,14 +25,16 @@ mod tests {
         providers::{Provider, ProviderBuilder},
         transports::http::reqwest::Url,
     };
-    use alloy_primitives::{address, B256, Address};
+    use alloy_primitives::{address, Address, B256};
     use malda_rs::{
         constants::*,
         viewcalls::{
-            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove, get_user_balance_batch_exec, get_user_balance_batch_prove
+            get_current_sequencer_commitment, get_user_balance_batch_exec,
+            get_user_balance_batch_prove, get_user_balance_exec, get_user_balance_prove,
         },
         viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
     };
+    use std::io::Write;
 
     // Common ERC20 tokens on Optimism
     const ASSETS_OPTIMISM: [Address; 10] = [
@@ -61,7 +63,6 @@ mod tests {
         address!("b79dd08ea68a908a97220c76d19a6aa9cbde4376"), // UNI
         address!("d07379a755A8f11B57610154861D694b2A0f615a"), // COMP
     ];
-
 
     // Common ERC20 tokens on Linea
     const ASSETS_LINEA: [Address; 10] = [
@@ -147,7 +148,6 @@ mod tests {
         println!("Cycles: {}", cycles);
     }
 
-
     #[tokio::test]
     async fn test_guest_proves_balance_ba1tch() {
         // Single chain test (Linea)
@@ -210,7 +210,12 @@ mod tests {
             vec![WETH_BASE],
             vec![WETH_ETHEREUM],
         ];
-        let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID, ETHEREUM_CHAIN_ID];
+        let chain_ids = vec![
+            LINEA_CHAIN_ID,
+            OPTIMISM_CHAIN_ID,
+            BASE_CHAIN_ID,
+            ETHEREUM_CHAIN_ID,
+        ];
 
         let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
             .await
@@ -228,29 +233,31 @@ mod tests {
         use rand::Rng;
         use std::time::Instant;
 
-        let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID, ETHEREUM_CHAIN_ID];
-        let mut rng = rand::thread_rng();
+        let chain_ids = vec![
+            LINEA_CHAIN_ID,
+            OPTIMISM_CHAIN_ID,
+            BASE_CHAIN_ID,
+            ETHEREUM_CHAIN_ID,
+        ];
 
-        // Print header
-        println!("chain_id,num_users,num_unique_assets,cycles,time_ms");
+        let available_assets = [
+            &ASSETS_LINEA,
+            &ASSETS_OPTIMISM,
+            &ASSETS_BASE,
+            &ASSETS_ETHEREUM,
+        ];
 
-        // Generate all test data first
-        let test_cases = (0..5).map(|_| {
-            let sizes: Vec<usize> = (0..4).map(|_| rng.gen_range(1..=10)).collect();
+        // Run the test 5 times
+        for iteration in 0..1 {
+            println!("\nIteration {}", iteration + 1);
             
             let mut users = Vec::new();
             let mut assets = Vec::new();
 
-            for (idx, &chain_id) in chain_ids.iter().enumerate() {
-                let size = sizes[idx];
-                
-                let available_assets = match chain_id {
-                    LINEA_CHAIN_ID => &ASSETS_LINEA,
-                    OPTIMISM_CHAIN_ID => &ASSETS_OPTIMISM,
-                    BASE_CHAIN_ID => &ASSETS_BASE,
-                    ETHEREUM_CHAIN_ID => &ASSETS_ETHEREUM,
-                    _ => panic!("Unknown chain ID"),
-                };
+            // Generate random data
+            let mut rng = rand::thread_rng();
+            for (idx, _chain_id) in chain_ids.iter().enumerate() {
+                let size = 20;
 
                 let chain_users: Vec<Address> = (0..size)
                     .map(|_| {
@@ -260,38 +267,67 @@ mod tests {
                     .collect();
 
                 let chain_assets: Vec<Address> = (0..size)
-                    .map(|_| available_assets[rng.gen_range(0..available_assets.len())])
+                    .map(|_| available_assets[idx][rng.gen_range(0..available_assets[idx].len())])
                     .collect();
 
                 users.push(chain_users);
                 assets.push(chain_assets);
             }
-            (users, assets)
-        }).collect::<Vec<_>>();
 
-        // Run tests sequentially
-        for (users, assets) in test_cases {
             let start_time = Instant::now();
-            let session_info = get_user_balance_batch_prove(users.clone(), assets.clone(), chain_ids.clone())
+            let prove_info = get_user_balance_batch_prove(users.clone(), assets.clone(), chain_ids.clone())
                 .await
                 .unwrap();
             let duration = start_time.elapsed();
 
-            // Print results for each chain
+            // Create log entry
+            let mut log_entry = String::new();
+
+            // Add metrics for each chain
             for (idx, &chain_id) in chain_ids.iter().enumerate() {
+                let chain_name = match chain_id {
+                    LINEA_CHAIN_ID => "linea",
+                    OPTIMISM_CHAIN_ID => "optimism",
+                    BASE_CHAIN_ID => "base",
+                    ETHEREUM_CHAIN_ID => "ethereum",
+                    _ => "unknown",
+                };
+
                 let num_users = users[idx].len();
-                let num_unique_assets = assets[idx].iter().collect::<std::collections::HashSet<_>>().len();
-                
-                println!(
-                    "{},{},{},{},{}",
-                    chain_id,
-                    num_users,
-                    num_unique_assets,
-                    0,
-                    duration.as_millis()
-                );
+                let num_unique_assets = assets[idx]
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
+
+                log_entry.push_str(&format!("users_{} {} assets_{} {} ", 
+                    chain_name, num_users,
+                    chain_name, num_unique_assets));
             }
+
+            // Add total metrics
+            let total_users: usize = users.iter().map(|u| u.len()).sum();
+            let total_assets: usize = assets.iter()
+                .flat_map(|a| a.iter())
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+
+            log_entry.push_str(&format!("total_users {} total_assets {} mcycles {} duration_s {:.2}\n",
+                total_users,
+                total_assets,
+                prove_info.stats.total_cycles / 1_000_000,
+                duration.as_secs_f64()));
+
+            // Append to file (using append instead of write)
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("batch_logs.txt")
+                .unwrap()
+                .write_all(log_entry.as_bytes())
+                .unwrap();
         }
+
+        panic!();
     }
 
     #[tokio::test]
