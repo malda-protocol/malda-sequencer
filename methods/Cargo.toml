@@ -13,9 +13,11 @@ risc0-build-ethereum = { workspace = true }
 risc0-zkp = { workspace = true }
 
 [dev-dependencies]
-alloy = "0.4.2"
+alloy = "0.6.4"
 alloy-primitives = { workspace = true }
-risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.1.4" }
+risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.2.0" }
 malda_rs = { path = "../malda_rs" }
 tokio = { version = "1.35", features = ["full", "test-util"] }
+rand = "0.8"
+
 

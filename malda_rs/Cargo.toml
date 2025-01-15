@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-alloy = "0.4.2"
+alloy = "0.6.4"
 alloy-primitives = { workspace = true }
 alloy-sol-types = { workspace = true }
 anyhow = { workspace = true }
@@ -18,7 +18,7 @@ risc0-steel = { workspace = true, features = ["host"] }
 risc0-zkvm = { version = "1.2", features = ["client", "unstable"] }
 tracing-subscriber = { workspace = true }
 url = { version = "2.5" }
-alloy-consensus = "0.4.2"
+alloy-consensus = "0.6.4"
 reqwest = { version = "0.12.4", features = ["json"] }
 serde = { version = "1.0.143", features = ["derive"] }
 k256 = "0.13.4"
@@ -34,3 +34,5 @@ alloy-primitives-old = { package = "alloy-primitives", version = "=0.7.7" }
 consensus-core = { git = "https://github.com/a16z/helios" , tag = "0.6.0" }
 consensus = { git = "https://github.com/a16z/helios" , tag = "0.6.0" }
 tree_hash = "0.7.0"
+bytemuck = { version = "1.16" }
+futures = "0.3"
