@@ -18,8 +18,6 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 #[cfg(test)]
 mod tests {
 
-    use core::;
-
     use alloy::{
         eips::BlockNumberOrTag,
         providers::{Provider, ProviderBuilder},
@@ -232,7 +230,6 @@ mod tests {
         println!("\nLinea + Optimism + Base + Ethereum via OP");
         println!("Cycles: {}", cycles);
 
-        !();
     }
 
     #[tokio::test]
@@ -340,7 +337,6 @@ mod tests {
                 .unwrap();
         }
 
-        !();
     }
 
     #[tokio::test]
@@ -489,7 +485,6 @@ mod tests {
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
 
-        !();
     }
 
     #[tokio::test]
