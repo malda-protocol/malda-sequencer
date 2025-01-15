@@ -5,7 +5,7 @@
 //! the secp256k1 elliptic curve.
 
 use crate::constants::SECP256K1N_HALF;
-use alloy_primitives::{keccak256, Address, Bytes, Signature, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, PrimitiveSignature as Signature, B256, U256};
 use k256::ecdsa::{Error, RecoveryId, VerifyingKey};
 
 /// Creates a signature message hash following Ethereum's signing scheme.
@@ -63,7 +63,7 @@ pub fn recover_signer(signature: Signature, sighash: B256) -> Option<Address> {
 
     sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
     sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
-    sig[64] = signature.v().y_parity_byte();
+    sig[64] = signature.v() as u8;
 
     // NOTE: we are removing error from underlying crypto library as it will restrain primitive
     // errors and we care only if recovery is passing or not.
@@ -94,7 +94,8 @@ fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, E
         signature = sig_normalized;
         recid ^= 1;
     }
-    let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
+    let recid = RecoveryId::from_byte(recid)
+        .expect("recovery ID should be valid as it's derived from the last byte of signature");
 
     // recover key
     let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &signature, recid)?;
@@ -143,16 +144,28 @@ fn public_key_to_address(public: VerifyingKey) -> Address {
 /// This function will panic if the input byte slice is not exactly 65 bytes long or if the `r` or `s` components
 /// cannot be parsed into `U256` values.
 pub fn signature_from_bytes(signature: &Bytes) -> Signature {
-    let r_array: [u8; 32] = signature.slice(0..32).to_vec().try_into().unwrap();
+    let r_array: [u8; 32] = signature
+        .slice(0..32)
+        .to_vec()
+        .try_into()
+        .expect("Failed to convert first 32 bytes into r component array");
     let r = U256::from_be_bytes(r_array);
 
-    let s_array: [u8; 32] = signature.slice(32..64).to_vec().try_into().unwrap();
+    let s_array: [u8; 32] = signature
+        .slice(32..64)
+        .to_vec()
+        .try_into()
+        .expect("Failed to convert second 32 bytes into s component array");
     let s = U256::from_be_bytes(s_array);
 
-    let v_array: [u8; 1] = signature.slice(64..65).to_vec().try_into().unwrap();
+    let v_array: [u8; 1] = signature
+        .slice(64..65)
+        .to_vec()
+        .try_into()
+        .expect("Failed to convert last byte into v component array");
     let v = v_array[0] == 1;
 
-    Signature::from_rs_and_parity(r, s, v).unwrap()
+    Signature::new(U256::from(r), U256::from(s), v)
 }
 
 #[cfg(test)]
@@ -185,18 +198,20 @@ mod tests {
         // Test with a known public key and its corresponding address
         let signing_key = SigningKey::from_slice(
             &hex::decode("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-                .unwrap(),
+                .expect("Failed to decode test private key hex string"),
         )
-        .unwrap();
+        .expect("Failed to create signing key from bytes");
+        
         let verifying_key = signing_key.verifying_key();
         let expected_address = public_key_to_address(*verifying_key);
 
-        // Create a message and sign it
         let message = b"Test message";
         let msg_hash: [u8; 32] = keccak256(message).into();
 
         // Sign the message
-        let (sig, recid) = signing_key.sign_prehash_recoverable(&msg_hash).unwrap();
+        let (sig, recid) = signing_key.sign_prehash_recoverable(&msg_hash)
+            .expect("Failed to sign test message");
+            
         let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig.to_bytes());
         sig_bytes[64] = recid.to_byte();
@@ -212,8 +227,7 @@ mod tests {
         let mut invalid_sig = signature;
         let invalid_s = SECP256K1N_HALF + U256::from(1);
 
-        invalid_sig =
-            Signature::from_rs_and_parity(invalid_sig.r(), invalid_s, invalid_sig.v()).unwrap();
+        invalid_sig = Signature::new(invalid_sig.r(), invalid_s, invalid_sig.v());
         let recovered_invalid = recover_signer(invalid_sig, msg_hash.into());
         assert_eq!(None, recovered_invalid);
     }
