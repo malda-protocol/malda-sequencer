@@ -1,0 +1,2 @@
+users_linea 10 assets_linea 7 users_optimism 10 assets_optimism 7 users_base 10 assets_base 7 users_ethereum 10 assets_ethereum 6 total_users 40 total_assets 26 mcycles 179 duration_s 16.20
+users_linea 10 assets_linea 6 users_optimism 10 assets_optimism 6 users_base 10 assets_base 7 users_ethereum 10 assets_ethereum 7 total_users 40 total_assets 26 mcycles 166 duration_s 12.48

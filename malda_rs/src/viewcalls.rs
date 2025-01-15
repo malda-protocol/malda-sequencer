@@ -54,39 +54,37 @@ pub async fn get_user_balance_exec(
     chain_ids: Vec<u64>,
 ) -> Result<SessionInfo, Error> {
     // Verify outer arrays have same length
-    assert_eq!(users.len(), assets.len());
-    assert_eq!(users.len(), chain_ids.len());
+    assert_eq!(users.len(), assets.len(), "Users and assets array lengths must match");
+    assert_eq!(users.len(), chain_ids.len(), "Users and chain_ids array lengths must match");
 
-    // Create futures using tokio::spawn for true parallelism
     let futures: Vec<_> = (0..chain_ids.len())
         .map(|i| {
             let users = users[i].clone();
             let assets = assets[i].clone();
             let chain_id = chain_ids[i];
-            tokio::spawn(async move { get_user_balance_zkvm_input(users, assets, chain_id).await })
+            tokio::spawn(async move { 
+                get_user_balance_zkvm_input(users, assets, chain_id).await 
+            })
         })
         .collect();
 
-    // Execute all futures in parallel and collect results
     let results = join_all(futures).await;
-    let all_inputs: Vec<u8> = results
+    let all_inputs = results
         .into_iter()
-        .filter_map(|r| r.ok()) // Handle any JoinError
-        .flat_map(|input| input)
-        .collect();
+        .map(|r| r.expect("Failed to join parallel execution task"))
+        .flatten()
+        .collect::<Vec<u8>>();
 
-    // Create environment with:
-    // 1. Number of batches
-    // 2. Concatenated inputs
     let env = ExecutorEnv::builder()
         .write(&(chain_ids.len() as u64))
-        .unwrap()
+        .expect("Failed to write chain count to executor environment")
         .write_slice(&all_inputs)
-        .build()?;
+        .build()
+        .expect("Failed to build executor environment");
 
-    let result = default_executor().execute(env, BALANCE_OF_ELF);
-
-    result
+    Ok(default_executor()
+        .execute(env, BALANCE_OF_ELF)
+        .expect("Failed to execute ZKVM"))
 }
 
 /// Generates ZK proofs for balance queries across multiple chains
@@ -297,11 +295,11 @@ pub async fn get_balance_call_input(
     let block_reorg_protected = block - reorg_protection_depth;
 
     let mut env = EthEvmEnv::builder()
-        .rpc(Url::parse(chain_url).unwrap())
+        .rpc(Url::parse(chain_url).expect("Failed to parse RPC URL"))
         .block_number_or_tag(BlockNumberOrTag::Number(block_reorg_protected))
         .build()
         .await
-        .unwrap();
+        .expect("Failed to build EVM environment");
 
     // Create array of Call3 structs for each balance check
     let mut calls = Vec::with_capacity(users.len());
@@ -334,9 +332,11 @@ pub async fn get_balance_call_input(
         .from(Address::ZERO)
         .call_with_prefetch()
         .await
-        .unwrap();
+        .expect("Failed to execute multicall");
 
-    env.into_input().await.unwrap()
+    env.into_input()
+        .await
+        .expect("Failed to convert environment to input")
 }
 
 /// Fetches the current sequencer commitment for L2 chains
@@ -359,20 +359,18 @@ pub async fn get_current_sequencer_commitment(chain_id: u64) -> (SequencerCommit
         OPTIMISM_SEPOLIA_CHAIN_ID => SEQUENCER_REQUEST_OPTIMISM_SEPOLIA,
         BASE_SEPOLIA_CHAIN_ID => SEQUENCER_REQUEST_BASE_SEPOLIA,
         ETHEREUM_SEPOLIA_CHAIN_ID => SEQUENCER_REQUEST_OPTIMISM_SEPOLIA,
-        _ => {
-            panic!("Invalid chain ID");
-        }
+        _ => panic!("Invalid chain ID: {}", chain_id),
     };
 
     let commitment = reqwest::get(req)
         .await
-        .unwrap()
+        .expect("Failed to fetch sequencer commitment")
         .json::<SequencerCommitment>()
         .await
-        .unwrap();
+        .expect("Failed to parse sequencer commitment JSON");
 
     let block = ExecutionPayload::try_from(&commitment)
-        .unwrap()
+        .expect("Failed to convert commitment to execution payload")
         .block_number;
 
     (commitment, block)
@@ -400,33 +398,43 @@ pub async fn get_l1block_call_input(
         OPTIMISM_CHAIN_ID => RPC_URL_OPTIMISM,
         BASE_SEPOLIA_CHAIN_ID => RPC_URL_BASE_SEPOLIA,
         OPTIMISM_SEPOLIA_CHAIN_ID => RPC_URL_OPTIMISM_SEPOLIA,
-
-        _ => {
-            panic!("Invalid chain ID");
-        }
+        _ => panic!("Invalid chain ID for L1 block call: {}", chain_id),
     };
     let mut env = EthEvmEnv::builder()
-        .rpc(Url::parse(rpc_url).unwrap())
+        .rpc(Url::parse(rpc_url).expect("Failed to parse RPC URL"))
         .block_number_or_tag(block)
         .build()
         .await
-        .unwrap();
+        .expect("Failed to build EVM environment");
 
     let call = IL1Block::hashCall {};
     let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
-    let _l1_block_hash = contract.call_builder(&call).call().await.unwrap()._0;
-    let view_call_input_l1_block = env.into_input().await.unwrap();
+    contract
+        .call_builder(&call)
+        .call()
+        .await
+        .expect("Failed to call L1Block hash");
+
+    let view_call_input_l1_block = env
+        .into_input()
+        .await
+        .expect("Failed to convert environment to input");
 
     let mut env = EthEvmEnv::builder()
-        .rpc(Url::parse(rpc_url).unwrap())
+        .rpc(Url::parse(rpc_url).expect("Failed to parse RPC URL"))
         .block_number_or_tag(block)
         .build()
         .await
-        .unwrap();
+        .expect("Failed to build EVM environment");
 
     let call = IL1Block::numberCall {};
     let mut contract = Contract::preflight(L1_BLOCK_ADDRESS_OPTIMISM, &mut env);
-    let l1_block = contract.call_builder(&call).call().await.unwrap()._0;
+    let l1_block = contract
+        .call_builder(&call)
+        .call()
+        .await
+        .expect("Failed to call L1Block number")
+        ._0;
 
     (view_call_input_l1_block, l1_block)
 }
@@ -455,13 +463,11 @@ pub async fn get_linking_blocks(
         BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
         LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
         ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
-        SCROLL_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL,
         OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
         BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE_SEPOLIA,
         LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
         ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
-        SCROLL_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_SCROLL_SEPOLIA,
-        _ => panic!("invalid chain id"),
+        _ => panic!("Invalid chain ID: {}", chain_id),
     };
 
     let mut linking_blocks = vec![];
@@ -470,11 +476,11 @@ pub async fn get_linking_blocks(
 
     for block_nr in (start_block)..=(current_block) {
         let env = EthEvmEnv::builder()
-            .rpc(Url::parse(rpc_url).unwrap())
+            .rpc(Url::parse(rpc_url).expect("Failed to parse RPC URL"))
             .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
             .build()
             .await
-            .unwrap();
+            .expect("Failed to build EVM environment");
         let header = env.header().inner().clone();
         linking_blocks.push(header);
     }

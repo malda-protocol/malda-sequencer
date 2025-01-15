@@ -130,23 +130,24 @@ pub fn validate_balance_of_call(
 /// * If block is not signed by the official Linea sequencer
 /// * If signature recovery fails
 pub fn validate_linea_env(chain_id: u64, header: risc0_steel::ethereum::EthBlockHeader) {
-    // extract sequencer signature from extra data
     let extra_data = header.inner().extra_data.clone();
 
     let length = extra_data.len();
     let prefix = extra_data.slice(0..length - 65);
     let signature_bytes = extra_data.slice(length - 65..length);
 
-    let sig = signature_from_bytes(&signature_bytes.try_into().unwrap());
+    let sig = signature_from_bytes(&signature_bytes.try_into()
+        .expect("Failed to convert signature bytes to fixed array"));
 
-    // hash block without signature
     let mut header = header.inner().clone();
     header.extra_data = prefix;
 
-    let sighash: [u8; 32] = header.hash_slow().to_vec().try_into().unwrap();
+    let sighash: [u8; 32] = header.hash_slow().to_vec().try_into()
+        .expect("Failed to convert header hash to fixed array");
     let sighash = B256::new(sighash);
 
-    let sequencer = recover_signer(sig, sighash).unwrap();
+    let sequencer = recover_signer(sig, sighash)
+        .expect("Failed to recover sequencer address from signature");
 
     let expected_sequencer = match chain_id {
         LINEA_CHAIN_ID => LINEA_SEQUENCER,
@@ -174,17 +175,20 @@ pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env
     match chain_id {
         OPTIMISM_CHAIN_ID => commitment
             .verify(OPTIMISM_SEQUENCER, OPTIMISM_CHAIN_ID)
-            .unwrap(),
-        BASE_CHAIN_ID => commitment.verify(BASE_SEQUENCER, BASE_CHAIN_ID).unwrap(),
+            .expect("Failed to verify Optimism sequencer commitment"),
+        BASE_CHAIN_ID => commitment
+            .verify(BASE_SEQUENCER, BASE_CHAIN_ID)
+            .expect("Failed to verify Base sequencer commitment"),
         OPTIMISM_SEPOLIA_CHAIN_ID => commitment
             .verify(OPTIMISM_SEPOLIA_SEQUENCER, OPTIMISM_SEPOLIA_CHAIN_ID)
-            .unwrap(),
+            .expect("Failed to verify Optimism Sepolia sequencer commitment"),
         BASE_SEPOLIA_CHAIN_ID => commitment
             .verify(BASE_SEPOLIA_SEQUENCER, BASE_SEPOLIA_CHAIN_ID)
-            .unwrap(),
+            .expect("Failed to verify Base Sepolia sequencer commitment"),
         _ => panic!("invalid chain id"),
     }
-    let payload = ExecutionPayload::try_from(commitment).unwrap();
+    let payload = ExecutionPayload::try_from(commitment)
+        .expect("Failed to convert sequencer commitment to execution payload");
     assert_eq!(payload.block_hash, env_block_hash, "block hash mismatch");
 }
 
