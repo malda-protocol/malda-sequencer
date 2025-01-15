@@ -1,3 +1,11 @@
+//! Integration tests for malda-rs validation and view call functionality.
+//!
+//! This module tests:
+//! - Linea environment validation
+//! - OpStack (Optimism/Base) environment validation
+//! - Chain length validation for reorg protection
+//! - Cross-chain balance query inputs
+
 #[cfg(test)]
 mod tests {
 
@@ -15,6 +23,15 @@ mod tests {
     // Arbitrary values for testing
     const USER: Address = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
 
+    /// Tests Linea environment validation with correct input parameters
+    ///
+    /// # Test Steps
+    /// 1. Fetches latest block from Linea
+    /// 2. Prepares balance call input
+    /// 3. Validates Linea environment
+    ///
+    /// # Expected Outcome
+    /// - No panic occurs with valid input
     #[tokio::test]
     async fn test_validate_linea_env_correct_input() {
         let latest_block = EthEvmEnv::builder()
@@ -32,8 +49,8 @@ mod tests {
             LINEA_CHAIN_ID,
             RPC_URL_LINEA,
             latest_block,
-            USER,
-            WETH_LINEA,
+            vec![USER],
+            vec![WETH_LINEA],
         )
         .await;
 
@@ -41,6 +58,15 @@ mod tests {
         validate_linea_env(LINEA_CHAIN_ID, env.header().inner().clone());
     }
 
+    /// Tests Linea environment validation with wrong chain input
+    ///
+    /// # Test Steps
+    /// 1. Fetches latest block from Optimism (wrong chain)
+    /// 2. Prepares balance call input
+    /// 3. Attempts to validate as Linea environment
+    ///
+    /// # Expected Outcome
+    /// - Panics due to chain ID mismatch
     #[tokio::test]
     async fn test_validate_linea_env_input_of_wrong_chain_panics() {
         let latest_block = EthEvmEnv::builder()
@@ -58,8 +84,8 @@ mod tests {
             OPTIMISM_CHAIN_ID,
             RPC_URL_OPTIMISM,
             latest_block,
-            USER,
-            WETH_OPTIMISM,
+            vec![USER],
+            vec![WETH_OPTIMISM],
         )
         .await;
 
@@ -70,6 +96,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests Linea environment validation with manipulated block data
+    ///
+    /// # Test Steps
+    /// 1. Fetches latest block from Linea
+    /// 2. Manipulates block number
+    /// 3. Attempts validation
+    ///
+    /// # Expected Outcome
+    /// - Panics due to block manipulation
     #[tokio::test]
     async fn test_validate_linea_env_input_manipulated_panics() {
         let latest_block = EthEvmEnv::builder()
@@ -87,8 +122,8 @@ mod tests {
             LINEA_CHAIN_ID,
             RPC_URL_LINEA,
             latest_block,
-            USER,
-            WETH_LINEA,
+            vec![USER],
+            vec![WETH_LINEA],
         )
         .await;
         let env = balance_call_input.into_env();
@@ -100,6 +135,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests OpStack environment validation with correct input
+    ///
+    /// # Test Steps
+    /// 1. Fetches current sequencer commitment
+    /// 2. Gets corresponding block hash
+    /// 3. Validates OpStack environment
+    ///
+    /// # Expected Outcome
+    /// - No panic occurs with valid input
     #[tokio::test]
     async fn test_validate_optimism_env_correct_input() {
         let (sequencer_commitment, block) =
@@ -119,6 +163,15 @@ mod tests {
         validate_opstack_env(OPTIMISM_CHAIN_ID, &sequencer_commitment, correct_hash);
     }
 
+    /// Tests OpStack environment validation with incorrect block hash
+    ///
+    /// # Test Steps
+    /// 1. Fetches current sequencer commitment
+    /// 2. Gets hash from wrong block
+    /// 3. Attempts validation
+    ///
+    /// # Expected Outcome
+    /// - Panics due to hash mismatch
     #[tokio::test]
     async fn test_validate_optimism_env_wrong_hash_panics() {
         let (sequencer_commitment, block) =
@@ -143,6 +196,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests OpStack environment validation with incorrect chain ID
+    ///
+    /// # Test Steps
+    /// 1. Fetches current sequencer commitment
+    /// 2. Gets correct block hash
+    /// 3. Attempts validation with wrong chain ID
+    ///
+    /// # Expected Outcome
+    /// - Panics due to chain ID mismatch
     #[tokio::test]
     async fn test_validate_optimism_env_wrong_chain_id_panics() {
         let (sequencer_commitment, block) =
@@ -167,6 +229,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests OpStack environment validation with wrong commitment
+    ///
+    /// # Test Steps
+    /// 1. Fetches Base commitment instead of Optimism
+    /// 2. Gets correct block hash
+    /// 3. Attempts validation
+    ///
+    /// # Expected Outcome
+    /// - Panics due to commitment mismatch
     #[tokio::test]
     async fn test_validate_optimism_env_wrong_commitment_panics() {
         // get commitment from base chain here
@@ -191,6 +262,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests OpStack environment validation with manipulated commitment
+    ///
+    /// # Test Steps
+    /// 1. Fetches commitments from both Optimism and Base
+    /// 2. Creates manipulated commitments by mixing data
+    /// 3. Attempts validation with manipulated data
+    ///
+    /// # Expected Outcome
+    /// - Panics for both signature and data manipulation
     #[tokio::test]
     async fn test_validate_optimism_env_manipulated_commitment_panics() {
         let (sequencer_commitment, _block) =
@@ -238,6 +318,14 @@ mod tests {
         .is_err());
     }
 
+    /// Tests chain length validation with correct input
+    ///
+    /// # Test Steps
+    /// 1. Gets linking blocks for specific block number
+    /// 2. Validates chain length with correct parameters
+    ///
+    /// # Expected Outcome
+    /// - No panic occurs with valid input
     #[tokio::test]
     async fn test_validate_chain_length_input_correct() {
         let block_number = 21193475;
@@ -253,6 +341,15 @@ mod tests {
         );
     }
 
+    /// Tests chain length validation with insufficient blocks
+    ///
+    /// # Test Steps
+    /// 1. Gets linking blocks
+    /// 2. Removes blocks to make chain too short
+    /// 3. Attempts validation
+    ///
+    /// # Expected Outcome
+    /// - Panics due to insufficient chain length
     #[tokio::test]
     async fn test_validate_chain_length_panics_if_chain_too_short() {
         let block_number = 21193475;
@@ -272,6 +369,15 @@ mod tests {
         .is_err());
     }
 
+    /// Tests chain length validation with mismatched hashes
+    ///
+    /// # Test Steps
+    /// 1. Gets linking blocks
+    /// 2. Uses wrong hash for validation
+    /// 3. Attempts validation
+    ///
+    /// # Expected Outcome
+    /// - Panics due to hash mismatch
     #[tokio::test]
     async fn test_validate_chain_length_panics_if_hash_doesnt_match() {
         let block_number = 21193475;

@@ -14,7 +14,7 @@ use ssz_derive::{Decode, Encode};
 use ssz_types::{typenum, FixedVector, VariableList};
 
 use crate::cryptography::signature_msg;
-use alloy_primitives::{Address, Bytes, Signature, B256, U256};
+use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, B256, U256};
 
 sol! {
     /// Interface for querying ERC-20 token balances.
@@ -34,18 +34,6 @@ sol! {
         function number() external view returns (uint64);
     }
 
-    /// Represents a journal entry for tracking asset balances.
-    ///
-    /// Contains information about user balances and associated assets.
-    struct Journal {
-        /// The balance amount
-        uint256 balance;
-        /// The user's address
-        address account;
-        /// The asset's contract address
-        address asset;
-    }
-
     /// @title Multicall3 interface for batch calling contracts
     /// @dev Allows batching multiple calls in a single transaction
     struct Call3 {
@@ -56,7 +44,7 @@ sol! {
         /// @dev Calldata to execute on the target contract
         bytes callData;
     }
-
+    
     /// @dev Result of an individual call within the batch
     struct CallResult {
         /// @dev Indicates if the call was successful
@@ -64,7 +52,7 @@ sol! {
         /// @dev Contains the return data (if successful) or revert data (if failed)
         bytes returnData;
     }
-
+    
     /// @title Interface for batched contract calls
     interface IMulticall3 {
         /// @notice Executes a batch of function calls on various contracts
