@@ -23,10 +23,8 @@ pub const RPC_URL_SCROLL: &str =
     "https://scroll-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ETHEREUM: &str =
     "https://eth-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
-pub const RPC_URL_BASE: &str =
-    "https://base-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
-pub const RPC_URL_OPTIMISM: &str =
-    "https://opt-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
+pub const RPC_URL_BASE: &str = "https://base.gateway.tenderly.co/29P4JAEzmz8Jkghs5Vdp72";
+pub const RPC_URL_OPTIMISM: &str = "https://optimism.gateway.tenderly.co/1rDcbzMPbj4dIOGbO8uXKL";
 pub const RPC_URL_ARBITRUM: &str =
     "https://arb-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 

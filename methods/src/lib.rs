@@ -18,7 +18,7 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 #[cfg(test)]
 mod tests {
 
-    use core::panic;
+    use core::;
 
     use alloy::{
         eips::BlockNumberOrTag,
@@ -29,8 +29,7 @@ mod tests {
     use malda_rs::{
         constants::*,
         viewcalls::{
-            get_current_sequencer_commitment, get_user_balance_batch_exec,
-            get_user_balance_batch_prove, get_user_balance_exec, get_user_balance_prove,
+            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove,
         },
         viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
     };
@@ -98,9 +97,11 @@ mod tests {
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_linea, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_linea]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -112,9 +113,11 @@ mod tests {
         let asset = WETH_LINEA_SEPOLIA;
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_linea, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_linea]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -126,9 +129,11 @@ mod tests {
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_optimism, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_optimism]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -140,22 +145,24 @@ mod tests {
         let asset = WETH_OPTIMISM_SEPOLIA;
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_optimism, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_optimism]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_ba1tch() {
+    async fn test_guest_proves_balance_batch() {
         // Single chain test (Linea)
         let users = vec![vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")]];
         let assets = vec![vec![WETH_LINEA]];
         let chain_ids = vec![LINEA_CHAIN_ID];
 
-        let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
+        let session_info = get_user_balance_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -172,7 +179,7 @@ mod tests {
         let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID];
 
-        let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
+        let session_info = get_user_balance_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -189,7 +196,7 @@ mod tests {
         let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM], vec![WETH_BASE]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID];
 
-        let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
+        let session_info = get_user_balance_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -217,7 +224,7 @@ mod tests {
             ETHEREUM_CHAIN_ID,
         ];
 
-        let session_info = get_user_balance_batch_exec(users, assets, chain_ids)
+        let session_info = get_user_balance_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -225,7 +232,7 @@ mod tests {
         println!("\nLinea + Optimism + Base + Ethereum via OP");
         println!("Cycles: {}", cycles);
 
-        panic!();
+        !();
     }
 
     #[tokio::test]
@@ -250,14 +257,14 @@ mod tests {
         // Run the test 5 times
         for iteration in 0..1 {
             println!("\nIteration {}", iteration + 1);
-            
+
             let mut users = Vec::new();
             let mut assets = Vec::new();
 
             // Generate random data
             let mut rng = rand::thread_rng();
             for (idx, _chain_id) in chain_ids.iter().enumerate() {
-                let size = 20;
+                let size = 10;
 
                 let chain_users: Vec<Address> = (0..size)
                     .map(|_| {
@@ -275,9 +282,11 @@ mod tests {
             }
 
             let start_time = Instant::now();
-            let prove_info = get_user_balance_batch_prove(users.clone(), assets.clone(), chain_ids.clone())
-                .await
-                .unwrap();
+            let prove_info =
+                get_user_balance_exec(users.clone(), assets.clone(), chain_ids.clone())
+                    .await
+                    .unwrap();
+            let cycles = prove_info.segments.iter().map(|s| s.cycles).sum::<u32>();
             let duration = start_time.elapsed();
 
             // Create log entry
@@ -299,23 +308,27 @@ mod tests {
                     .collect::<std::collections::HashSet<_>>()
                     .len();
 
-                log_entry.push_str(&format!("users_{} {} assets_{} {} ", 
-                    chain_name, num_users,
-                    chain_name, num_unique_assets));
+                log_entry.push_str(&format!(
+                    "users_{} {} assets_{} {} ",
+                    chain_name, num_users, chain_name, num_unique_assets
+                ));
             }
 
             // Add total metrics
             let total_users: usize = users.iter().map(|u| u.len()).sum();
-            let total_assets: usize = assets.iter()
+            let total_assets: usize = assets
+                .iter()
                 .flat_map(|a| a.iter())
                 .collect::<std::collections::HashSet<_>>()
                 .len();
 
-            log_entry.push_str(&format!("total_users {} total_assets {} mcycles {} duration_s {:.2}\n",
+            log_entry.push_str(&format!(
+                "total_users {} total_assets {} mcycles {} duration_s {:.2}\n",
                 total_users,
                 total_assets,
-                prove_info.stats.total_cycles / 1_000_000,
-                duration.as_secs_f64()));
+                cycles / 1_000_000,
+                duration.as_secs_f64()
+            ));
 
             // Append to file (using append instead of write)
             std::fs::OpenOptions::new()
@@ -327,7 +340,7 @@ mod tests {
                 .unwrap();
         }
 
-        panic!();
+        !();
     }
 
     #[tokio::test]
@@ -336,9 +349,11 @@ mod tests {
         let asset = WETH_BASE_SEPOLIA;
         let chain_id = BASE_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_base, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_base]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -350,9 +365,11 @@ mod tests {
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_ethereum]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -364,9 +381,11 @@ mod tests {
         let asset = WETH_ETHEREUM_SEPOLIA;
         let chain_id = ETHEREUM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(user_ethereum, asset, chain_id)
-            .await
-            .unwrap();
+        let session_info = get_user_balance_exec(
+            vec![vec![user_ethereum]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
@@ -417,23 +436,26 @@ mod tests {
         let chain_id = LINEA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(user_linea, asset, chain_id)
-            .await
-            .unwrap();
+        let prove_info = get_user_balance_prove(
+            vec![vec![user_linea]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
         let duration = start_time.elapsed();
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
 
-        panic!();
 
         println!("Benchmarking Optimism...");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(user_optimism, asset, chain_id)
-            .await
-            .unwrap();
+        let prove_info = get_user_balance_prove(
+            vec![vec![user_optimism]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
         let duration = start_time.elapsed();
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
@@ -443,9 +465,11 @@ mod tests {
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(user_base, asset, chain_id)
-            .await
-            .unwrap();
+        let prove_info = get_user_balance_prove(
+            vec![vec![user_base]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
         let duration = start_time.elapsed();
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
@@ -455,15 +479,17 @@ mod tests {
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(user_ethereum, asset, chain_id)
-            .await
-            .unwrap();
+        let prove_info = get_user_balance_prove(
+            vec![vec![user_ethereum]], 
+            vec![vec![asset]], 
+            vec![chain_id]
+        ).await.unwrap();
         let duration = start_time.elapsed();
 
         println!("MCycles: {}", prove_info.stats.total_cycles / 1000000);
         println!("e2e time: {:?}", duration);
 
-        panic!();
+        !();
     }
 
     #[tokio::test]

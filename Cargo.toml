@@ -31,8 +31,3 @@ risc0-core = { version = "1.1.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 
-
-
-[profile.release]
-debug = 1
-lto = true
