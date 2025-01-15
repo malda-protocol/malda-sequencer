@@ -13,6 +13,8 @@
 //! - Base
 //! - Linea
 
+use core::panic;
+
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
 use crate::types::{Call3, IMulticall3};
@@ -235,9 +237,10 @@ pub async fn get_user_balance_zkvm_input(
         _ => panic!("Invalid chain ID"),
     };
 
-    let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
-    let balance_call_input =
-        get_balance_call_input(chain_id, rpc_url, block, users.clone(), assets.clone()).await;
+    let (linking_blocks, balance_call_input) = tokio::join!(
+        get_linking_blocks(chain_id, rpc_url, block),
+        get_balance_call_input(chain_id, rpc_url, block, users.clone(), assets.clone())
+    );
 
     let input: Vec<u8> = bytemuck::pod_collect_to_vec(
         &risc0_zkvm::serde::to_vec(&(
@@ -470,19 +473,28 @@ pub async fn get_linking_blocks(
         _ => panic!("Invalid chain ID: {}", chain_id),
     };
 
-    let mut linking_blocks = vec![];
-
     let start_block = current_block - reorg_protection_depth + 1;
+    
+    // Create futures for parallel block fetching
+    let futures: Vec<_> = (start_block..=current_block)
+        .map(|block_nr| {
+            let rpc_url = rpc_url.to_string();
+            tokio::spawn(async move {
+                let env = EthEvmEnv::builder()
+                    .rpc(Url::parse(&rpc_url).expect("Failed to parse RPC URL"))
+                    .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
+                    .build()
+                    .await
+                    .expect("Failed to build EVM environment");
+                env.header().inner().clone()
+            })
+        })
+        .collect();
 
-    for block_nr in (start_block)..=(current_block) {
-        let env = EthEvmEnv::builder()
-            .rpc(Url::parse(rpc_url).expect("Failed to parse RPC URL"))
-            .block_number_or_tag(BlockNumberOrTag::Number(block_nr))
-            .build()
-            .await
-            .expect("Failed to build EVM environment");
-        let header = env.header().inner().clone();
-        linking_blocks.push(header);
-    }
-    linking_blocks
+    // Execute all futures in parallel and collect results
+        join_all(futures)
+        .await
+        .into_iter()
+        .map(|r| r.expect("Failed to join block fetch task"))
+        .collect()
 }
