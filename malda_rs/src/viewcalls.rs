@@ -50,7 +50,7 @@ use futures::future::join_all;
 /// - Array lengths don't match
 /// - RPC calls fail
 /// - ZKVM execution fails
-pub async fn get_user_balance_exec(
+pub async fn get_proof_data_exec(
     users: Vec<Vec<Address>>,
     assets: Vec<Vec<Address>>,
     chain_ids: Vec<u64>,
@@ -65,7 +65,7 @@ pub async fn get_user_balance_exec(
             let assets = assets[i].clone();
             let chain_id = chain_ids[i];
             tokio::spawn(async move { 
-                get_user_balance_zkvm_input(users, assets, chain_id).await 
+                get_proof_data_zkvm_input(users, assets, chain_id).await 
             })
         })
         .collect();
@@ -104,7 +104,7 @@ pub async fn get_user_balance_exec(
 /// - Array lengths don't match
 /// - RPC calls fail
 /// - Proof generation fails
-pub async fn get_user_balance_prove(
+pub async fn get_proof_data_prove(
     users: Vec<Vec<Address>>,
     assets: Vec<Vec<Address>>,
     chain_ids: Vec<u64>,
@@ -127,7 +127,7 @@ pub async fn get_user_balance_prove(
                     let assets = assets[i].clone();
                     let chain_id = chain_ids[i];
                     tokio::spawn(async move {
-                        get_user_balance_zkvm_input(users, assets, chain_id).await
+                        get_proof_data_zkvm_input(users, assets, chain_id).await
                     })
                 })
                 .collect();
@@ -170,7 +170,7 @@ pub async fn get_user_balance_prove(
 /// Panics if:
 /// - Invalid chain ID is provided
 /// - RPC calls fail
-pub async fn get_user_balance_zkvm_input(
+pub async fn get_proof_data_zkvm_input(
     users: Vec<Address>,
     assets: Vec<Address>,
     chain_id: u64,

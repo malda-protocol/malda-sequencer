@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "balance-of"
-path = "src/bin/balance_of.rs"
+name = "get-proof-data"
+path = "src/bin/get_proof_data.rs"
 
 [workspace]
 members = ["guest_utils"]

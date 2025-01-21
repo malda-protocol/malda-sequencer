@@ -47,7 +47,7 @@ pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 /// # Returns
 ///
 /// Returns a `Result` containing the zero-knowledge `ProveInfo` or an error
-pub async fn get_user_balance_prove(
+pub async fn get_proof_data_prove(
     user: Address,
     asset: Address,
     chain_id: u64,
@@ -59,7 +59,7 @@ pub async fn get_user_balance_prove(
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         // Execute the async env creation in the new runtime
-        let env = rt.block_on(get_user_balance_zkvm_env(
+        let env = rt.block_on(get_proof_data_zkvm_env(
             user,
             asset,
             chain_id,
@@ -88,13 +88,13 @@ pub async fn get_user_balance_prove(
 /// # Returns
 ///
 /// Returns a `Result` containing the execution `SessionInfo` or an error
-pub async fn get_user_balance_exec(
+pub async fn get_proof_data_exec(
     user: Address,
     asset: Address,
     chain_id: u64,
     trusted_hash: B256,
 ) -> Result<SessionInfo, Error> {
-    let env = get_user_balance_zkvm_env(user, asset, chain_id, trusted_hash).await;
+    let env = get_proof_data_zkvm_env(user, asset, chain_id, trusted_hash).await;
     default_executor().execute(env, BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF)
 }
 
@@ -120,7 +120,7 @@ pub async fn get_user_balance_exec(
 /// # Panics
 ///
 /// Panics if an unsupported chain ID is provided
-pub async fn get_user_balance_zkvm_env(
+pub async fn get_proof_data_zkvm_env(
     user: Address,
     asset: Address,
     chain_id: u64,
@@ -219,7 +219,7 @@ pub async fn get_balance_call_input(
         .await
         .unwrap();
 
-    let call = IERC20::balanceOfCall { account: user };
+    let call = IERC20::getProofDataCall { account: user };
 
     let mut contract = Contract::preflight(asset, &mut env);
     let _returns = contract.call_builder(&call).call().await.unwrap();

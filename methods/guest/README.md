@@ -8,8 +8,8 @@ For zkVM API documentation, see the [guest module] of the [`risc0-zkvm`] crate.
 
 For the Malda protocol, we have two guest programs:
 
-1. `balance_of.rs`: Read balance of an ERC20 token on an EVM chain and generate a zkProof of validity
-2. `balance_of_ethereum_light_client.rs`: Read balance of an ERC20 token on Ethereum using the Ethereum Light Client and generate a zkProof of validity
+1. `get_proof_data.rs`: Read proof data from an EVM chain and generate a zkProof of validity
+2. `get_proof_data_ethereum_light_client.rs`: Read proof data from Ethereum using the Ethereum Light Client and generate a zkProof of validity
 
 [guest]: https://dev.risczero.com/terminology#guest
 [developer docs]: https://dev.risczero.com/zkvm

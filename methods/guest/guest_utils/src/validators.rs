@@ -38,22 +38,22 @@ use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 /// * If environment validation fails
 /// * If chain length is insufficient
 /// * If block hashes don't match
-pub fn validate_balance_of_call(
+pub fn validate_get_proof_data_call(
     chain_id: u64,
-    accounts: Vec<Address>,
-    assets: Vec<Address>,
+    account: Vec<Address>,
+    asset: Vec<Address>,
     env_input: EthEvmInput,
     sequencer_commitment: Option<SequencerCommitment>,
-    op_env_input: Option<EthEvmInput>,
+    env_op_input: Option<EthEvmInput>,
     linking_blocks: Vec<RlpHeader<Header>>,
     output: &mut Vec<Bytes>,
 ) {
     let env = env_input.into_env();
 
     // Create array of Call3 structs for each balance check
-    let mut calls = Vec::with_capacity(accounts.len());
+    let mut calls = Vec::with_capacity(account.len());
 
-    for (account, asset) in accounts.iter().zip(assets.iter()) {
+    for (account, asset) in account.iter().zip(asset.iter()) {
         // Create function selector for balanceOf(address)
         let selector = [0x70, 0xa0, 0x82, 0x31]; // keccak256("balanceOf(address)")[:4]
         let account_bytes: [u8; 32] = account.into_word().into();
@@ -98,7 +98,7 @@ pub fn validate_balance_of_call(
     } else if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
         let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
-            op_env_input.unwrap(),
+            env_op_input.unwrap(),
         );
         ethereum_hash
     } else {
