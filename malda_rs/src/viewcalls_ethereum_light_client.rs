@@ -1,8 +1,8 @@
 //! Ethereum view call utilities for cross-chain view call proof.
 //!
 //! This module provides functionality to:
-//! - Generate zero-knowledge proofs for token balance queries across EVM chains
-//! - Execute and verify token balance queries using RISC Zero
+//! - Generate zero-knowledge proofs for proof data queries across EVM chains
+//! - Execute and verify proof data queries using RISC Zero
 //! - Handle Ethereum consensus layer (beacon chain) data verification
 //! - Process block headers for reorg protection
 //! - Build execution environments for zero-knowledge proofs
@@ -30,17 +30,17 @@ use tokio;
 use url::Url;
 
 use crate::constants::*;
-use crate::types::{SequencerCommitment, IERC20};
-use methods::BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF;
+use crate::types::{SequencerCommitment, IMaldaMarket};
+use methods::GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF;
 
 pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 
-/// Generates a zero-knowledge proof for a user's token balance query.
+/// Generates a zero-knowledge proof for a user's proof data query.
 ///
 /// # Arguments
 ///
 /// * `user` - The user's Ethereum address
-/// * `asset` - The token contract address to query
+/// * `market` - The market contract address to query
 /// * `chain_id` - The target chain identifier
 /// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
@@ -49,7 +49,7 @@ pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 /// Returns a `Result` containing the zero-knowledge `ProveInfo` or an error
 pub async fn get_proof_data_prove(
     user: Address,
-    asset: Address,
+    market: Address,
     chain_id: u64,
     trusted_hash: B256,
 ) -> Result<ProveInfo, Error> {
@@ -61,27 +61,27 @@ pub async fn get_proof_data_prove(
         // Execute the async env creation in the new runtime
         let env = rt.block_on(get_proof_data_zkvm_env(
             user,
-            asset,
+            market,
             chain_id,
             trusted_hash,
         ));
 
         // Perform the proving
-        default_prover().prove(env, BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF)
+        default_prover().prove(env, GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF)
     })
     .await?;
 
     prove_info
 }
 
-/// Executes a token balance query without generating a proof.
+/// Executes a proof data query without generating a proof.
 ///
-/// Useful for testing and debugging balance queries before generating proofs.
+/// Useful for testing and debugging proof data queries before generating proofs.
 ///
 /// # Arguments
 ///
 /// * `user` - The user's Ethereum address
-/// * `asset` - The token contract address to query
+/// * `market` - The market contract address to query
 /// * `chain_id` - The target chain identifier
 /// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
@@ -90,39 +90,39 @@ pub async fn get_proof_data_prove(
 /// Returns a `Result` containing the execution `SessionInfo` or an error
 pub async fn get_proof_data_exec(
     user: Address,
-    asset: Address,
+    market: Address,
     chain_id: u64,
     trusted_hash: B256,
 ) -> Result<SessionInfo, Error> {
-    let env = get_proof_data_zkvm_env(user, asset, chain_id, trusted_hash).await;
-    default_executor().execute(env, BALANCE_OF_ETHEREUM_LIGHT_CLIENT_ELF)
+    let env = get_proof_data_zkvm_env(user, market, chain_id, trusted_hash).await;
+    default_executor().execute(env, GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF)
 }
 
-/// Creates a RISC Zero executor environment for token balance queries.
+/// Creates a RISC Zero executor environment for proof data queries.
 ///
 /// This function:
 /// 1. Fetches and validates beacon chain consensus data
 /// 2. Retrieves necessary block headers for reorg protection
-/// 3. Prepares the balance query call data
+/// 3. Prepares the proof data query call data
 /// 4. Builds a complete environment for zero-knowledge proof generation
 ///
 /// # Arguments
 ///
 /// * `user` - The user's Ethereum address
-/// * `asset` - The token contract address to query
+/// * `market` - The market contract address to query
 /// * `chain_id` - The target chain identifier
 /// * `trusted_hash` - The trusted beacon chain block hash to anchor verification from
 ///
 /// # Returns
 ///
-/// Returns an `ExecutorEnv` configured for generating balance query proofs
+/// Returns an `ExecutorEnv` configured for generating proof data query proofs
 ///
 /// # Panics
 ///
 /// Panics if an unsupported chain ID is provided
 pub async fn get_proof_data_zkvm_env(
     user: Address,
-    asset: Address,
+    market: Address,
     chain_id: u64,
     trusted_hash: B256,
 ) -> ExecutorEnv<'static> {
@@ -145,22 +145,22 @@ pub async fn get_proof_data_zkvm_env(
     let block = beacon_block.body.execution_payload().block_number().clone();
 
     let linking_blocks = get_linking_blocks(chain_id, rpc_url, block).await;
-    let balance_call_input = get_balance_call_input(chain_id, rpc_url, block, user, asset).await;
+    let proof_data_call_input = get_proof_data_call_input(chain_id, rpc_url, block, user, market).await;
 
-    let beacon_input = get_balance_call_input(
+    let beacon_proof_data_input = get_proof_data_call_input(
         chain_id,
         rpc_url,
         block + REORG_PROTECTION_DEPTH_ETHEREUM,
         user,
-        asset,
+        market,
     )
     .await;
 
     build_l1_chain_builder_environment(
-        balance_call_input,
+        proof_data_call_input,
         chain_id,
         user,
-        asset,
+        market,
         None,
         None,
         linking_blocks,
@@ -168,32 +168,32 @@ pub async fn get_proof_data_zkvm_env(
         beacon_root,
         updates,
         finality_update,
-        beacon_input,
+        beacon_proof_data_input,
     )
 }
 
-/// Constructs an EVM input for a balance query.
+/// Constructs an EVM input for a proof data query.
 ///
-/// Prepares the encoded EVM call data for querying an ERC20 token's balanceOf function,
+/// Prepares the encoded EVM call data for querying an ERC20 token's getProofData function,
 /// taking into account chain-specific reorg protection depths.
 ///
 /// # Arguments
 ///
 /// * `chain_id` - The target chain identifier
 /// * `chain_url` - RPC endpoint URL for the target chain
-/// * `block` - Block number to query the balance at
+/// * `block` - Block number to query at
 /// * `user` - Address of the user to query
-/// * `asset` - Token contract address to query
+/// * `market` - Token contract address to query
 ///
 /// # Returns
 ///
-/// Returns an `EvmInput` containing the encoded balance call and block header data
-pub async fn get_balance_call_input(
+/// Returns an `EvmInput` containing the encoded proof data call and block header data
+pub async fn get_proof_data_call_input(
     chain_id: u64,
     chain_url: &str,
     block: u64,
     user: Address,
-    asset: Address,
+    market: Address,
 ) -> EvmInput<RlpHeader<Header>> {
     let reorg_protection_depth = match chain_id {
         OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
@@ -219,9 +219,9 @@ pub async fn get_balance_call_input(
         .await
         .unwrap();
 
-    let call = IERC20::getProofDataCall { account: user };
+    let call = IMaldaMarket::getProofDataCall { account: user, dstChainId: chain_id as u32 };
 
-    let mut contract = Contract::preflight(asset, &mut env);
+    let mut contract = Contract::preflight(market, &mut env);
     let _returns = contract.call_builder(&call).call().await.unwrap();
 
     env.into_input().await.unwrap()
@@ -298,7 +298,7 @@ pub fn build_l1_chain_builder_environment(
     view_call_input: EvmInput<RlpHeader<Header>>,
     chain_id: u64,
     user: Address,
-    asset: Address,
+    market: Address,
     sequencer_commitment: Option<SequencerCommitment>,
     env_op_input: Option<EthEvmInput>,
     linking_blocks: Vec<RlpHeader<Header>>,
@@ -315,7 +315,7 @@ pub fn build_l1_chain_builder_environment(
         .unwrap()
         .write(&user)
         .unwrap()
-        .write(&asset)
+        .write(&market)
         .unwrap()
         .write(&sequencer_commitment)
         .unwrap()

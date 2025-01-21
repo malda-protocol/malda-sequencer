@@ -1,11 +1,11 @@
 //! Ethereum view call utilities for cross-chain view call proof.
 //!
 //! This module provides functionality to:
-//! - Execute and prove user token balance queries across multiple EVM chains
+//! - Execute and prove user proof data queries across multiple EVM chains
 //! - Handle sequencer commitments for L2 chains (Optimism, Base)
 //! - Process L1 block verification for L2 chains
 //! - Manage linking blocks for reorg protection
-//! - Support parallel processing of multi-chain balance queries
+//! - Support parallel processing of multi-chain proof data queries
 //!
 //! The module supports both mainnet and testnet (Sepolia) environments for:
 //! - Ethereum (L1)
@@ -17,8 +17,8 @@ use core::panic;
 
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
-use crate::types::{Call3, IMulticall3};
-use methods::BALANCE_OF_ELF;
+use crate::types::{Call3, IMulticall3, IMaldaMarket};
+use methods::GET_PROOF_DATA_ELF;
 
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
@@ -35,11 +35,11 @@ use tokio;
 use url::Url;
 use futures::future::join_all;
 
-/// Executes balance queries across multiple chains in parallel
+/// Executes proof data queries across multiple chains in parallel
 ///
 /// # Arguments
 /// * `users` - Vector of user address vectors, one per chain
-/// * `assets` - Vector of token address vectors, one per chain
+/// * `markets` - Vector of market contract address vectors, one per chain
 /// * `chain_ids` - Vector of chain IDs to query
 ///
 /// # Returns
@@ -52,20 +52,20 @@ use futures::future::join_all;
 /// - ZKVM execution fails
 pub async fn get_proof_data_exec(
     users: Vec<Vec<Address>>,
-    assets: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
     chain_ids: Vec<u64>,
 ) -> Result<SessionInfo, Error> {
     // Verify outer arrays have same length
-    assert_eq!(users.len(), assets.len(), "Users and assets array lengths must match");
+    assert_eq!(users.len(), markets.len(), "Users and markets array lengths must match");
     assert_eq!(users.len(), chain_ids.len(), "Users and chain_ids array lengths must match");
 
     let futures: Vec<_> = (0..chain_ids.len())
         .map(|i| {
             let users = users[i].clone();
-            let assets = assets[i].clone();
+            let markets = markets[i].clone();
             let chain_id = chain_ids[i];
             tokio::spawn(async move { 
-                get_proof_data_zkvm_input(users, assets, chain_id).await 
+                get_proof_data_zkvm_input(users, markets, chain_id).await 
             })
         })
         .collect();
@@ -85,15 +85,15 @@ pub async fn get_proof_data_exec(
         .expect("Failed to build executor environment");
 
     Ok(default_executor()
-        .execute(env, BALANCE_OF_ELF)
+        .execute(env, GET_PROOF_DATA_ELF)
         .expect("Failed to execute ZKVM"))
 }
 
-/// Generates ZK proofs for balance queries across multiple chains
+/// Generates ZK proofs for proof data queries across multiple chains
 ///
 /// # Arguments
 /// * `users` - Vector of user address vectors, one per chain
-/// * `assets` - Vector of token address vectors, one per chain
+/// * `markets` - Vector of market contract address vectors, one per chain
 /// * `chain_ids` - Vector of chain IDs to query
 ///
 /// # Returns
@@ -106,7 +106,7 @@ pub async fn get_proof_data_exec(
 /// - Proof generation fails
 pub async fn get_proof_data_prove(
     users: Vec<Vec<Address>>,
-    assets: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
     chain_ids: Vec<u64>,
 ) -> Result<ProveInfo, Error> {
     // Move all the work including env creation into the blocking task
@@ -117,17 +117,17 @@ pub async fn get_proof_data_prove(
         // Execute all async operations in the new runtime
         let env = rt.block_on(async {
             // Verify outer arrays have same length
-            assert_eq!(users.len(), assets.len());
+            assert_eq!(users.len(), markets.len());
             assert_eq!(users.len(), chain_ids.len());
 
             // Create futures using tokio::spawn for true parallelism
             let futures: Vec<_> = (0..chain_ids.len())
                 .map(|i| {
                     let users = users[i].clone();
-                    let assets = assets[i].clone();
+                    let markets = markets[i].clone();
                     let chain_id = chain_ids[i];
                     tokio::spawn(async move {
-                        get_proof_data_zkvm_input(users, assets, chain_id).await
+                        get_proof_data_zkvm_input(users, markets, chain_id).await
                     })
                 })
                 .collect();
@@ -149,18 +149,18 @@ pub async fn get_proof_data_prove(
                 .unwrap()
         });
 
-        default_prover().prove(env, BALANCE_OF_ELF)
+        default_prover().prove(env, GET_PROOF_DATA_ELF)
     })
     .await?;
 
     prove_info
 }
 
-/// Prepares input data for the ZKVM for a single chain's balance queries
+/// Prepares input data for the ZKVM for a single chain's proof data queries
 ///
 /// # Arguments
 /// * `users` - Vector of user addresses to query
-/// * `assets` - Vector of token addresses to query
+/// * `markets` - Vector of market contract addresses to query
 /// * `chain_id` - Chain ID for the queries
 ///
 /// # Returns
@@ -172,7 +172,7 @@ pub async fn get_proof_data_prove(
 /// - RPC calls fail
 pub async fn get_proof_data_zkvm_input(
     users: Vec<Address>,
-    assets: Vec<Address>,
+    markets: Vec<Address>,
     chain_id: u64,
 ) -> Vec<u8> {
     let rpc_url = match chain_id {
@@ -237,17 +237,17 @@ pub async fn get_proof_data_zkvm_input(
         _ => panic!("Invalid chain ID"),
     };
 
-    let (linking_blocks, balance_call_input) = tokio::join!(
+    let (linking_blocks, proof_data_call_input) = tokio::join!(
         get_linking_blocks(chain_id, rpc_url, block),
-        get_balance_call_input(chain_id, rpc_url, block, users.clone(), assets.clone())
+        get_proof_data_call_input(chain_id, rpc_url, block, users.clone(), markets.clone())
     );
 
     let input: Vec<u8> = bytemuck::pod_collect_to_vec(
         &risc0_zkvm::serde::to_vec(&(
-            &balance_call_input,
+            &proof_data_call_input,
             &chain_id,
             &users,
-            &assets,
+            &markets,
             &commitment,
             &l1_block_call_input,
             &linking_blocks,
@@ -258,14 +258,14 @@ pub async fn get_proof_data_zkvm_input(
     input
 }
 
-/// Prepares multicall input for batch balance checking
+/// Prepares multicall input for batch proof data checking
 ///
 /// # Arguments
 /// * `chain_id` - Chain ID for the queries
 /// * `chain_url` - RPC URL for the chain
 /// * `block` - Block number to query at
 /// * `users` - Vector of user addresses
-/// * `assets` - Vector of token addresses
+/// * `markets` - Vector of market contract addresses
 ///
 /// # Returns
 /// * `EvmInput<RlpHeader<Header>>` - Formatted EVM input for the multicall
@@ -274,12 +274,12 @@ pub async fn get_proof_data_zkvm_input(
 /// Panics if:
 /// - Invalid chain ID is provided
 /// - RPC connection fails
-pub async fn get_balance_call_input(
+pub async fn get_proof_data_call_input(
     chain_id: u64,
     chain_url: &str,
     block: u64,
     users: Vec<Address>,
-    assets: Vec<Address>,
+    markets: Vec<Address>,
 ) -> EvmInput<RlpHeader<Header>> {
     let reorg_protection_depth = match chain_id {
         OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
@@ -304,12 +304,12 @@ pub async fn get_balance_call_input(
         .await
         .expect("Failed to build EVM environment");
 
-    // Create array of Call3 structs for each balance check
+    // Create array of Call3 structs for each proof data check
     let mut calls = Vec::with_capacity(users.len());
 
-    for (user, asset) in users.iter().zip(assets.iter()) {
-        // Create function selector for balanceOf(address)
-        let selector = [0x70, 0xa0, 0x82, 0x31]; // keccak256("balanceOf(address)")[:4]
+    for (user, market) in users.iter().zip(markets.iter()) {
+        // Selector for getProofData(address)
+        let selector = [0x29, 0x1e, 0x45, 0xbc];
         let user_bytes: [u8; 32] = user.into_word().into();
 
         // Create calldata by concatenating selector and encoded address
@@ -319,7 +319,7 @@ pub async fn get_balance_call_input(
         call_data.extend_from_slice(&user_bytes);
 
         calls.push(Call3 {
-            target: *asset,
+            target: *market,
             allowFailure: false,
             callData: call_data.into(),
         });
@@ -328,12 +328,18 @@ pub async fn get_balance_call_input(
     // Make single multicall
     let multicall = IMulticall3::aggregate3Call { calls };
 
+    let gas_price = if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+        50000000000u64
+    } else {
+        10000000000u64
+    };
+
     let mut contract = Contract::preflight(MULTICALL, &mut env);
     let _returns = contract
         .call_builder(&multicall)
-        .gas_price(U256::from(20000000000u64))
+        .gas_price(U256::from(gas_price))
         .from(Address::ZERO)
-        .call_with_prefetch()
+        .call()
         .await
         .expect("Failed to execute multicall");
 
