@@ -168,6 +168,7 @@ mod tests {
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("Cycles: {}", cycles);
+        
     }
 
     #[tokio::test]
