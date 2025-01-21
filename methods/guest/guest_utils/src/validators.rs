@@ -1,7 +1,7 @@
 //! Validator functions for verifying blockchain environments and commitments.
 //!
 //! This module provides validation utilities for:
-//! - Token balance queries across multiple EVM chains
+//! - Proof data queries across multiple EVM chains
 //! - Linea block validation through sequencer signatures
 //! - OpStack (Optimism/Base) validation through sequencer commitments
 //! - Ethereum L1 block validation through OpStack L2s
@@ -21,7 +21,7 @@ use alloy_primitives::Bytes;
 use alloy_primitives::B256;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 
-/// Validates and executes balance queries across multiple accounts and tokens
+/// Validates and executes proof data queries across multiple accounts and tokens
 ///
 /// # Arguments
 /// * `chain_id` - The chain ID to validate against
@@ -31,7 +31,7 @@ use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 /// * `sequencer_commitment` - Optional sequencer commitment for L2 chains
 /// * `op_env_input` - Optional Optimism environment input for L1 validation
 /// * `linking_blocks` - Vector of blocks for reorg protection
-/// * `output` - Output vector for balance results
+/// * `output` - Output vector for proof data results
 ///
 /// # Panics
 /// * If chain ID is invalid
@@ -50,15 +50,15 @@ pub fn validate_get_proof_data_call(
 ) {
     let env = env_input.into_env();
 
-    // Create array of Call3 structs for each balance check
+    // Create array of Call3 structs for each proof data check
     let mut calls = Vec::with_capacity(account.len());
 
     for (account, asset) in account.iter().zip(asset.iter()) {
-        // Create function selector for balanceOf(address)
-        let selector = [0x70, 0xa0, 0x82, 0x31]; // keccak256("balanceOf(address)")[:4]
+        // Create function selector for getProofData(address,uint32)
+        let selector = [0x29, 0x1e, 0x45, 0xbc];
         let account_bytes: [u8; 32] = account.into_word().into();
 
-        // Create calldata by concatenating selector and encoded address
+        // Create calldata by concatenating selector and encoded parameters
         let mut call_data = Vec::with_capacity(36); // 4 bytes selector + 32 bytes address
         call_data.extend_from_slice(&selector);
         call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
@@ -111,6 +111,12 @@ pub fn validate_get_proof_data_call(
         linking_blocks,
         validated_block_hash,
     );
+
+    // Print all results
+    for result in returns.results.iter() {
+        println!("{:?}", result.returnData);
+        println!("{:?}", result.success);
+    }
 
     // Push results directly to output vector
     returns

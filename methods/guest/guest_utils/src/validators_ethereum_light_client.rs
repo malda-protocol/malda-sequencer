@@ -4,7 +4,7 @@
 //! - Light client store management
 //! - Beacon chain bootstrapping and updates
 //! - Sync committee verification
-//! - Balance validation using light client proofs
+//! - Proof data validation using light client proofs
 
 use consensus_core::{
     apply_bootstrap, apply_optimistic_update, apply_update, verify_bootstrap,
@@ -259,8 +259,8 @@ pub fn read_l1_chain_builder_input() -> (
 
 sol! {
     struct Journal {
-        /// The balance amount
-        bytes balance;
+        /// The proof data bytes
+        bytes proof_data;
         /// The user's address
         address account;
         /// The asset's contract address
@@ -272,12 +272,12 @@ sol! {
     }
 }
 
-/// Validates an ERC20 balance query using light client proofs.
+/// Validates a proof data query using light client proofs.
 ///
 /// # Arguments
 /// * `chain_id` - The chain ID to validate against
 /// * `account` - Account address to query
-/// * `asset` - ERC20 token address
+/// * `asset` - Contract address to query
 /// * `env_input` - Ethereum environment input
 /// * `_sequencer_commitment` - Optional sequencer commitment
 /// * `_op_env_input` - Optional optimistic environment input
@@ -289,9 +289,9 @@ sol! {
 /// 1. Verifies the light client chain via sync committee
 /// 2. Validates block linking and chain length
 /// 3. Verifies beacon chain commitments
-/// 4. Executes and validates the balance query
+/// 4. Executes and validates the proof data query
 ///
-/// Commits the results including balance and checkpoints to the guest environment.
+/// Commits the results including proof data and checkpoints to the guest environment.
 pub fn validate_get_proof_data_call(
     chain_id: u64,
     account: Address,
@@ -305,7 +305,7 @@ pub fn validate_get_proof_data_call(
 
     let contract = Contract::new(asset, &env);
 
-    let call = IERC20::getProofDataCall { account: account };
+    let call = IMaldaMarket::getProofDataCall { account: account, dstChainId: chain_id as u32 };
     let proof_data = contract.call_builder(&call).call()._0;
 
     let last_block = if linking_blocks.is_empty() {
@@ -342,7 +342,7 @@ pub fn validate_get_proof_data_call(
     );
 
     let journal = Journal {
-        balance: proof_data,
+        proof_data,
         account,
         asset,
         checkpoint: B256::new(checkpoint.0),

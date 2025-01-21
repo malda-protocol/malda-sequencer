@@ -45,7 +45,7 @@ mod tests {
             .inner()
             .number;
 
-        let balance_call_input = get_balance_call_input(
+        let proof_data_call_input = get_proof_data_call_input(
             LINEA_CHAIN_ID,
             RPC_URL_LINEA,
             latest_block,
@@ -54,7 +54,7 @@ mod tests {
         )
         .await;
 
-        let env = balance_call_input.into_env();
+        let env = proof_data_call_input.into_env();
         validate_linea_env(LINEA_CHAIN_ID, env.header().inner().clone());
     }
 
@@ -80,7 +80,7 @@ mod tests {
             .inner()
             .number;
 
-        let balance_call_input = get_balance_call_input(
+        let proof_data_call_input = get_proof_data_call_input(
             OPTIMISM_CHAIN_ID,
             RPC_URL_OPTIMISM,
             latest_block,
@@ -89,7 +89,7 @@ mod tests {
         )
         .await;
 
-        let env = balance_call_input.into_env();
+        let env = proof_data_call_input.into_env();
         assert!(std::panic::catch_unwind(|| {
             validate_linea_env(LINEA_CHAIN_ID, env.header().inner().clone());
         })
@@ -118,7 +118,7 @@ mod tests {
             .inner()
             .number;
 
-        let balance_call_input = get_balance_call_input(
+        let proof_data_call_input = get_proof_data_call_input(
             LINEA_CHAIN_ID,
             RPC_URL_LINEA,
             latest_block,
@@ -126,7 +126,8 @@ mod tests {
             vec![WETH_LINEA],
         )
         .await;
-        let env = balance_call_input.into_env();
+
+        let env = proof_data_call_input.into_env();
         let mut header = env.header().inner().inner().clone();
         header.number = 1;
         assert!(std::panic::catch_unwind(|| {

@@ -17,13 +17,14 @@ use crate::cryptography::signature_msg;
 use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, B256, U256};
 
 sol! {
-    /// Interface for querying ERC-20 token balances.
-    interface IERC20 {
-        /// Returns the token balance of a given account.
+    /// Interface for querying proof data from the Malda Market.
+    interface IMaldaMarket {
+        /// Returns the proof data for a given account.
         ///
         /// # Arguments
-        /// * `account` - The address to query the balance for
-        function getProofData(address account) external view returns (bytes memory);
+        /// * `account` - The address to query the proof data for
+        /// * `dstChainId` - The chainId to query the proof data for
+        function getProofData(address account, uint32 dstChainId) external view returns (bytes memory);
     }
 
     /// Interface for accessing L1 block information.
@@ -35,7 +36,7 @@ sol! {
     }
 
     /// @title Multicall3 interface for batch calling contracts
-    /// @dev Allows batching multiple calls in a single transaction
+    /// @dev Allows batching multiple proof data queries in a single transaction
     struct Call3 {
         /// @dev Target contract to call
         address target;
@@ -45,7 +46,7 @@ sol! {
         bytes callData;
     }
     
-    /// @dev Result of an individual call within the batch
+    /// @dev Result of an individual proof data query within the batch
     struct CallResult {
         /// @dev Indicates if the call was successful
         bool success;
