@@ -27,9 +27,9 @@ mod tests {
     use malda_rs::{
         constants::*,
         viewcalls::{
-            get_current_sequencer_commitment, get_user_balance_exec, get_user_balance_prove,
+            get_current_sequencer_commitment, get_proof_data_exec, get_proof_data_prove,
         },
-        viewcalls_ethereum_light_client::get_user_balance_exec as get_user_balance_exec_ethereum_light_client,
+        viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
     use std::io::Write;
 
@@ -90,12 +90,12 @@ mod tests {
     ];
 
     #[tokio::test]
-    async fn test_guest_proves_balance_on_linea() {
+    async fn prove_get_proof_data_on_linea() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let asset = WETH_LINEA;
         let chain_id = LINEA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_linea]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -106,12 +106,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sepolia_guest_proves_balance_on_linea() {
+    async fn prove_get_proof_data_on_linea_sepolia() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let asset = WETH_LINEA_SEPOLIA;
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_linea]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -122,12 +122,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_on_optimism() {
+    async fn prove_get_proof_data_on_optimism() {
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_optimism]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -138,12 +138,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sepolia_guest_proves_balance_on_optimism() {
+    async fn prove_get_proof_data_on_optimism_sepolia() {
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let asset = WETH_OPTIMISM_SEPOLIA;
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_optimism]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -154,13 +154,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_batch() {
+    async fn prove_get_proof_data_batch() {
         // Single chain test (Linea)
         let users = vec![vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")]];
         let assets = vec![vec![WETH_LINEA]];
         let chain_ids = vec![LINEA_CHAIN_ID];
 
-        let session_info = get_user_balance_exec(users, assets, chain_ids)
+        let session_info = get_proof_data_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -177,7 +177,7 @@ mod tests {
         let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID];
 
-        let session_info = get_user_balance_exec(users, assets, chain_ids)
+        let session_info = get_proof_data_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -194,7 +194,7 @@ mod tests {
         let assets = vec![vec![WETH_LINEA], vec![WETH_OPTIMISM], vec![WETH_BASE]];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID];
 
-        let session_info = get_user_balance_exec(users, assets, chain_ids)
+        let session_info = get_proof_data_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -222,7 +222,7 @@ mod tests {
             ETHEREUM_CHAIN_ID,
         ];
 
-        let session_info = get_user_balance_exec(users, assets, chain_ids)
+        let session_info = get_proof_data_exec(users, assets, chain_ids)
             .await
             .unwrap();
 
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_batch_stats() {
+    async fn prove_get_proof_data_batch_stats() {
         use rand::Rng;
         use std::time::Instant;
 
@@ -280,7 +280,7 @@ mod tests {
 
             let start_time = Instant::now();
             let prove_info =
-                get_user_balance_exec(users.clone(), assets.clone(), chain_ids.clone())
+                get_proof_data_exec(users.clone(), assets.clone(), chain_ids.clone())
                     .await
                     .unwrap();
             let cycles = prove_info.segments.iter().map(|s| s.cycles).sum::<u32>();
@@ -340,12 +340,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sepolia_guest_proves_balance_on_base() {
+    async fn prove_get_proof_data_on_base_sepolia() {
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
         let asset = WETH_BASE_SEPOLIA;
         let chain_id = BASE_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_base]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -356,12 +356,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_on_ethereum_via_op() {
+    async fn prove_get_proof_data_on_ethereum_via_op() {
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_ethereum]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -372,12 +372,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sepolia_guest_proves_balance_on_ethereum_via_op() {
+    async fn prove_get_proof_data_on_ethereum_sepolia_via_op() {
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
         let asset = WETH_ETHEREUM_SEPOLIA;
         let chain_id = ETHEREUM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_user_balance_exec(
+        let session_info = get_proof_data_exec(
             vec![vec![user_ethereum]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -388,7 +388,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_proves_balance_on_ethereum_via_light_client() {
+    async fn prove_get_proof_data_on_ethereum_via_light_client() {
         let user_ethereum = address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E");
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
@@ -401,7 +401,7 @@ mod tests {
         ];
         let trusted_hash = B256::from(trusted_hash_bytes);
 
-        let session_info = get_user_balance_exec_ethereum_light_client(
+        let session_info = get_proof_data_exec_ethereum_light_client(
             user_ethereum,
             asset,
             chain_id,
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn benchmark_prove_all_chains() {
+    async fn benchmark_prove_get_proof_data_all_chains() {
         let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
         let user_optimism = address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8");
         let user_base = address!("6446021F4E396dA3df4235C62537431372195D38");
@@ -432,7 +432,7 @@ mod tests {
         let chain_id = LINEA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(
+        let prove_info = get_proof_data_prove(
             vec![vec![user_linea]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -447,7 +447,7 @@ mod tests {
         let asset = WETH_OPTIMISM;
         let chain_id = OPTIMISM_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(
+        let prove_info = get_proof_data_prove(
             vec![vec![user_optimism]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -461,7 +461,7 @@ mod tests {
         let asset = WETH_BASE;
         let chain_id = BASE_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(
+        let prove_info = get_proof_data_prove(
             vec![vec![user_base]], 
             vec![vec![asset]], 
             vec![chain_id]
@@ -475,7 +475,7 @@ mod tests {
         let asset = WETH_ETHEREUM;
         let chain_id = ETHEREUM_CHAIN_ID;
         let start_time = std::time::Instant::now();
-        let prove_info = get_user_balance_prove(
+        let prove_info = get_proof_data_prove(
             vec![vec![user_ethereum]], 
             vec![vec![asset]], 
             vec![chain_id]

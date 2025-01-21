@@ -23,7 +23,7 @@ sol! {
         ///
         /// # Arguments
         /// * `account` - The address to query the balance for
-        function balanceOf(address account) external view returns (uint256);
+        function getProofData(address account) external view returns (bytes memory);
     }
 
     /// Interface for accessing L1 block information.

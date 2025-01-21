@@ -260,7 +260,7 @@ pub fn read_l1_chain_builder_input() -> (
 sol! {
     struct Journal {
         /// The balance amount
-        uint256 balance;
+        bytes balance;
         /// The user's address
         address account;
         /// The asset's contract address
@@ -292,7 +292,7 @@ sol! {
 /// 4. Executes and validates the balance query
 ///
 /// Commits the results including balance and checkpoints to the guest environment.
-pub fn validate_balance_of_call(
+pub fn validate_get_proof_data_call(
     chain_id: u64,
     account: Address,
     asset: Address,
@@ -303,10 +303,10 @@ pub fn validate_balance_of_call(
 ) {
     let env = env_input.into_env();
 
-    let erc20_contract = Contract::new(asset, &env);
+    let contract = Contract::new(asset, &env);
 
-    let call = IERC20::balanceOfCall { account: account };
-    let balance = erc20_contract.call_builder(&call).call()._0;
+    let call = IERC20::getProofDataCall { account: account };
+    let proof_data = contract.call_builder(&call).call()._0;
 
     let last_block = if linking_blocks.is_empty() {
         env.header().inner().clone()
@@ -342,7 +342,7 @@ pub fn validate_balance_of_call(
     );
 
     let journal = Journal {
-        balance,
+        balance: proof_data,
         account,
         asset,
         checkpoint: B256::new(checkpoint.0),
