@@ -50,7 +50,7 @@ mod tests {
             RPC_URL_LINEA,
             latest_block,
             vec![USER],
-            vec![WETH_LINEA],
+            vec![WETH_MARKET_SEPOLIA],
         )
         .await;
 
@@ -85,7 +85,7 @@ mod tests {
             RPC_URL_OPTIMISM,
             latest_block,
             vec![USER],
-            vec![WETH_OPTIMISM],
+            vec![WETH_MARKET_SEPOLIA],
         )
         .await;
 
@@ -123,7 +123,7 @@ mod tests {
             RPC_URL_LINEA,
             latest_block,
             vec![USER],
-            vec![WETH_LINEA],
+            vec![WETH_MARKET_SEPOLIA],
         )
         .await;
 
