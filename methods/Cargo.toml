@@ -21,3 +21,4 @@ tokio = { version = "1.35", features = ["full", "test-util"] }
 rand = "0.8"
 
 
+risc0-ethereum-contracts = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.2.0" }
