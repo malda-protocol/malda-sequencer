@@ -51,5 +51,5 @@ pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str =
     "http://127.0.0.1:9545/gossip_getSequencerCommitment";
 
 
-pub const USDC_MARKET_SEPOLIA: Address = address!("e968F5D73777bC422295D923A290e5C9e380aa41");
-pub const WETH_MARKET_SEPOLIA: Address = address!("eA9A687DF688a7c79f36AdEB5cE6Dba1e26A300B");
+pub const USDC_MARKET_SEPOLIA: Address = address!("0C6cBeAbCbD56B4536460fB39dCd215323d209a3");
+pub const WETH_MARKET_SEPOLIA: Address = address!("7c907cC2D7Dc9f2b8b815d4D0c9271Bcf609240D");

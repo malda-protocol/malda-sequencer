@@ -16,9 +16,7 @@ use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
 use alloy_consensus::Header;
-use alloy_primitives::Address;
-use alloy_primitives::Bytes;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256, U256, Bytes};
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 
 /// Validates and executes proof data queries across multiple accounts and tokens
@@ -27,6 +25,7 @@ use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
 /// * `chain_id` - The chain ID to validate against
 /// * `accounts` - Vector of account addresses to query
 /// * `assets` - Vector of token contract addresses to query
+/// * `target_chain_ids` - Vector of target chain IDs for each account
 /// * `env_input` - EVM environment input for the chain
 /// * `sequencer_commitment` - Optional sequencer commitment for L2 chains
 /// * `op_env_input` - Optional Optimism environment input for L1 validation
@@ -42,6 +41,7 @@ pub fn validate_get_proof_data_call(
     chain_id: u64,
     account: Vec<Address>,
     asset: Vec<Address>,
+    target_chain_ids: Vec<u64>,
     env_input: EthEvmInput,
     sequencer_commitment: Option<SequencerCommitment>,
     env_op_input: Option<EthEvmInput>,
@@ -53,19 +53,21 @@ pub fn validate_get_proof_data_call(
     // Create array of Call3 structs for each proof data check
     let mut calls = Vec::with_capacity(account.len());
 
-    for (account, asset) in account.iter().zip(asset.iter()) {
-        // Create function selector for getProofData(address,uint32)
-        let selector = [0x29, 0x1e, 0x45, 0xbc];
-        let account_bytes: [u8; 32] = account.into_word().into();
+    for ((user, market), target_chain_id) in account.iter().zip(asset.iter()).zip(target_chain_ids.iter()) {
+        // Selector for getProofData(address,uint32)
+        let selector = [0x07, 0xd9, 0x23, 0xe9];
+        let user_bytes: [u8; 32] = user.into_word().into();
+        let chain_id_bytes: [u8; 32] = U256::from(*target_chain_id).to_be_bytes();
 
-        // Create calldata by concatenating selector and encoded parameters
-        let mut call_data = Vec::with_capacity(36); // 4 bytes selector + 32 bytes address
+        // Create calldata by concatenating selector, encoded address, and chain ID
+        let mut call_data = Vec::with_capacity(100); // 4 bytes selector + 32 bytes address + 32 bytes chain ID
         call_data.extend_from_slice(&selector);
         call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
-        call_data.extend_from_slice(&account_bytes);
+        call_data.extend_from_slice(&user_bytes);
+        call_data.extend_from_slice(&chain_id_bytes);
 
         calls.push(Call3 {
-            target: *asset,
+            target: *market,
             allowFailure: false,
             callData: call_data.into(),
         });
@@ -111,12 +113,6 @@ pub fn validate_get_proof_data_call(
         linking_blocks,
         validated_block_hash,
     );
-
-    // Print all results
-    for result in returns.results.iter() {
-        println!("{:?}", result.returnData);
-        println!("{:?}", result.success);
-    }
 
     // Push results directly to output vector
     returns

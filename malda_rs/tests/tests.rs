@@ -51,6 +51,7 @@ mod tests {
             latest_block,
             vec![USER],
             vec![WETH_MARKET_SEPOLIA],
+            vec![OPTIMISM_CHAIN_ID],
         )
         .await;
 
@@ -86,6 +87,7 @@ mod tests {
             latest_block,
             vec![USER],
             vec![WETH_MARKET_SEPOLIA],
+            vec![LINEA_CHAIN_ID],
         )
         .await;
 
@@ -124,6 +126,7 @@ mod tests {
             latest_block,
             vec![USER],
             vec![WETH_MARKET_SEPOLIA],
+            vec![OPTIMISM_CHAIN_ID],
         )
         .await;
 
