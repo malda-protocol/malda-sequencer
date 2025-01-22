@@ -4303,6 +4303,7 @@ dependencies = [
  "ethers",
  "eyre",
  "futures",
+ "hex",
  "k256 0.13.4",
  "log",
  "methods",

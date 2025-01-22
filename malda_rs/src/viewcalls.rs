@@ -53,6 +53,7 @@ use futures::future::join_all;
 pub async fn get_proof_data_exec(
     users: Vec<Vec<Address>>,
     markets: Vec<Vec<Address>>,
+    target_chain_id: Vec<Vec<u64>>,
     chain_ids: Vec<u64>,
 ) -> Result<SessionInfo, Error> {
     // Verify outer arrays have same length
@@ -63,9 +64,10 @@ pub async fn get_proof_data_exec(
         .map(|i| {
             let users = users[i].clone();
             let markets = markets[i].clone();
+            let target_chain_id = target_chain_id[i].clone();
             let chain_id = chain_ids[i];
             tokio::spawn(async move { 
-                get_proof_data_zkvm_input(users, markets, chain_id).await 
+                get_proof_data_zkvm_input(users, markets, target_chain_id, chain_id).await 
             })
         })
         .collect();
@@ -107,6 +109,7 @@ pub async fn get_proof_data_exec(
 pub async fn get_proof_data_prove(
     users: Vec<Vec<Address>>,
     markets: Vec<Vec<Address>>,
+    target_chain_ids: Vec<Vec<u64>>,
     chain_ids: Vec<u64>,
 ) -> Result<ProveInfo, Error> {
     // Move all the work including env creation into the blocking task
@@ -126,8 +129,9 @@ pub async fn get_proof_data_prove(
                     let users = users[i].clone();
                     let markets = markets[i].clone();
                     let chain_id = chain_ids[i];
+                    let target_chain_id = target_chain_ids[i].clone();
                     tokio::spawn(async move {
-                        get_proof_data_zkvm_input(users, markets, chain_id).await
+                        get_proof_data_zkvm_input(users, markets, target_chain_id, chain_id).await
                     })
                 })
                 .collect();
@@ -173,6 +177,7 @@ pub async fn get_proof_data_prove(
 pub async fn get_proof_data_zkvm_input(
     users: Vec<Address>,
     markets: Vec<Address>,
+    target_chain_ids: Vec<u64>,
     chain_id: u64,
 ) -> Vec<u8> {
     let rpc_url = match chain_id {
@@ -241,7 +246,7 @@ pub async fn get_proof_data_zkvm_input(
 
     let (linking_blocks, proof_data_call_input) = tokio::join!(
         get_linking_blocks(chain_id, rpc_url, block),
-        get_proof_data_call_input(chain_id, rpc_url, block, users.clone(), markets.clone())
+        get_proof_data_call_input(chain_id, rpc_url, block, users.clone(), markets.clone(), target_chain_ids.clone())
     );
 
     let input: Vec<u8> = bytemuck::pod_collect_to_vec(
@@ -250,6 +255,7 @@ pub async fn get_proof_data_zkvm_input(
             &chain_id,
             &users,
             &markets,
+            &target_chain_ids,
             &commitment,
             &l1_block_call_input,
             &linking_blocks,
@@ -282,6 +288,7 @@ pub async fn get_proof_data_call_input(
     block: u64,
     users: Vec<Address>,
     markets: Vec<Address>,
+    target_chain_ids: Vec<u64>,
 ) -> EvmInput<RlpHeader<Header>> {
     let reorg_protection_depth = match chain_id {
         OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
@@ -309,16 +316,22 @@ pub async fn get_proof_data_call_input(
     // Create array of Call3 structs for each proof data check
     let mut calls = Vec::with_capacity(users.len());
 
-    for (user, market) in users.iter().zip(markets.iter()) {
-        // Selector for getProofData(address)
-        let selector = [0x29, 0x1e, 0x45, 0xbc];
+    for ((user, market), target_chain_id) in users.iter().zip(markets.iter()).zip(target_chain_ids.iter()) {
+        // Selector for getProofData(address,uint32)
+        let selector = [0x07, 0xd9, 0x23, 0xe9];
         let user_bytes: [u8; 32] = user.into_word().into();
+        // Convert chain_id to 4 bytes
+        let chain_id_bytes = (*target_chain_id as u32).to_be_bytes();
 
-        // Create calldata by concatenating selector and encoded address
-        let mut call_data = Vec::with_capacity(36); // 4 bytes selector + 32 bytes address
+        // Create calldata by concatenating selector, encoded address, and chain ID
+        let mut call_data = Vec::with_capacity(68); // 4 bytes selector + 32 bytes address + 4 bytes chain ID
         call_data.extend_from_slice(&selector);
         call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
         call_data.extend_from_slice(&user_bytes);
+        call_data.extend_from_slice(&[0u8; 28]); // pad chain id to 32 bytes
+        call_data.extend_from_slice(&chain_id_bytes);
+
+        println!("{:?}", hex::encode(call_data.clone()));
 
         calls.push(Call3 {
             target: *market,
@@ -344,6 +357,14 @@ pub async fn get_proof_data_call_input(
         .call()
         .await
         .expect("Failed to execute multicall");
+
+        // Print all results
+        for result in _returns.results.iter() {
+            println!("{:?}", result.returnData);
+            println!("{:?}", result.success);
+        }
+
+        panic!("stop");
 
     env.into_input()
         .await
