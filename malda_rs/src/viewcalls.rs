@@ -17,14 +17,14 @@ use core::panic;
 
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
-use crate::types::{Call3, IMulticall3, IMaldaMarket};
+use crate::types::{Call3, IMulticall3};
 use methods::GET_PROOF_DATA_ELF;
 
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
 use risc0_zkvm::{
-    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo,
+    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts
 };
 
 use alloy_consensus::Header;
@@ -149,7 +149,7 @@ pub async fn get_proof_data_prove(
                 .unwrap()
         });
 
-        default_prover().prove(env, GET_PROOF_DATA_ELF)
+        default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::groth16())
     })
     .await?;
 

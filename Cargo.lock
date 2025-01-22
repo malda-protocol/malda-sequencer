@@ -4390,6 +4390,7 @@ dependencies = [
  "rand",
  "risc0-build",
  "risc0-build-ethereum",
+ "risc0-ethereum-contracts",
  "risc0-steel",
  "risc0-zkp",
  "tokio",

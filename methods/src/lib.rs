@@ -32,6 +32,7 @@ mod tests {
         viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
     use std::io::Write;
+    use risc0_ethereum_contracts::encode_seal;
 
     // Common market tokens for all chains
     const MARKETS: [Address; 2] = [
@@ -110,14 +111,14 @@ mod tests {
         let market = address!("0A94446f1FC201Ea0fF1B8288864A18Cb581035e");
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_proof_data_exec(
+        let session_info = get_proof_data_prove(
             vec![vec![user_optimism]], 
             vec![vec![market]], 
             vec![chain_id]
         ).await.unwrap();
 
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("Cycles: {}", cycles);
+        let seal = encode_seal(&session_info.receipt).unwrap();
+
         
     }
 
