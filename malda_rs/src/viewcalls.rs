@@ -210,6 +210,8 @@ pub async fn get_proof_data_zkvm_input(
         (Some(block), None)
     };
 
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
     let (l1_block_call_input, ethereum_block) =
         if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
             let chain_id = if chain_id == ETHEREUM_CHAIN_ID {

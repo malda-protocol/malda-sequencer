@@ -36,7 +36,7 @@ pub const RPC_URL_ETHEREUM_SEPOLIA: &str =
     "https://eth-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_BASE_SEPOLIA: &str =
     "https://base-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
-pub const RPC_URL_OPTIMISM_SEPOLIA: &str = "http://localhost:8545";
+pub const RPC_URL_OPTIMISM_SEPOLIA: &str = "https://opt-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY";
 pub const RPC_URL_ARBITRUM_SEPOLIA: &str =
     "https://arb-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
@@ -50,17 +50,6 @@ pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str =
 pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str =
     "http://127.0.0.1:9545/gossip_getSequencerCommitment";
 
-/// Wrapped Ether (WETH) contract addresses for each supported network
-pub const WETH_ETHEREUM: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
-pub const WETH_LINEA: Address = address!("e5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f");
-pub const WETH_ARBITRUM: Address = address!("82aF49447D8a07e3bd95BD0d56f35241523fBab1");
-pub const WETH_OPTIMISM: Address = address!("4200000000000000000000000000000000000006");
-pub const WETH_BASE: Address = address!("4200000000000000000000000000000000000006");
-pub const WETH_SCROLL: Address = address!("5300000000000000000000000000000000000004");
 
-pub const WETH_ETHEREUM_SEPOLIA: Address = address!("7b79995e5f793A07Bc00c21412e50Ecae098E7f9");
-pub const WETH_LINEA_SEPOLIA: Address = address!("f7F895d17DBA17A872041bebbb648F95adE2aEF9");
-pub const WETH_ARBITRUM_SEPOLIA: Address = address!("802CC0F559eBc79DA798bf3F3baB44141a1a06Ed");
-pub const WETH_OPTIMISM_SEPOLIA: Address = address!("4200000000000000000000000000000000000006");
-pub const WETH_BASE_SEPOLIA: Address = address!("4200000000000000000000000000000000000006");
-pub const WETH_SCROLL_SEPOLIA: Address = address!("5300000000000000000000000000000000000004");
+pub const USDC_MARKET_SEPOLIA: Address = address!("e968F5D73777bC422295D923A290e5C9e380aa41");
+pub const WETH_MARKET_SEPOLIA: Address = address!("eA9A687DF688a7c79f36AdEB5cE6Dba1e26A300B");
