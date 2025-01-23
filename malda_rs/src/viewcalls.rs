@@ -18,7 +18,7 @@ use core::panic;
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
 use crate::types::{Call3, IMulticall3};
-use methods::{GET_PROOF_DATA_ELF, GET_PROOF_DATA_ID};
+use methods::GET_PROOF_DATA_ELF;
 
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
@@ -57,8 +57,6 @@ pub async fn get_proof_data_exec(
     target_chain_id: Vec<Vec<u64>>,
     chain_ids: Vec<u64>,
 ) -> Result<SessionInfo, Error> {
-    println!("GET_PROOF_DATA_ID: {:?}", GET_PROOF_DATA_ID);
-    panic!("test");
     // Verify outer arrays have same length
     assert_eq!(users.len(), markets.len(), "Users and markets array lengths must match");
     assert_eq!(users.len(), chain_ids.len(), "Users and chain_ids array lengths must match");
