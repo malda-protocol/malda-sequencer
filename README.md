@@ -192,3 +192,7 @@ Below are the primary files in the project directory
 [zkVM program]: ./methods/guest/
 [steel-repo]: https://github.com/risc0/risc0-ethereum/tree/main/steel
 [erc20-counter]: https://github.com/risc0/risc0-ethereum/tree/main/examples/erc20-counter
+
+
+    tests::benchmark_prove_get_proof_data_all_chains
+    tests::prove_get_proof_data_on_ethereum_sepolia_via_op

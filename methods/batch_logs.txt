@@ -1,2 +1,6 @@
 users_linea 10 assets_linea 6 users_optimism 10 assets_optimism 6 users_base 10 assets_base 6 users_ethereum 10 assets_ethereum 7 total_users 40 total_assets 25 mcycles 0 duration_s 8.80
 users_linea 10 assets_linea 2 users_optimism 10 assets_optimism 2 users_base 10 assets_base 2 users_ethereum 10 assets_ethereum 2 total_users 40 total_assets 2 mcycles 47 duration_s 6.56
+users_linea 10 assets_linea 2 users_optimism 10 assets_optimism 2 users_base 10 assets_base 2 users_ethereum 10 assets_ethereum 2 total_users 40 total_assets 2 mcycles 46 duration_s 6.01
+users_linea 10 assets_linea 2 users_optimism 10 assets_optimism 2 users_base 10 assets_base 2 users_ethereum 10 assets_ethereum 2 total_users 40 total_assets 2 mcycles 41 duration_s 5.82
+users_linea 10 assets_linea 2 users_optimism 10 assets_optimism 2 users_base 10 assets_base 2 users_ethereum 10 assets_ethereum 2 total_users 40 total_assets 2 mcycles 40 duration_s 5.53
+users_linea 10 assets_linea 2 users_optimism 10 assets_optimism 2 users_base 10 assets_base 2 users_ethereum 10 assets_ethereum 2 total_users 40 total_assets 2 mcycles 52 duration_s 5.92

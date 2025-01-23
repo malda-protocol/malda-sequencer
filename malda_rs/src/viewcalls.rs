@@ -28,7 +28,7 @@ use risc0_zkvm::{
 };
 
 use alloy_consensus::Header;
-use alloy::primitives::{Address, U256};
+use alloy::primitives::Address;
 
 use anyhow::{Result, Error};
 use tokio;
@@ -40,6 +40,7 @@ use futures::future::join_all;
 /// # Arguments
 /// * `users` - Vector of user address vectors, one per chain
 /// * `markets` - Vector of market contract address vectors, one per chain
+/// * `target_chain_ids` - Vector of target chain IDs to query
 /// * `chain_ids` - Vector of chain IDs to query
 ///
 /// # Returns
@@ -96,6 +97,7 @@ pub async fn get_proof_data_exec(
 /// # Arguments
 /// * `users` - Vector of user address vectors, one per chain
 /// * `markets` - Vector of market contract address vectors, one per chain
+/// * `target_chain_ids` - Vector of target chain IDs to query
 /// * `chain_ids` - Vector of chain IDs to query
 ///
 /// # Returns
@@ -165,6 +167,7 @@ pub async fn get_proof_data_prove(
 /// # Arguments
 /// * `users` - Vector of user addresses to query
 /// * `markets` - Vector of market contract addresses to query
+/// * `target_chain_ids` - Vector of target chain IDs to query
 /// * `chain_id` - Chain ID for the queries
 ///
 /// # Returns
@@ -274,6 +277,7 @@ pub async fn get_proof_data_zkvm_input(
 /// * `block` - Block number to query at
 /// * `users` - Vector of user addresses
 /// * `markets` - Vector of market contract addresses
+/// * `target_chain_ids` - Vector of target chain IDs to query
 ///
 /// # Returns
 /// * `EvmInput<RlpHeader<Header>>` - Formatted EVM input for the multicall
@@ -326,12 +330,9 @@ pub async fn get_proof_data_call_input(
         // Create calldata by concatenating selector, encoded address, and chain ID
         let mut call_data = Vec::with_capacity(68); // 4 bytes selector + 32 bytes address + 4 bytes chain ID
         call_data.extend_from_slice(&selector);
-        call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
         call_data.extend_from_slice(&user_bytes);
         call_data.extend_from_slice(&[0u8; 28]); // pad chain id to 32 bytes
         call_data.extend_from_slice(&chain_id_bytes);
-
-        println!("{:?}", hex::encode(call_data.clone()));
 
         calls.push(Call3 {
             target: *market,
@@ -343,28 +344,20 @@ pub async fn get_proof_data_call_input(
     // Make single multicall
     let multicall = IMulticall3::aggregate3Call { calls };
 
-    let gas_price = if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
-        50000000000u64
-    } else {
-        10000000000u64
-    };
+    // let gas_price = if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+    //     50000000000u64
+    // } else {
+    //     10000000000u64
+    // };
 
     let mut contract = Contract::preflight(MULTICALL, &mut env);
     let _returns = contract
         .call_builder(&multicall)
-        .gas_price(U256::from(gas_price))
-        .from(Address::ZERO)
+        // .gas_price(U256::from(gas_price))
+        // .from(Address::ZERO)
         .call()
         .await
         .expect("Failed to execute multicall");
-
-        // Print all results
-        for result in _returns.results.iter() {
-            println!("{:?}", result.returnData);
-            println!("{:?}", result.success);
-        }
-
-        panic!("stop");
 
     env.into_input()
         .await
