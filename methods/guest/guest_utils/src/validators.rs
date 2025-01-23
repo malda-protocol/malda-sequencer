@@ -12,12 +12,15 @@
 //! - Optimism - Mainnet and Sepolia
 //! - Base - Mainnet and Sepolia
 //! - Linea - Mainnet and Sepolia
+use std::io::Read;
+
 use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256, U256, Bytes};
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
+use alloy_sol_types::SolType;
 
 /// Validates and executes proof data queries across multiple accounts and tokens
 ///
@@ -54,6 +57,7 @@ pub fn validate_get_proof_data_call(
     let mut calls = Vec::with_capacity(account.len());
 
     for ((user, market), target_chain_id) in account.iter().zip(asset.iter()).zip(target_chain_ids.iter()) {
+        assert!(*market == WETH_MARKET_SEPOLIA || *market == USDC_MARKET_SEPOLIA, "market is not mWETH or mUSDC");
         // Selector for getProofData(address,uint32)
         let selector = [0x07, 0xd9, 0x23, 0xe9];
         let user_bytes: [u8; 32] = user.into_word().into();
@@ -114,11 +118,15 @@ pub fn validate_get_proof_data_call(
         validated_block_hash,
     );
 
-    // Push results directly to output vector
+    // Push decoded results to output vector
     returns
         .results
         .iter()
-        .for_each(|result| output.push(result.returnData.clone()));
+        .for_each(|result| {
+            let decoded = <alloy_sol_types::sol!(bytes)>::abi_decode(&result.returnData, true)
+                .expect("Failed to decode return data");
+            output.push(decoded.into());
+        });
 }
 
 /// Validates a Linea block header by verifying the sequencer signature
