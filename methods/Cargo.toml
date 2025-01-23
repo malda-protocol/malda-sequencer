@@ -10,7 +10,7 @@ methods = ["guest"]
 hex = { workspace = true }
 risc0-build = { workspace = true }
 risc0-build-ethereum = { workspace = true }
-risc0-zkp = { workspace = true }
+risc0-zkp = { workspace = true, features = ["prove"] }
 
 [dev-dependencies]
 alloy = "0.6.4"
