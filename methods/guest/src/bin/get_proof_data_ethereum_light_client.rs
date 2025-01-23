@@ -1,9 +1,8 @@
 use guest_utils::{validators_ethereum_light_client::validate_get_proof_data_call as validate_get_proof_data_call_ethereum_light_client, types::SequencerCommitment};
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::Address;
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;
 use alloy_consensus::Header;
-use alloy_sol_types::SolValue;
 
 fn main() {
     // Read the input data for this application.

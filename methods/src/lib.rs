@@ -32,7 +32,6 @@ mod tests {
         viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
     use std::io::Write;
-    use risc0_ethereum_contracts::encode_seal;
 
     // Common market tokens for all chains
     const MARKETS: [Address; 2] = [
@@ -114,13 +113,12 @@ mod tests {
         let market = WETH_MARKET_SEPOLIA;
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
-        let session_info = get_proof_data_prove(
+        let _session_info = get_proof_data_prove(
             vec![vec![user_optimism]], 
             vec![vec![market]], 
             vec![vec![LINEA_CHAIN_ID]],
             vec![chain_id]
         ).await.unwrap();
-        panic!("stop");
     }
 
     #[tokio::test]
@@ -150,7 +148,10 @@ mod tests {
             vec![WETH_MARKET_SEPOLIA],
         ];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID];
-        let target_chain_ids = vec![vec![OPTIMISM_CHAIN_ID]];
+        let target_chain_ids = vec![
+            vec![OPTIMISM_CHAIN_ID],
+            vec![LINEA_CHAIN_ID],
+        ];
 
         let session_info = get_proof_data_exec(users, assets, target_chain_ids, chain_ids)
             .await
@@ -172,7 +173,11 @@ mod tests {
             vec![WETH_MARKET_SEPOLIA],
         ];
         let chain_ids = vec![LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID, BASE_CHAIN_ID];
-        let target_chain_ids = vec![vec![OPTIMISM_CHAIN_ID]];
+        let target_chain_ids = vec![
+            vec![OPTIMISM_CHAIN_ID],
+            vec![LINEA_CHAIN_ID],
+            vec![OPTIMISM_CHAIN_ID],
+        ];
 
         let session_info = get_proof_data_exec(users, assets, target_chain_ids, chain_ids)
             .await
@@ -184,7 +189,6 @@ mod tests {
 
         // Test with Linea + Optimism + Base + Ethereum
         let users = vec![
-            vec![address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3")],
             vec![address!("e50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8")],
             vec![address!("6446021F4E396dA3df4235C62537431372195D38")],
             vec![address!("F04a5cC80B1E94C69B48f5ee68a08CD2F09A7c3E")],
@@ -201,7 +205,12 @@ mod tests {
             BASE_CHAIN_ID,
             ETHEREUM_CHAIN_ID,
         ];
-        let target_chain_ids = vec![vec![OPTIMISM_CHAIN_ID]];
+        let target_chain_ids = vec![
+            vec![OPTIMISM_CHAIN_ID],
+            vec![LINEA_CHAIN_ID],
+            vec![OPTIMISM_CHAIN_ID],
+            vec![LINEA_CHAIN_ID],
+        ];
 
         let session_info = get_proof_data_exec(users, assets, target_chain_ids, chain_ids)
             .await
@@ -255,10 +264,17 @@ mod tests {
             }
 
             let start_time = Instant::now();
-            let prove_info =
-                get_proof_data_exec(users.clone(), assets.clone(), vec![vec![OPTIMISM_CHAIN_ID]], chain_ids.clone())
-                    .await
-                    .unwrap();
+            // Create target_chain_ids with same length as users/assets
+            let target_chain_ids = users.iter().map(|_| vec![OPTIMISM_CHAIN_ID]).collect::<Vec<_>>();
+            
+            let prove_info = get_proof_data_exec(
+                users.clone(), 
+                assets.clone(), 
+                target_chain_ids,
+                chain_ids.clone()
+            )
+            .await
+            .unwrap();
             let cycles = prove_info.segments.iter().map(|s| s.cycles).sum::<u32>();
             let duration = start_time.elapsed();
 

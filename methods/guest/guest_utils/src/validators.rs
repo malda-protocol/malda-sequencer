@@ -60,9 +60,8 @@ pub fn validate_get_proof_data_call(
         let chain_id_bytes: [u8; 32] = U256::from(*target_chain_id).to_be_bytes();
 
         // Create calldata by concatenating selector, encoded address, and chain ID
-        let mut call_data = Vec::with_capacity(100); // 4 bytes selector + 32 bytes address + 32 bytes chain ID
+        let mut call_data = Vec::with_capacity(68); // 4 bytes selector + 32 bytes address + 32 bytes chain ID
         call_data.extend_from_slice(&selector);
-        call_data.extend_from_slice(&[0u8; 12]); // pad address to 32 bytes
         call_data.extend_from_slice(&user_bytes);
         call_data.extend_from_slice(&chain_id_bytes);
 
@@ -101,6 +100,7 @@ pub fn validate_get_proof_data_call(
         let ethereum_hash = get_ethereum_block_hash_via_opstack(
             sequencer_commitment.unwrap(),
             env_op_input.unwrap(),
+            chain_id
         );
         ethereum_hash
     } else {
@@ -211,9 +211,11 @@ pub fn validate_opstack_env(chain_id: u64, commitment: &SequencerCommitment, env
 pub fn get_ethereum_block_hash_via_opstack(
     commitment: SequencerCommitment,
     input_op: EthEvmInput,
+    chain_id: u64
 ) -> B256 {
     let env_op = input_op.into_env();
-    validate_opstack_env(OPTIMISM_CHAIN_ID, &commitment, env_op.commitment().digest);
+    let verify_via_chain = if chain_id == ETHEREUM_CHAIN_ID { OPTIMISM_CHAIN_ID } else { OPTIMISM_SEPOLIA_CHAIN_ID };
+    validate_opstack_env(verify_via_chain, &commitment, env_op.commitment().digest);
     let l1_block = Contract::new(L1_BLOCK_ADDRESS_OPTIMISM, &env_op);
     let call = IL1Block::hashCall {};
     l1_block.call_builder(&call).call()._0
