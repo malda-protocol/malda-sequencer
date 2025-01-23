@@ -16,6 +16,7 @@ use ssz_types::{typenum, FixedVector, VariableList};
 use crate::cryptography::signature_msg;
 use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, B256, U256};
 
+
 sol! {
     /// Interface for querying proof data from the Malda Market.
     interface IMaldaMarket {

@@ -4428,6 +4428,7 @@ dependencies = [
  "log",
  "methods",
  "reqwest 0.12.9",
+ "revm",
  "risc0-ethereum-contracts",
  "risc0-steel",
  "risc0-zkvm",
