@@ -19,6 +19,7 @@ ethereum_ssz_derive = "0.7.0"
 ethereum_ssz = "0.7.0"
 alloy-rlp = "0.3"
 alloy-consensus = "0.6.4"
+revm = { version = "18.0", default-features = false, features = ["std"] }
 
 alloy-primitives-old = { package = "alloy-primitives", version = "=0.7.7" }
 alloy = "0.6.4"

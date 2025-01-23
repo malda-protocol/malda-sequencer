@@ -12,15 +12,16 @@
 //! - Optimism - Mainnet and Sepolia
 //! - Base - Mainnet and Sepolia
 //! - Linea - Mainnet and Sepolia
-use std::io::Read;
 
+use std::collections::BTreeMap;
 use crate::constants::*;
 use crate::cryptography::{recover_signer, signature_from_bytes};
 use crate::types::*;
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256, U256, Bytes};
-use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract};
+use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader, Contract, config::{ChainSpec, ForkCondition}};
 use alloy_sol_types::SolType;
+use revm::primitives::SpecId;
 
 /// Validates and executes proof data queries across multiple accounts and tokens
 ///
@@ -51,7 +52,12 @@ pub fn validate_get_proof_data_call(
     linking_blocks: Vec<RlpHeader<Header>>,
     output: &mut Vec<Bytes>,
 ) {
-    let env = env_input.into_env();
+
+    let chainspec = ChainSpec {
+        chain_id: chain_id,
+        forks: BTreeMap::from([(SpecId::SHANGHAI, ForkCondition::Block(1))])
+    };
+    let env = env_input.into_env().with_chain_spec(&chainspec);
 
     // Create array of Call3 structs for each proof data check
     let mut calls = Vec::with_capacity(account.len());

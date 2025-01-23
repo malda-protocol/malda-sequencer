@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, U256, address},
     providers::{
         fillers::{
             CachedNonceManager, ChainIdFiller, GasFiller, JoinFill, NonceFiller,
@@ -23,7 +23,7 @@ use eyre::Result;
 use futures_util::StreamExt;
 use malda_rs::{
     constants::*,
-    viewcalls::{get_proof_data_prove, get_proof_data_exec},
+    viewcalls::{get_proof_data_prove},
 };
 
 pub mod events;
@@ -82,11 +82,48 @@ alloy::sol! {
 
         function outHere(bytes calldata journalData, bytes calldata seal, uint256[] memory amounts, address receiver)
         external;
+
+        function mint(uint256 amount) external;
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    // let private_key_sender = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9286d1f37712ca1d16a56a81a1bf";
+
+    // let signer: PrivateKeySigner = private_key_sender
+    //     .parse()
+    //     .expect("should parse private key");
+    // let wallet = EthereumWallet::from(signer);
+
+    // let provider: ProviderType = ProviderBuilder::new()
+    //     .filler(JoinFill::new(
+    //         GasFiller,
+    //         JoinFill::new(
+    //             NonceFiller::<CachedNonceManager>::default(),
+    //             ChainIdFiller::default(),
+    //         ),
+    //     ))
+    //     .wallet(wallet)
+    //     .on_http(Url::parse("https://linea-sepolia.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e")?);
+
+    // let host_market = IMaldaMarket::new(WETH_MARKET_SEPOLIA, provider.clone());
+
+    // let tx_hash = {
+    //     let mint_action = host_market.mint(U256::from(100000000));
+    //     tracing::info!("Broadcasting out here transaction");
+    //     let pending_tx = mint_action.send().await?;
+    //     tracing::info!("Sent tx {}", pending_tx.tx_hash());
+    //     pending_tx
+    //         .with_timeout(Some(TX_TIMEOUT))
+    //         .watch()
+    //         .await?
+    // };
+
+
+
+    // panic!();
     // Markets
     let markets = vec![
         WETH_MARKET_SEPOLIA,
@@ -215,9 +252,6 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
     let seal = encode_seal(&receipt)?;
     let journal = receipt.journal.bytes.clone();
 
-    println!("Journal as hex string: {:?}", hex::encode(&journal));
-    println!("Seal as hex string: {:?}", hex::encode(&seal));
-
     let rpc_url_submission = match dst_chain_id as u64 {
         OPTIMISM_SEPOLIA_CHAIN_ID => Url::parse(RPC_URL_OPTIMISM_SEPOLIA)?,
         ETHEREUM_SEPOLIA_CHAIN_ID => Url::parse(RPC_URL_ETHEREUM_SEPOLIA)?,
@@ -244,10 +278,12 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
     let host_market = IMaldaMarket::new(market, provider.clone());
 
     let tx_hash = {
-        let out_here_action = host_market.outHere(journal.into(), seal.into(), amount, receiver);
+        let out_here_action = host_market.outHere(journal.into(), seal.into(), amount, receiver).from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
         tracing::info!("Broadcasting out here transaction");
+        println!("Broadcasting out here transaction");
         let pending_tx = out_here_action.send().await?;
         tracing::info!("Sent tx {}", pending_tx.tx_hash());
+        println!("Sent tx {:?}", pending_tx.tx_hash());
         pending_tx
             .with_timeout(Some(TX_TIMEOUT))
             .watch()
@@ -261,7 +297,7 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
 async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dyn std::error::Error>> {
     let event = parse_supplied_event(&log);
 
-
+    println!("Event: {:?}", event);
 
     let method_selector = event.linea_method_selector.as_str();
     if method_selector != MINT_EXTERNAL_SELECTOR && method_selector != REPAY_EXTERNAL_SELECTOR {
@@ -306,14 +342,7 @@ async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dy
         .expect("should parse private key");
     let wallet = EthereumWallet::from(signer);
 
-    let provider: ProviderType = ProviderBuilder::new()
-        .filler(JoinFill::new(
-            GasFiller,
-            JoinFill::new(
-                NonceFiller::<CachedNonceManager>::default(),
-                ChainIdFiller::default(),
-            ),
-        ))
+    let provider = ProviderBuilder::new().with_recommended_fillers()
         .wallet(wallet)
         .on_http(rpc_url_submission);
 
@@ -321,10 +350,12 @@ async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dy
 
     let tx_hash = match event.linea_method_selector.as_str() {
         MINT_EXTERNAL_SELECTOR => {
-            let mint_action = host_market.mintExternal(journal.into(), seal.into(), amount, receiver);
+            let mint_action = host_market.mintExternal(journal.into(), seal.into(), amount, receiver).from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
             tracing::info!("Broadcasting mint external transaction");
+            println!("Broadcasting mint external transaction");
             let pending_tx = mint_action.send().await?;
             tracing::info!("Sent tx {}", pending_tx.tx_hash());
+            println!("Sent tx {:?}", pending_tx.tx_hash());
             pending_tx
                 .with_timeout(Some(TX_TIMEOUT))
                 .watch()
