@@ -32,6 +32,7 @@ mod tests {
         viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
     use std::io::Write;
+    use hex;
 
     // Common market tokens for all chains
     const MARKETS: [Address; 2] = [
@@ -41,7 +42,7 @@ mod tests {
 
     #[tokio::test]
     async fn prove_get_proof_data_on_linea() {
-        let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
+        let user_linea = address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3");
         let asset = WETH_MARKET_SEPOLIA;
         let chain_id = LINEA_CHAIN_ID;
 
@@ -53,12 +54,14 @@ mod tests {
         ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("journal: 0x{}", hex::encode(&session_info.journal));
         println!("Cycles: {}", cycles);
+        panic!("test");
     }
 
     #[tokio::test]
-    async fn prove_get_proof_data_on_linea_sepolia() {
-        let user_linea = address!("Ad7f33984bed10518012013D4aB0458D37FEE6F3");
+    async fn prove_sepolia_get_proof_data_on_linea() {
+        let user_linea = address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3");
         let asset = WETH_MARKET_SEPOLIA;
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
@@ -70,7 +73,9 @@ mod tests {
         ).await.unwrap();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("journal: 0x{}", hex::encode(&session_info.journal));
         println!("Cycles: {}", cycles);
+        panic!("test");
     }
 
     #[tokio::test]
