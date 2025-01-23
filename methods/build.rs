@@ -38,8 +38,6 @@ fn get_project_paths() -> (PathBuf, PathBuf) {
 fn main() {
     let (image_id_path, elf_path) = get_project_paths();
 
-    // Builds can be made deterministic, and thereby reproducible, by using Docker to build the
-    // guest. Check the RISC0_USE_DOCKER variable and use Docker to build the guest if set.
     let use_docker = env::var("RISC0_USE_DOCKER").ok().map(|_| DockerOptions {
         root_dir: Some("../".into()),
     });
