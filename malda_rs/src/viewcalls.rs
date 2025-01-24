@@ -155,7 +155,7 @@ pub async fn get_proof_data_prove(
                 .unwrap()
         });
 
-        default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::groth16())
+        default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::succinct())
     })
     .await?;
 

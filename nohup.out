@@ -1,0 +1,103 @@
+   Compiling methods v0.1.0 (/home/ubuntu/malda-zkcoprocessor/methods)
+   Compiling malda_rs v0.1.0 (/home/ubuntu/malda-zkcoprocessor/malda_rs)
+warning: constant `USDC_MARKET_SEPOLIA` is never used
+  --> malda_rs/src/../../methods/guest/guest_utils/src/constants.rs:75:11
+   |
+75 | pub const USDC_MARKET_SEPOLIA: Address = address!("0C6cBeAbCbD56B4536460fB39dCd215323d209a3");
+   |           ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: constant `WETH_MARKET_SEPOLIA` is never used
+  --> malda_rs/src/../../methods/guest/guest_utils/src/constants.rs:76:11
+   |
+76 | pub const WETH_MARKET_SEPOLIA: Address = address!("7c907cC2D7Dc9f2b8b815d4D0c9271Bcf609240D");
+   |           ^^^^^^^^^^^^^^^^^^^
+
+   Compiling sequencer v0.1.0 (/home/ubuntu/malda-zkcoprocessor/host)
+warning: `malda_rs` (lib) generated 2 warnings
+warning: unused imports: `consensus::Transaction`, `node_bindings::Anvil`, `primitives::b256`, and `request::TransactionRequest`
+  --> host/src/bin/main.rs:16:5
+   |
+16 |     consensus::Transaction,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+17 |     node_bindings::Anvil,
+   |     ^^^^^^^^^^^^^^^^^^^^
+18 |     primitives::b256,
+   |     ^^^^^^^^^^^^^^^^
+19 |     rpc::types::{request::TransactionRequest},
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `collections::HashMap` and `sync::Arc`
+  --> host/src/bin/main.rs:32:11
+   |
+32 | use std::{collections::HashMap, sync::Arc};
+   |           ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused import: `tokio::sync::Mutex`
+  --> host/src/bin/main.rs:33:5
+   |
+33 | use tokio::sync::Mutex;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rand`
+  --> host/src/bin/main.rs:36:5
+   |
+36 | use rand;
+   |     ^^^^
+
+warning: struct `ChainConfig` is never constructed
+  --> host/src/bin/main.rs:60:8
+   |
+60 | struct ChainConfig {
+   |        ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `parse_liquidate_external_event` is never used
+   --> host/src/bin/main.rs:399:4
+    |
+399 | fn parse_liquidate_external_event(log: &Log) -> LiquidateExternalEvent {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sequencer` (bin "main") generated 6 warnings (run `cargo fix --bin "main"` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 28s
+     Running `target/debug/main`
+Listening for events...
+Listening for events...
+Listening for events...
+Listening for events...
+Listening for events...
+Listening for events...
+Listening for events...
+Listening for events...
+Received event on OPTIMISM_SEPOLIA for market asset WETH
+Event: SuppliedEvent { from: 0x2693946791da99da78ac441aba6d5ce2bccd96d3, acc_amount_in: 7900005, acc_amount_out: 4000000, amount: 100000, src_chain_id: 11155420, dst_chain_id: 59141, linea_method_selector: "6f8be464" }
+Journal as hex string: "00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000702693946791da99da78ac441aba6d5ce2bccd96d37c907cc2d7dc9f2b8b815d4d0c9271bcf609240d0000000000000000000000000000000000000000000000000000000000788b6500000000000000000000000000000000000000000000000000000000003d090000aa37dc0000e70500000000000000000000000000000000"
+Seal as hex string: "c101b42b0ad715d93cb0e96b439443775fa5e84db2dde44e43ad50c6984a61846e734a8711931a1ae8e4578c95b9e4ed2df30cc8300535477ac6eb015390094003da595a10cebdfcb522f03c687641d9fd1a81be5102484c0e7c8f4f1a70a839800ab1fe117219f3169bbc656522a3c4568895f344db583251c30018699ff5d3963a795a19d1d3c51aa6244e840b75e8a110d39a91a9e0de72c0d1677393ab05a7120da802b7a09bd890d6bf913e06a71ea4fd3d263593623c74fe11789cb401e8d1ecae1395820367424960cd81064e0f56c12512f1542f37111e94042abac3fe15f54e22bede852c3008998155b85c047d58107049dd9d885a50a663dd26aa7c0a6413"
+Broadcasting mint external transaction
+Sent tx 0x2066206881513df52ff06312a4cd47ac57b097b731286494907b645a68677b1a
+Processed event OPTIMISM_SEPOLIA for market WETH in 48.868864849s
+Received event on OPTIMISM_SEPOLIA for market asset USDC
+Event: SuppliedEvent { from: 0x6c7d89c32ead20f980ad76a33377550f3f72a338, acc_amount_in: 1499800, acc_amount_out: 0, amount: 100000, src_chain_id: 11155420, dst_chain_id: 59141, linea_method_selector: "6f8be464" }
+Journal as hex string: "00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000706c7d89c32ead20f980ad76a33377550f3f72a3380c6cbeabcbd56b4536460fb39dcd215323d209a3000000000000000000000000000000000000000000000000000000000016e298000000000000000000000000000000000000000000000000000000000000000000aa37dc0000e70500000000000000000000000000000000"
+Seal as hex string: "c101b42b24d4e4fa2899cdedf07b93c890622794d483702be6d3f33ba7e0c265185b1db5231fe9bff178dabe940d949826d616d16626f6f24bd2cd63eb6fbd5282a5675d23024c689dfa01fe330bcd6ee0bb680bf3949852ae367935f8fe02bd105ad2e808e50de6cb64fa69a4d9e3b92be9caad8a37b730acec2655d2930233302b753719d3ab52f7244329ad8f0ae358fb28bf4fba3acb7862841a0471f344f3c184580ee25074f32562383bd8b02c5f91f76905af52d0d72e112e050580dc6bd448280ac6fbf5c6444caa2a5ef0453c6818359704aa40bddc38ea6c97cfab83217da30fe512d51ed5241b643148c9b37781f812ca072cfe4cd74b87ac51a5c467455f"
+Broadcasting mint external transaction
+Processed event OPTIMISM_SEPOLIA for market USDC in 37.632343868s
+Error processing event: TransportError(ErrorResp(ErrorPayload { code: 3, message: "execution reverted", data: Some(RawValue("0x8179ac1a")) }))
+Received event on OPTIMISM_SEPOLIA for market asset USDC
+Event: SuppliedEvent { from: 0x6c7d89c32ead20f980ad76a33377550f3f72a338, acc_amount_in: 1599800, acc_amount_out: 0, amount: 100000, src_chain_id: 11155420, dst_chain_id: 59141, linea_method_selector: "6f8be464" }
+Journal as hex string: "00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000706c7d89c32ead20f980ad76a33377550f3f72a3380c6cbeabcbd56b4536460fb39dcd215323d209a30000000000000000000000000000000000000000000000000000000000186938000000000000000000000000000000000000000000000000000000000000000000aa37dc0000e70500000000000000000000000000000000"
+Seal as hex string: "c101b42b1faa7f0abf49b0383aa809814dc03282270a6ff86cfe6869c54abda7e5d7bae30fad8a400a9d0a9372d9369a5a244e9ca6c770b01bafb19a600a74726827c7231b1f8bc916df7dcb831a9780d91c88e912bf63beed711d6ffdd8dcccd623ae970b34273a06dfa3e1ec18e1c3b11199151e9a9e8ee4662dfc1b0d75cb8c1708fa0d1c155e2df0587a9c974690fc45d1f42bcdce629762a855b0a590c89e77e8c020cb4e485ce167def9e2a3200c03a02a981a4c4d5fde1ae9cbed55d7f5b668e918dc6cb8c617c22838b2994c01d64e1b527288e5bd876c50179b6d839f566c20176ce692167b7e1fdd1721c4a7b5524b2e00045f58731a9290d324d42ba505a2"
+Broadcasting mint external transaction
+Sent tx 0x267979b4eefb215d7ba426bbd1f8c5e0a9f969e3a2cac8d0a390c8d5785ad7cb
+Processed event OPTIMISM_SEPOLIA for market USDC in 47.128183931s
+Received event on OPTIMISM_SEPOLIA for market asset USDC
+Event: SuppliedEvent { from: 0x6c7d89c32ead20f980ad76a33377550f3f72a338, acc_amount_in: 1699800, acc_amount_out: 0, amount: 100000, src_chain_id: 11155420, dst_chain_id: 59141, linea_method_selector: "6f8be464" }
+Journal as hex string: "00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000706c7d89c32ead20f980ad76a33377550f3f72a3380c6cbeabcbd56b4536460fb39dcd215323d209a3000000000000000000000000000000000000000000000000000000000019efd8000000000000000000000000000000000000000000000000000000000000000000aa37dc0000e70500000000000000000000000000000000"
+Seal as hex string: "c101b42b1e8e8fd9badb6a75506da15ab0146059714dc173924a0fbaf7b97040ff5d347e25e3036601eba4900d3a5ee7a0098687b78534efec24afceaec1a1e9223661a80d94e9d425aed693ebe5fe133595543d439f2f8d2ad30e64cac40590fc486f4c21075715793942b54e3d64d30695a420203fad8f7df30aa994ba2cd209419ce91d83d8ed372419e2e095415ee8e0122d9d83cfe269f0e4f56b65bec6b99499b71e2ee5546ab559f27748dde71a588906ac40bcc9d5c4dab28ffbe7ff661ce5c7173bcb84a71f82d0d3fea58203861ad109b1c2533bf9ba93a4d3e84ca687d60d03e77fe4f5dc55613f60394c3b235b7c51b8a886e6581bf7c81b7fb995394620"
+Broadcasting mint external transaction
+Processed event OPTIMISM_SEPOLIA for market USDC in 42.356960752s
+Error processing event: TransportError(ErrorResp(ErrorPayload { code: 3, message: "execution reverted: division or modulo by zero", data: Some(RawValue("0x4e487b710000000000000000000000000000000000000000000000000000000000000012")) }))
