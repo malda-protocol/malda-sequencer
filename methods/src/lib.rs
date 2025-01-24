@@ -31,8 +31,9 @@ mod tests {
         },
         viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
-    use std::io::Write;
+    use std::{io::Write, time::Duration};
     use hex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Common market tokens for all chains
     const MARKETS: [Address; 2] = [
@@ -65,16 +66,19 @@ mod tests {
         let asset = WETH_MARKET_SEPOLIA;
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
+        let start_time = std::time::Instant::now();
         let session_info = get_proof_data_exec(
             vec![vec![user_linea]], 
             vec![vec![asset]], 
             vec![vec![OPTIMISM_CHAIN_ID]],
             vec![chain_id]
         ).await.unwrap();
+        let duration = start_time.elapsed();
 
         let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
         println!("journal: 0x{}", hex::encode(&session_info.journal));
         println!("Cycles: {}", cycles);
+        println!("Duration: {:?}", duration);
         panic!("test");
     }
 
@@ -118,12 +122,105 @@ mod tests {
         let market = WETH_MARKET_SEPOLIA;
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
-        let _session_info = get_proof_data_prove(
+        let start_time = std::time::Instant::now();
+        let session_info = get_proof_data_exec(
             vec![vec![user_optimism]], 
             vec![vec![market]], 
             vec![vec![LINEA_CHAIN_ID]],
             vec![chain_id]
         ).await.unwrap();
+        let duration = start_time.elapsed();
+        println!("Duration: {:?}", duration);
+        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        println!("Cycles: {}", cycles);
+        panic!("test");
+    }
+
+    #[tokio::test]
+    async fn prove_testnet_bonsai_state() {
+        let user = address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3");
+        let market = WETH_MARKET_SEPOLIA;
+        let chain_id = LINEA_SEPOLIA_CHAIN_ID;
+
+        // Parameters for parallel execution
+        let n_parallel = 40; // Number of parallel executions
+        let delay_secs = [200, 6, 6, 8, 10]; // Delay between spawns in seconds
+
+        for delay in delay_secs {
+            // Write delay info to file
+            let delay_info = format!("Delay between submissions: {} seconds\n\n", delay);
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("parallel_benchmark.txt")
+                .unwrap()
+                .write_all(delay_info.as_bytes())
+                .unwrap();
+
+            // Create shared atomic counter
+            static ACTIVE_PROOFS: AtomicUsize = AtomicUsize::new(0);
+
+            // Spawn parallel tasks
+            for i in 0..n_parallel {
+                let user = user.clone();
+                let market = market.clone();
+                let chain_id = chain_id.clone();
+
+
+                
+                tokio::spawn(async move {
+                    
+                    let active_proofs = ACTIVE_PROOFS.fetch_add(1, Ordering::SeqCst);
+                    let start_time = std::time::Instant::now();
+                    
+                    let result = get_proof_data_prove(
+                        vec![vec![user]], 
+                        vec![vec![market]], 
+                        vec![vec![OPTIMISM_CHAIN_ID]],
+                        vec![LINEA_SEPOLIA_CHAIN_ID]
+                    ).await;
+
+                    match result {
+                        Ok(session_info) => {
+                            let duration = start_time.elapsed();
+                            let cycles = session_info.stats.total_cycles / 1000;
+                            let log_entry = format!("Parallel proof {} - Cycles: {}, Duration: {:?}, Active proofs: {}\n", 
+                                i, cycles, duration, active_proofs);
+                            
+                            // Print to console
+                            println!("{}", log_entry);
+                            
+                            // Write to file
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open("parallel_benchmark.txt")
+                                .unwrap()
+                                .write_all(log_entry.as_bytes())
+                                .unwrap();
+                        }
+                        Err(e) => {
+                            let error_log = format!("Parallel proof {} failed: {:?}\n", i, e);
+                            println!("{}", error_log);
+                            
+                            // Write error to file
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open("parallel_benchmark.txt")
+                                .unwrap()
+                                .write_all(error_log.as_bytes())
+                                .unwrap();
+                        }
+                    }
+                    ACTIVE_PROOFS.fetch_sub(1, Ordering::SeqCst);
+                });
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+            }
+
+            tokio::time::sleep(Duration::from_secs(600)).await;
+        }
+
     }
 
     #[tokio::test]
