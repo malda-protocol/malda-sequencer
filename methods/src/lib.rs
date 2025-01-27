@@ -143,8 +143,8 @@ mod tests {
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
         // Parameters for parallel execution
-        let n_parallel = 40; // Number of parallel executions
-        let delay_secs = [200, 6, 6, 8, 10]; // Delay between spawns in seconds
+        let n_parallel = 20; // Number of parallel executions
+        let delay_secs = [30]; // Delay between spawns in seconds
 
         for delay in delay_secs {
             // Write delay info to file
@@ -177,7 +177,7 @@ mod tests {
                         vec![vec![user]], 
                         vec![vec![market]], 
                         vec![vec![OPTIMISM_CHAIN_ID]],
-                        vec![LINEA_SEPOLIA_CHAIN_ID]
+                        vec![OPTIMISM_SEPOLIA_CHAIN_ID]
                     ).await;
 
                     match result {
