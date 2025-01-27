@@ -816,3 +816,114 @@ SUCCINCT
 
 not provable locally
 
+BONSAI 1 LESS INSTANCE
+
+1 User on Optimism Sepolia, delay between submissions 7 seconds
+
+Delay between submissions: 7 seconds
+
+Delay between submissions: 7 seconds
+
+Parallel proof 0 - Cycles: 4194, Duration: 46.867670384s, Active proofs: 0
+Parallel proof 1 - Cycles: 4194, Duration: 53.203959457s, Active proofs: 1
+Parallel proof 2 - Cycles: 6291, Duration: 59.892084475s, Active proofs: 2
+Parallel proof 3 - Cycles: 4194, Duration: 67.060812587s, Active proofs: 3
+Parallel proof 4 - Cycles: 4194, Duration: 73.32774779s, Active proofs: 4
+Parallel proof 5 - Cycles: 4194, Duration: 80.849563863s, Active proofs: 5
+Parallel proof 6 - Cycles: 4194, Duration: 87.72325376s, Active proofs: 6
+Parallel proof 7 - Cycles: 4194, Duration: 94.412220683s, Active proofs: 6
+Parallel proof 8 - Cycles: 6815, Duration: 101.938442383s, Active proofs: 7
+Parallel proof 9 - Cycles: 4194, Duration: 109.276681915s, Active proofs: 7
+Parallel proof 10 - Cycles: 4194, Duration: 114.223015721s, Active proofs: 8
+Parallel proof 11 - Cycles: 6291, Duration: 121.679281919s, Active proofs: 8
+Parallel proof 12 - Cycles: 4194, Duration: 127.71260063s, Active proofs: 9
+Parallel proof 13 - Cycles: 4194, Duration: 136.002492054s, Active proofs: 9
+Parallel proof 14 - Cycles: 4194, Duration: 142.168247557s, Active proofs: 10
+Parallel proof 15 - Cycles: 4194, Duration: 148.480436183s, Active proofs: 10
+Parallel proof 16 - Cycles: 4194, Duration: 156.710525071s, Active proofs: 11
+Parallel proof 17 - Cycles: 4194, Duration: 163.089997616s, Active proofs: 11
+Parallel proof 18 - Cycles: 5242, Duration: 168.954578498s, Active proofs: 12
+Parallel proof 19 - Cycles: 4194, Duration: 175.885855976s, Active proofs: 12
+Parallel proof 20 - Cycles: 4194, Duration: 184.378143243s, Active proofs: 13
+Parallel proof 21 - Cycles: 4194, Duration: 189.784178051s, Active proofs: 13
+Parallel proof 22 - Cycles: 4194, Duration: 197.754491728s, Active proofs: 14
+Parallel proof 23 - Cycles: 4194, Duration: 204.289580448s, Active proofs: 14
+Parallel proof 24 - Cycles: 4194, Duration: 211.088957201s, Active proofs: 15
+Parallel proof 25 - Cycles: 4194, Duration: 216.35275444s, Active proofs: 15
+Parallel proof 26 - Cycles: 5242, Duration: 224.35502881s, Active proofs: 16
+Parallel proof 27 - Cycles: 4194, Duration: 230.624198483s, Active proofs: 16
+Parallel proof 28 - Cycles: 4194, Duration: 237.775865797s, Active proofs: 17
+Parallel proof 29 - Cycles: 4194, Duration: 245.496413325s, Active proofs: 17
+Parallel proof 30 - Cycles: 4194, Duration: 251.430886959s, Active proofs: 18
+Parallel proof 31 - Cycles: 4194, Duration: 257.822579278s, Active proofs: 18
+Parallel proof 32 - Cycles: 4194, Duration: 264.465961033s, Active proofs: 19
+Parallel proof 33 - Cycles: 4194, Duration: 272.676685928s, Active proofs: 19
+Parallel proof 34 - Cycles: 4194, Duration: 279.34470533s, Active proofs: 20
+Parallel proof 35 - Cycles: 5242, Duration: 285.381078315s, Active proofs: 20
+Parallel proof 36 - Cycles: 4194, Duration: 291.919118893s, Active proofs: 21
+Parallel proof 37 - Cycles: 4194, Duration: 300.397338051s, Active proofs: 21
+Parallel proof 38 - Cycles: 4194, Duration: 305.931605925s, Active proofs: 22
+Parallel proof 39 - Cycles: 4194, Duration: 312.615991039s, Active proofs: 22
+Delay between submissions: 10 seconds
+
+Parallel proof 0 - Cycles: 4194, Duration: 34.864871758s, Active proofs: 0
+Parallel proof 1 - Cycles: 6291, Duration: 39.24154041s, Active proofs: 1
+Parallel proof 2 - Cycles: 4194, Duration: 42.564095765s, Active proofs: 2
+Parallel proof 3 - Cycles: 4194, Duration: 46.82786621s, Active proofs: 3
+Parallel proof 4 - Cycles: 4194, Duration: 49.689671535s, Active proofs: 3
+Parallel proof 5 - Cycles: 4194, Duration: 53.294093398s, Active proofs: 3
+Parallel proof 6 - Cycles: 4194, Duration: 57.625120242s, Active proofs: 4
+Parallel proof 7 - Cycles: 4194, Duration: 62.189618883s, Active proofs: 4
+Parallel proof 8 - Cycles: 4194, Duration: 64.527448519s, Active proofs: 4
+Parallel proof 9 - Cycles: 4194, Duration: 69.759028833s, Active proofs: 4
+Parallel proof 10 - Cycles: 4194, Duration: 73.198989573s, Active proofs: 5
+Parallel proof 11 - Cycles: 4718, Duration: 75.528323869s, Active proofs: 5
+Parallel proof 12 - Cycles: 4194, Duration: 80.560833881s, Active proofs: 5
+Parallel proof 13 - Cycles: 4194, Duration: 84.29242774s, Active proofs: 6
+Parallel proof 14 - Cycles: 4194, Duration: 88.599792156s, Active proofs: 6
+Parallel proof 15 - Cycles: 4194, Duration: 90.968912301s, Active proofs: 6
+Parallel proof 16 - Cycles: 7340, Duration: 94.881354923s, Active proofs: 6
+Parallel proof 17 - Cycles: 8388, Duration: 99.067101113s, Active proofs: 7
+Parallel proof 18 - Cycles: 4194, Duration: 102.681100985s, Active proofs: 7
+Parallel proof 19 - Cycles: 6291, Duration: 107.874486018s, Active proofs: 7
+Delay between submissions: 12 seconds
+
+Parallel proof 0 - Cycles: 4194, Duration: 38.784624317s, Active proofs: 0
+Parallel proof 1 - Cycles: 4194, Duration: 40.23241432s, Active proofs: 1
+Parallel proof 2 - Cycles: 4194, Duration: 41.797128882s, Active proofs: 2
+Parallel proof 3 - Cycles: 4194, Duration: 43.746606424s, Active proofs: 3
+Parallel proof 4 - Cycles: 4194, Duration: 45.579326041s, Active proofs: 3
+Parallel proof 5 - Cycles: 4194, Duration: 46.618303585s, Active proofs: 3
+Parallel proof 6 - Cycles: 4194, Duration: 49.078153133s, Active proofs: 3
+Parallel proof 7 - Cycles: 4194, Duration: 49.89065115s, Active proofs: 3
+Parallel proof 8 - Cycles: 4194, Duration: 52.185547082s, Active proofs: 3
+Delay between submissions: 14 seconds
+
+Parallel proof 0 - Cycles: 6815, Duration: 37.701475886s, Active proofs: 0
+Parallel proof 1 - Cycles: 4194, Duration: 37.310066051s, Active proofs: 1
+Parallel proof 2 - Cycles: 4718, Duration: 36.707658339s, Active proofs: 2
+Parallel proof 3 - Cycles: 4194, Duration: 38.313396975s, Active proofs: 2
+Parallel proof 4 - Cycles: 6291, Duration: 41.105266319s, Active proofs: 2
+Parallel proof 5 - Cycles: 4194, Duration: 41.690471717s, Active proofs: 2
+Parallel proof 6 - Cycles: 4194, Duration: 41.3488703s, Active proofs: 2
+Parallel proof 7 - Cycles: 4194, Duration: 40.016706111s, Active proofs: 2
+Parallel proof 8 - Cycles: 4194, Duration: 39.510365427s, Active proofs: 2
+Parallel proof 9 - Cycles: 4194, Duration: 40.431363718s, Active proofs: 2
+Parallel proof 10 - Cycles: 4194, Duration: 39.150417462s, Active proofs: 2
+Parallel proof 11 - Cycles: 4194, Duration: 38.853441141s, Active proofs: 2
+Parallel proof 12 - Cycles: 4194, Duration: 39.006149135s, Active proofs: 2
+Parallel proof 13 - Cycles: 4194, Duration: 36.920654253s, Active proofs: 2
+Parallel proof 14 - Cycles: 4194, Duration: 38.352879363s, Active proofs: 2
+Parallel proof 15 - Cycles: 4194, Duration: 52.37079757s, Active proofs: 2
+Parallel proof 16 - Cycles: 4194, Duration: 51.537627232s, Active proofs: 2
+Parallel proof 17 - Cycles: 4194, Duration: 50.847952896s, Active proofs: 2
+Parallel proof 18 - Cycles: 6291, Duration: 51.119320052s, Active proofs: 3
+Parallel proof 19 - Cycles: 4194, Duration: 50.918371879s, Active proofs: 3
+
+empty no input
+
+Delay between submissions: 30 seconds
+
+
+
+Parallel proof 0 - Cycles: 65, Duration: 25.126836949s, Active proofs: 0
