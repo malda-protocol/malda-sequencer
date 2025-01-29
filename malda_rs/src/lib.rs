@@ -20,3 +20,5 @@ pub mod validators;
 
 #[path = "../../guest_utils/src/validators_ethereum_light_client.rs"]
 pub mod validators_ethereum_light_client;
+
+pub mod elfs_ids;

@@ -4324,6 +4324,7 @@ dependencies = [
  "hex",
  "k256 0.13.4",
  "log",
+ "methods",
  "reqwest 0.12.9",
  "revm",
  "risc0-ethereum-contracts",
