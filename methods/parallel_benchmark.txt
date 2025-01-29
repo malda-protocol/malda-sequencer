@@ -1,2 +1,0 @@
-Delay between submissions: 30 seconds
-
