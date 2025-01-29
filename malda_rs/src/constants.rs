@@ -12,8 +12,6 @@
 #[path = "../../methods/guest/guest_utils/src/constants.rs"]
 mod constants;
 
-use alloy_primitives::{address, Address};
-
 pub use constants::*;
 
 /// RPC endpoint URLs for supported networks
@@ -49,7 +47,3 @@ pub const SEQUENCER_REQUEST_OPTIMISM_SEPOLIA: &str =
     "http://127.0.0.1:9547/gossip_getSequencerCommitment";
 pub const SEQUENCER_REQUEST_BASE_SEPOLIA: &str =
     "http://127.0.0.1:9545/gossip_getSequencerCommitment";
-
-
-pub const USDC_MARKET_SEPOLIA: Address = address!("0C6cBeAbCbD56B4536460fB39dCd215323d209a3");
-pub const WETH_MARKET_SEPOLIA: Address = address!("7c907cC2D7Dc9f2b8b815d4D0c9271Bcf609240D");

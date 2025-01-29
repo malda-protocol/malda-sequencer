@@ -87,6 +87,6 @@ pub const HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG: &str = "mErc20Host_WithdrawOnExt
 pub const EXTENSION_SUPPLIED_SIG: &str = "mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)";
 pub const EXTENSION_EXTRACTED_SIG: &str = "mTokenGateway_Extracted(address,address,address,uint256,uint256,uint256,uint32,uint32)";
 
-pub const MINT_EXTERNAL_SELECTOR: &str = "6f8be464";
-pub const REPAY_EXTERNAL_SELECTOR: &str = "d7afddc5";
+pub const MINT_EXTERNAL_SELECTOR: &str = "9d9339b3";
+pub const REPAY_EXTERNAL_SELECTOR: &str = "08fee263";
 
