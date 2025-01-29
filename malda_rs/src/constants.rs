@@ -9,7 +9,7 @@
 //! This module contains a comprehensive set of constant definitions that are used across different chains
 //! and components of the Malda Protocol.
 
-#[path = "../../methods/guest/guest_utils/src/constants.rs"]
+#[path = "../../guest_utils/src/constants.rs"]
 mod constants;
 
 pub use constants::*;

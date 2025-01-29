@@ -14,11 +14,9 @@
 //! - Linea
 
 use core::panic;
-
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
 use crate::types::{Call3, IMulticall3};
-use methods::GET_PROOF_DATA_ELF;
 
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
@@ -34,6 +32,8 @@ use anyhow::{Result, Error};
 use tokio;
 use url::Url;
 use futures::future::join_all;
+
+pub const GET_PROOF_DATA_ELF: &[u8] = &[1];
 
 /// Executes proof data queries across multiple chains in parallel
 ///

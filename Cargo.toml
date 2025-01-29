@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["host", "malda_rs", "methods", "patch/ethereum_hashing"]
+members = ["malda_rs", "methods", "patch/ethereum_hashing"]
 exclude = ["lib"]
 
 [workspace.package]
