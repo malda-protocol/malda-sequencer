@@ -123,7 +123,7 @@ mod tests {
         let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
-        let session_info = get_proof_data_exec(
+        let session_info = get_proof_data_prove(
             vec![vec![user_optimism]], 
             vec![vec![market]], 
             vec![vec![LINEA_CHAIN_ID]],
@@ -131,8 +131,8 @@ mod tests {
         ).await.unwrap();
         let duration = start_time.elapsed();
         println!("Duration: {:?}", duration);
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("Cycles: {}", cycles);
+        // let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        // println!("Cycles: {}", cycles);
         panic!("test");
     }
 

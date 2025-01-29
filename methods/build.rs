@@ -13,37 +13,23 @@
 // limitations under the License.
 
 use std::{collections::HashMap, env, path::PathBuf, fs};
-
 use risc0_build::{embed_methods_with_options, DockerOptions, GuestOptions};
-use risc0_build_ethereum::generate_solidity_files;
-
-// Paths where the generated Solidity files will be written.
-fn get_project_paths() -> (PathBuf, PathBuf) {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let root_dir = manifest_dir.parent().unwrap().to_path_buf();
-    
-    let contracts_dir = root_dir.join("contracts");
-    let tests_dir = root_dir.join("tests");
-    
-    // Create directories if they don't exist
-    fs::create_dir_all(&contracts_dir).unwrap();
-    fs::create_dir_all(&tests_dir).unwrap();
-    
-    let image_id_path = contracts_dir.join("ImageID.sol");
-    let elf_path = tests_dir.join("Elf.sol");
-    
-    (image_id_path, elf_path)
-}
 
 fn main() {
-    let (image_id_path, elf_path) = get_project_paths();
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let root_dir = manifest_dir.parent().unwrap().to_path_buf();
+    let malda_rs_dir = root_dir.join("malda_rs");
+    let malda_rs_src = malda_rs_dir.join("src");
+    let malda_rs_bin = malda_rs_dir.join("bin");
 
     let use_docker = env::var("RISC0_USE_DOCKER").ok().map(|_| DockerOptions {
         root_dir: Some("../".into()),
     });
 
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     // Generate Rust source files for the methods crate.
-    let guests = embed_methods_with_options(HashMap::from([(
+    let _guests = embed_methods_with_options(HashMap::from([(
         "guests",
         GuestOptions {
             features: Vec::new(),
@@ -51,10 +37,69 @@ fn main() {
         },
     )]));
 
-    // Generate Solidity source files for use with Forge.
-    let solidity_opts = risc0_build_ethereum::Options::default()
-        .with_image_id_sol_path(image_id_path)
-        .with_elf_sol_path(elf_path);
+    // Copy and rename specific files
+    let methods_path = out_dir.join("methods.rs");
+    let elfs_ids_path = malda_rs_src.join("elfs_ids.rs");
+    fs::copy(&methods_path, &elfs_ids_path).unwrap();
 
-    generate_solidity_files(guests.as_slice(), &solidity_opts).unwrap();
+    // Read elfs_ids.rs to get the original ELF paths
+    let elfs_ids_content = fs::read_to_string(&elfs_ids_path).unwrap();
+    
+    // Copy the ELF files to malda_rs/bin
+    if let Some(path_line) = elfs_ids_content.lines().find(|line| line.contains("GET_PROOF_DATA_PATH")) {
+        if let Some(path) = path_line.split('"').nth(1) {
+            let source_path = PathBuf::from(path);
+            let filename = source_path.file_name().unwrap();
+            let dest_path = malda_rs_bin.join(filename);
+            fs::copy(&source_path, &dest_path).unwrap();
+            println!("Copied ELF file from {} to {}", source_path.display(), dest_path.display());
+        }
+    }
+
+    if let Some(path_line) = elfs_ids_content.lines().find(|line| line.contains("GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH")) {
+        if let Some(path) = path_line.split('"').nth(1) {
+            let source_path = PathBuf::from(path);
+            let filename = source_path.file_name().unwrap();
+            let dest_path = malda_rs_bin.join(filename);
+            fs::copy(&source_path, &dest_path).unwrap();
+            println!("Copied ELF file from {} to {}", source_path.display(), dest_path.display());
+        }
+    }
+
+    // Now update the paths in elfs_ids.rs to use relative paths
+    let mut elfs_ids_content = elfs_ids_content.replace(
+        "include_bytes!(\"/",
+        "include_bytes!(\"../bin/"
+    );
+    
+    elfs_ids_content = elfs_ids_content.replace(
+        "GET_PROOF_DATA_PATH: &str = \"/",
+        "GET_PROOF_DATA_PATH: &str = \"../bin/"
+    );
+    elfs_ids_content = elfs_ids_content.replace(
+        "GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH: &str = \"/",
+        "GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH: &str = \"../bin/"
+    );
+    
+    // Extract just the filenames for the paths
+    if let Some(path_line) = elfs_ids_content.lines().find(|line| line.contains("GET_PROOF_DATA_PATH")) {
+        if let Some(path) = path_line.split('"').nth(1) {
+            let path_buf = PathBuf::from(path);
+            let file_name = path_buf.file_name().unwrap();
+            let filename = file_name.to_str().unwrap();
+            elfs_ids_content = elfs_ids_content.replace(path, &format!("../bin/{}", filename));
+        }
+    }
+    
+    if let Some(path_line) = elfs_ids_content.lines().find(|line| line.contains("GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH")) {
+        if let Some(path) = path_line.split('"').nth(1) {
+            let path_buf = PathBuf::from(path);
+            let file_name = path_buf.file_name().unwrap();
+            let filename = file_name.to_str().unwrap();
+            elfs_ids_content = elfs_ids_content.replace(path, &format!("../bin/{}", filename));
+        }
+    }
+    
+    // Write the updated content back to elfs_ids.rs
+    fs::write(&elfs_ids_path, elfs_ids_content).unwrap();
 }

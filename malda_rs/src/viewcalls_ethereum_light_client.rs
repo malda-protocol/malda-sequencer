@@ -31,7 +31,7 @@ use url::Url;
 
 use crate::constants::*;
 use crate::types::{SequencerCommitment, IMaldaMarket};
-pub const GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF: &[u8] = &[1];
+use crate::elfs_ids::GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF;
 
 pub const RPC_URL_BEACON: &str = "https://www.lightclientdata.org";
 
