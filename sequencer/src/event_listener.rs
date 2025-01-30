@@ -88,16 +88,16 @@ impl EventListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
+    use crate::constants::test::*;
 
     #[tokio::test]
     async fn test_event_listener_creation() {
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         let config = EventConfig {
-            ws_url: "wss://example.com".to_string(),
+            ws_url: TEST_WS_URL.to_string(),
             market: Address::ZERO,
-            event_signature: "Event()".to_string(),
-            chain_id: 1,
+            event_signature: TEST_EVENT_SIGNATURE.to_string(),
+            chain_id: TEST_CHAIN_ID,
         };
 
         let _listener = EventListener::new(config, tx);

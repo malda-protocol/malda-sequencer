@@ -26,20 +26,19 @@ use crate::{
 };
 
 mod event_listener;
-use event_listener::{EventListener, EventConfig, RawEvent};
+use event_listener::{EventListener, EventConfig};
 use tokio::sync::mpsc;
 
 mod event_processor;
-use event_processor::{EventProcessor, ProcessedEvent};
+use event_processor::EventProcessor;
 
 mod proof_generator;
-use proof_generator::{ProofGenerator, ProofReadyEvent};
+use proof_generator::ProofGenerator;
 
 mod transaction_manager;
 use transaction_manager::{TransactionManager, TransactionConfig};
 
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
-pub const PRIVATE_KEY_SENDER: &str = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9286d1f37712ca1d16a56a81a1bf";
 
 type ProviderType = alloy::providers::fillers::FillProvider<
     JoinFill<
@@ -71,10 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting sequencer...");
     
-    // Create channels
-    let (raw_tx, raw_rx) = mpsc::channel::<RawEvent>(1000);
-    let (processed_tx, processed_rx) = mpsc::channel::<ProcessedEvent>(1000);
-    let (proof_tx, proof_rx) = mpsc::channel::<ProofReadyEvent>(1000);
+    // Create channels with proper capacities
+    let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+    let (processed_tx, processed_rx) = mpsc::channel(PROCESSED_CHANNEL_CAPACITY);
+    let (proof_tx, proof_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
 
     info!("Initialized channels");
 
@@ -111,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     chain_id: *chain_id,
                 };
                 
-                let listener = EventListener::new(config, raw_tx.clone());
+                let listener = EventListener::new(config, event_tx.clone());
                 let handle = tokio::spawn(async move {
                     if let Err(e) = listener.start().await {
                         error!("Event listener failed: {:?}", e);
@@ -119,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 
                 handles.push(handle);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(LISTENER_SPAWN_DELAY).await;
             }
         }
     }
@@ -128,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn event processor
     let processor_handle = tokio::spawn(async move {
-        let mut processor = EventProcessor::new(raw_rx, processed_tx);
+        let mut processor = EventProcessor::new(event_rx, processed_tx);
         if let Err(e) = processor.start().await {
             error!("Event processor failed: {:?}", e);
         }
@@ -140,8 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut generator = ProofGenerator::new(
             processed_rx,
             proof_tx,
-            3, // max retries
-            Duration::from_secs(1), // retry delay
+            MAX_PROOF_RETRIES,
+            PROOF_RETRY_DELAY,
         );
         if let Err(e) = generator.start().await {
             error!("Proof generator failed: {:?}", e);
@@ -151,12 +150,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create transaction manager config
     let tx_config = TransactionConfig {
-        max_retries: 3,
-        retry_delay: Duration::from_secs(1),
+        max_retries: MAX_TX_RETRIES,
+        retry_delay: TX_RETRY_DELAY,
         rpc_urls: vec![
             (ETHEREUM_SEPOLIA_CHAIN_ID as u32, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
             (OPTIMISM_SEPOLIA_CHAIN_ID as u32, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
-            (LINEA_SEPOLIA_CHAIN_ID as u32, "https://linea-sepolia.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e".to_string()),
+            (LINEA_SEPOLIA_CHAIN_ID as u32, RPC_URL_LINEA_SEPOLIA.to_string()),
         ],
     };
 

@@ -21,6 +21,12 @@ pub enum ProcessedEvent {
         amount: U256,
         market: Address,
     },
+    HostBorrow {
+        sender: Address,
+        dst_chain_id: u32,
+        amount: U256,
+        market: Address,
+    },
     ExtensionSupply {
         from: Address,
         amount: U256,
@@ -65,6 +71,12 @@ impl EventProcessor {
                                 sender, dst_chain_id, amount, market
                             );
                         }
+                        ProcessedEvent::HostBorrow { sender, dst_chain_id, amount, market } => {
+                            info!(
+                                "Processed host borrow: sender={:?} dst_chain={} amount={} market={:?}",
+                                sender, dst_chain_id, amount, market
+                            );
+                        }
                         ProcessedEvent::ExtensionSupply { from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
                             info!(
                                 "Processed extension supply: from={:?} amount={} src_chain={} dst_chain={} market={:?} method={}",
@@ -77,6 +89,7 @@ impl EventProcessor {
                         "Attempting to send processed event to proof generator: type={}", 
                         match &processed {
                             ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
+                            ProcessedEvent::HostBorrow { .. } => "HostBorrow",
                             ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
                         }
                     );
