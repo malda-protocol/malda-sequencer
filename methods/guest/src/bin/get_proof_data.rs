@@ -1,6 +1,6 @@
 // Copyright notice...
 
-use guest_utils::{validators::validate_get_proof_data_call, types::SequencerCommitment};
+use malda_utils::{validators::validate_get_proof_data_call, types::SequencerCommitment};
 use alloy_primitives::{Address, Bytes};
 use risc0_steel::{ethereum::EthEvmInput, serde::RlpHeader};
 use risc0_zkvm::guest::env;

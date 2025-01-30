@@ -15,7 +15,7 @@ alloy-sol-types = { version = "0.8.8" }
 risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.2.0" }
 risc0-zkvm = { version = "=1.2.1", default-features = false, features = ['std', 'unstable'] }
 revm = { version = "18.0", default-features = false, features = ["std"] }
-guest_utils = { path = "../../guest_utils" }
+malda_utils = { path = "../../malda_utils" }
 alloy-consensus = "0.6.4"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 
