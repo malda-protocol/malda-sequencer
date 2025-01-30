@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{TxHash, address},
+    primitives::TxHash,
     transports::http::reqwest::Url,
     providers::Provider,
 };
@@ -12,9 +12,12 @@ use crate::{
     proof_generator::ProofReadyEvent,
     ProviderType,
     create_provider,
-    PRIVATE_KEY_SENDER,
-    TX_TIMEOUT,
     types::IMaldaMarket,
+    constants::{
+        TX_TIMEOUT,
+        SEQUENCER_ADDRESS,
+        SEQUENCER_PRIVATE_KEY,
+    },
 };
 
 #[derive(Debug)]
@@ -66,7 +69,7 @@ impl TransactionManager {
             .ok_or_else(|| eyre::eyre!("No RPC URL configured for chain {}", chain_id))?;
 
         let url = Url::parse(&rpc_url)?;
-        create_provider(url, PRIVATE_KEY_SENDER).await
+        create_provider(url, SEQUENCER_PRIVATE_KEY).await
             .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
     }
 
@@ -139,13 +142,9 @@ impl TransactionManager {
         Ok(())
     }
 
-    async fn submit_transaction(
-        &self,
-        provider: &ProviderType,
-        event: &ProofReadyEvent,
-    ) -> Result<TxHash> {
+    async fn submit_transaction(&self, provider: &ProviderType, event: &ProofReadyEvent) -> Result<TxHash> {
         let market = IMaldaMarket::new(event.market, provider.clone());
-
+        
         let tx_hash = match event.method.as_str() {
             "outHere" => {
                 info!("Preparing outHere transaction for market {:?}", event.market);
@@ -156,7 +155,7 @@ impl TransactionManager {
                         event.amount.clone(),
                         event.receiver,
                     )
-                    .from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
+                    .from(SEQUENCER_ADDRESS);
 
                 info!("Broadcasting outHere transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
                     event.journal.len(), event.seal.len(), event.amount, event.receiver);
@@ -166,19 +165,19 @@ impl TransactionManager {
                 info!("Transaction sent with hash {}", pending_tx.tx_hash());
 
                 debug!("Waiting for transaction confirmation with timeout {:?}", TX_TIMEOUT);
-                let tx_hash = pending_tx
-                    .with_timeout(Some(TX_TIMEOUT))
-                    .watch()
-                    .await
-                    .wrap_err("Failed to confirm outHere transaction")?;
-
-                info!("Transaction confirmed with hash {:?}", tx_hash);
-
-                // Add validation
-                self.validate_transaction_receipt(provider, tx_hash, event).await?;
-                tx_hash
+                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                    Ok(hash) => {
+                        info!("Transaction confirmed with hash {:?}", hash);
+                        hash
+                    },
+                    Err(e) => {
+                        error!("outHere transaction failed: {}", e);
+                        return Err(e).wrap_err("Failed to confirm outHere transaction");
+                    }
+                }
             },
             "mintExternal" => {
+                info!("Preparing mintExternal transaction for market {:?}", event.market);
                 let action = market
                     .mintExternal(
                         event.journal.clone(),
@@ -186,52 +185,72 @@ impl TransactionManager {
                         event.amount.clone(),
                         event.receiver,
                     )
-                    .from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
+                    .from(SEQUENCER_ADDRESS);
 
-                info!("Broadcasting mintExternal transaction");
+                info!("Broadcasting mintExternal transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
+                    event.journal.len(), event.seal.len(), event.amount, event.receiver);
+                
                 let pending_tx = action.send().await
                     .wrap_err("Failed to send mintExternal transaction")?;
-                info!("Sent tx {}", pending_tx.tx_hash());
+                info!("Transaction sent with hash {}", pending_tx.tx_hash());
 
-                let tx_hash = pending_tx
-                    .with_timeout(Some(TX_TIMEOUT))
-                    .watch()
-                    .await
-                    .wrap_err("Failed to confirm mintExternal transaction")?;
-
-                // Add validation
-                self.validate_transaction_receipt(provider, tx_hash, event).await?;
-                tx_hash
+                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                    Ok(hash) => {
+                        info!("Transaction confirmed with hash {:?}", hash);
+                        hash
+                    },
+                    Err(e) => {
+                        error!("mintExternal transaction failed: {}", e);
+                        return Err(e).wrap_err("Failed to confirm mintExternal transaction");
+                    }
+                }
             },
             "repayExternal" => {
+                info!("Preparing repayExternal transaction for market {:?}", event.market);
                 let action = market
                     .repayExternal(
                         event.journal.clone(),
                         event.seal.clone(),
                         event.amount.clone(),
                         event.receiver,
-                    );
+                    )
+                    .from(SEQUENCER_ADDRESS);
 
-                info!("Broadcasting repayExternal transaction");
+                info!("Broadcasting repayExternal transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
+                    event.journal.len(), event.seal.len(), event.amount, event.receiver);
+                
                 let pending_tx = action.send().await
                     .wrap_err("Failed to send repayExternal transaction")?;
-                info!("Sent tx {}", pending_tx.tx_hash());
+                info!("Transaction sent with hash {}", pending_tx.tx_hash());
 
-                let tx_hash = pending_tx
-                    .with_timeout(Some(TX_TIMEOUT))
-                    .watch()
-                    .await
-                    .wrap_err("Failed to confirm repayExternal transaction")?;
-
-                // Add validation
-                self.validate_transaction_receipt(provider, tx_hash, event).await?;
-                tx_hash
+                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                    Ok(hash) => {
+                        info!("Transaction confirmed with hash {:?}", hash);
+                        hash
+                    },
+                    Err(e) => {
+                        error!("repayExternal transaction failed: {}", e);
+                        return Err(e).wrap_err("Failed to confirm repayExternal transaction");
+                    }
+                }
             },
-            _ => return Err(eyre::eyre!("Invalid method: {}", event.method)),
+            method => {
+                error!("Invalid transaction method: {}", method);
+                return Err(eyre::eyre!("Invalid method: {}", method));
+            }
         };
 
-        info!("Transaction {:?} confirmed and validated", tx_hash);
-        Ok(tx_hash)
+        // Validate the transaction
+        match self.validate_transaction_receipt(provider, tx_hash, event).await {
+            Ok(_) => {
+                info!("Transaction {:?} confirmed and validated", tx_hash);
+                Ok(tx_hash)
+            },
+            Err(e) => {
+                error!("Transaction validation failed for hash {:?}: {}", tx_hash, e);
+                Err(e)
+            }
+        }
     }
 
     async fn process_transaction(&self, event: ProofReadyEvent) -> Result<TxHash> {
@@ -242,5 +261,23 @@ impl TransactionManager {
 
         let provider = self.get_provider_for_chain(event.dst_chain_id).await?;
         self.submit_with_retry(&provider, &event).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constants::{PROOF_CHANNEL_CAPACITY, MAX_TX_RETRIES, TX_RETRY_DELAY};
+
+    #[tokio::test]
+    async fn test_transaction_manager_creation() {
+        let (tx, rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+        let config = TransactionConfig {
+            max_retries: MAX_TX_RETRIES,
+            retry_delay: TX_RETRY_DELAY,
+            rpc_urls: vec![],
+        };
+
+        let _manager = TransactionManager::new(rx, config);
     }
 } 

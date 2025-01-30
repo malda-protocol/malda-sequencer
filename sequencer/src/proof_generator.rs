@@ -48,6 +48,7 @@ impl ProofGenerator {
                 "Proof generator received event: type={}", 
                 match &event {
                     ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
+                    ProcessedEvent::HostBorrow { .. } => "HostBorrow",
                     ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
                 }
             );
@@ -56,6 +57,9 @@ impl ProofGenerator {
             let (market, chain_id, event_type) = match &event {
                 ProcessedEvent::HostWithdraw { market, dst_chain_id, .. } => {
                     (market, dst_chain_id, "HostWithdraw")
+                },
+                ProcessedEvent::HostBorrow { market, dst_chain_id, .. } => {
+                    (market, dst_chain_id, "HostBorrow")
                 },
                 ProcessedEvent::ExtensionSupply { market, dst_chain_id, .. } => {
                     (market, dst_chain_id, "ExtensionSupply")
@@ -98,6 +102,9 @@ impl ProofGenerator {
             ProcessedEvent::HostWithdraw { .. } => {
                 info!("Starting proof generation for HostWithdraw event");
             },
+            ProcessedEvent::HostBorrow { .. } => {
+                info!("Starting proof generation for HostBorrow event");
+            },
             ProcessedEvent::ExtensionSupply { .. } => {
                 info!("Starting proof generation for ExtensionSupply event");
             }
@@ -106,6 +113,35 @@ impl ProofGenerator {
         let result = match event {
             ProcessedEvent::HostWithdraw { sender, dst_chain_id, amount, market } => {
                 info!("Preparing proof data for HostWithdraw");
+                let users = vec![vec![sender]];
+                let markets = vec![vec![market]];
+                let dst_chain_ids = vec![vec![dst_chain_id as u64]];
+                let src_chain_ids = vec![malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID];
+
+                debug!(
+                    "Calling generate_proof_with_retry with: users={:?}, markets={:?}, dst_chains={:?}, src_chains={:?}",
+                    users, markets, dst_chain_ids, src_chain_ids
+                );
+
+                let (journal, seal) = self.generate_proof_with_retry(
+                    users,
+                    markets,
+                    dst_chain_ids,
+                    src_chain_ids,
+                ).await?;
+
+                Ok(ProofReadyEvent {
+                    market,
+                    journal,
+                    seal,
+                    amount: vec![amount],
+                    receiver: Address::ZERO,
+                    method: "outHere".to_string(),
+                    dst_chain_id,
+                })
+            },
+            ProcessedEvent::HostBorrow { sender, dst_chain_id, amount, market } => {
+                info!("Preparing proof data for HostBorrow");
                 let users = vec![vec![sender]];
                 let markets = vec![vec![market]];
                 let dst_chain_ids = vec![vec![dst_chain_id as u64]];
@@ -246,18 +282,18 @@ impl ProofGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
+    use crate::constants::{PROOF_CHANNEL_CAPACITY, MAX_PROOF_RETRIES, PROOF_RETRY_DELAY};
 
     #[tokio::test]
     async fn test_proof_generator_creation() {
-        let (event_tx, event_rx) = mpsc::channel(100);
-        let (proof_tx, _proof_rx) = mpsc::channel(100);
+        let (event_tx, event_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+        let (proof_tx, _proof_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
         
         let _generator = ProofGenerator::new(
             event_rx,
             proof_tx,
-            3,
-            Duration::from_secs(1),
+            MAX_PROOF_RETRIES,
+            PROOF_RETRY_DELAY,
         );
     }
 } 
