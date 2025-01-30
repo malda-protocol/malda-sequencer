@@ -9,16 +9,16 @@ pub mod viewcalls;
 
 pub mod viewcalls_ethereum_light_client;
 
-#[path = "../../guest_utils/src/cryptography.rs"]
+#[path = "../../malda_utils/src/cryptography.rs"]
 pub mod cryptography;
 
-#[path = "../../guest_utils/src/types.rs"]
+#[path = "../../malda_utils/src/types.rs"]
 pub mod types;
 
-#[path = "../../guest_utils/src/validators.rs"]
+#[path = "../../malda_utils/src/validators.rs"]
 pub mod validators;
 
-#[path = "../../guest_utils/src/validators_ethereum_light_client.rs"]
+#[path = "../../malda_utils/src/validators_ethereum_light_client.rs"]
 pub mod validators_ethereum_light_client;
 
 pub mod elfs_ids;

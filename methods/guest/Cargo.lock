@@ -2280,38 +2280,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "guest_utils"
-version = "0.1.0"
-dependencies = [
- "alloy 0.6.4",
- "alloy-consensus 0.6.4",
- "alloy-primitives 0.7.7",
- "alloy-primitives 0.8.15",
- "alloy-rlp",
- "alloy-sol-types 0.8.15",
- "consensus-core",
- "ethereum_ssz 0.7.1",
- "ethereum_ssz_derive 0.7.1",
- "eyre",
- "k256",
- "revm",
- "risc0-steel",
- "risc0-zkvm",
- "serde",
- "snap",
- "ssz_types 0.8.0",
- "tree_hash 0.7.0",
- "url",
-]
-
-[[package]]
 name = "guests"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus 0.6.4",
  "alloy-primitives 0.8.15",
  "alloy-sol-types 0.8.15",
- "guest_utils",
+ "malda_utils",
  "revm",
  "risc0-steel",
  "risc0-zkvm",
@@ -2867,6 +2842,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
 dependencies = [
  "hashbrown 0.15.2",
+]
+
+[[package]]
+name = "malda_utils"
+version = "0.1.0"
+dependencies = [
+ "alloy 0.6.4",
+ "alloy-consensus 0.6.4",
+ "alloy-primitives 0.7.7",
+ "alloy-primitives 0.8.15",
+ "alloy-rlp",
+ "alloy-sol-types 0.8.15",
+ "consensus-core",
+ "ethereum_ssz 0.7.1",
+ "ethereum_ssz_derive 0.7.1",
+ "eyre",
+ "k256",
+ "revm",
+ "risc0-steel",
+ "risc0-zkvm",
+ "serde",
+ "snap",
+ "ssz_types 0.8.0",
+ "tree_hash 0.7.0",
+ "url",
 ]
 
 [[package]]
