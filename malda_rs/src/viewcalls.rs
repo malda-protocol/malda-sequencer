@@ -14,10 +14,11 @@
 //! - Linea
 
 use core::panic;
+
 use crate::types::{ExecutionPayload, IL1Block, SequencerCommitment};
 use crate::constants::*;
 use crate::types::{Call3, IMulticall3};
-use crate::elfs_ids::GET_PROOF_DATA_ELF;
+use crate::elfs_ids::*;
 
 use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
@@ -216,8 +217,6 @@ pub async fn get_proof_data_zkvm_input(
             .number;
         (Some(block), None)
     };
-
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let (l1_block_call_input, ethereum_block) =
         if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {

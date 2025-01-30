@@ -1,5 +1,9 @@
-use alloy::primitives::{Address, U256};
+use alloy::{
+    primitives::{Address, U256},
+    rpc::types::Log,
+};
 use serde::{Deserialize, Serialize};
+use hex;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LiquidateExternalEvent {
@@ -89,4 +93,31 @@ pub const EXTENSION_EXTRACTED_SIG: &str = "mTokenGateway_Extracted(address,addre
 
 pub const MINT_EXTERNAL_SELECTOR: &str = "9d9339b3";
 pub const REPAY_EXTERNAL_SELECTOR: &str = "08fee263";
+
+// Add the parsing functions here
+pub fn parse_supplied_event(log: &Log) -> SuppliedEvent {
+    let from = Address::from_slice(&log.topics()[1][12..]);
+    
+    // The non-indexed parameters are packed in the data field
+    let data = log.data().data.clone();
+    
+    SuppliedEvent {
+        from,
+        acc_amount_in: U256::from_be_slice(&data[0..32]),
+        acc_amount_out: U256::from_be_slice(&data[32..64]),
+        amount: U256::from_be_slice(&data[64..96]),
+        src_chain_id: u32::from_be_bytes(data[124..128].try_into().unwrap()),
+        dst_chain_id: u32::from_be_bytes(data[156..160].try_into().unwrap()),
+        linea_method_selector: hex::encode(&data[160..164]),
+    }
+}
+
+pub fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtensionChainEvent {
+    WithdrawOnExtensionChainEvent {
+        sender: Address::from_slice(&log.topics()[1][12..]),
+        // Chain ID is padded to 32 bytes, we want the last 4 bytes
+        dst_chain_id: u32::from_be_bytes(log.data().data[28..32].try_into().unwrap()),
+        amount: U256::from_be_slice(&log.data().data[32..64]),
+    }
+}
 

@@ -68,17 +68,13 @@ fn main() {
 
     // Now update the paths in elfs_ids.rs to use relative paths
     let mut elfs_ids_content = elfs_ids_content.replace(
-        "include_bytes!(\"/",
-        "include_bytes!(\"../bin/"
+        "pub const GET_PROOF_DATA_ELF: &[u8] = &[];",
+        "pub const GET_PROOF_DATA_ELF: &[u8] = include_bytes!(\"../bin/get-proof-data\");"
     );
     
     elfs_ids_content = elfs_ids_content.replace(
-        "GET_PROOF_DATA_PATH: &str = \"/",
-        "GET_PROOF_DATA_PATH: &str = \"../bin/"
-    );
-    elfs_ids_content = elfs_ids_content.replace(
-        "GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH: &str = \"/",
-        "GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_PATH: &str = \"../bin/"
+        "pub const GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF: &[u8] = &[];",
+        "pub const GET_PROOF_DATA_ETHEREUM_LIGHT_CLIENT_ELF: &[u8] = include_bytes!(\"../bin/get_proof_data_ethereum_light_client\");"
     );
     
     // Extract just the filenames for the paths
