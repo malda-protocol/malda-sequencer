@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{Address, U256, address, Bytes},
+    primitives::{Address, U256, address, Bytes, TxHash},
     providers::{
         fillers::{
             BlobGasFiller, CachedNonceManager, ChainIdFiller, GasFiller, JoinFill, NonceFiller,
@@ -229,20 +229,16 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
 
     let host_market = IMaldaMarket::new(market, provider.clone());
 
-    let tx_hash = {
-        let out_here_action = host_market.outHere(journal.into(), seal.into(), amount, receiver).from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
-        tracing::info!("Broadcasting out here transaction");
-        println!("Broadcasting out here transaction");
-        let pending_tx = out_here_action.send().await?;
-        tracing::info!("Sent tx {}", pending_tx.tx_hash());
-        println!("Sent tx {:?}", pending_tx.tx_hash());
-        pending_tx
-            .with_timeout(Some(TX_TIMEOUT))
-            .watch()
-            .await?
-    };
+    submit_transaction(
+        &provider,
+        market,
+        journal,
+        seal,
+        amount,
+        receiver,
+        "outHere"
+    ).await?;
 
-    tracing::info!("Tx {:?} confirmed", tx_hash);
     Ok(())
 }
 
@@ -282,33 +278,24 @@ async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dy
 
     let host_market = IMaldaMarket::new(market, provider.clone());
 
-    let tx_hash = match event.linea_method_selector.as_str() {
-        MINT_EXTERNAL_SELECTOR => {
-            let mint_action = host_market.mintExternal(journal.into(), seal.into(), amount, receiver).from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
-            tracing::info!("Broadcasting mint external transaction");
-            println!("Broadcasting mint external transaction");
-            let pending_tx = mint_action.send().await?;
-            tracing::info!("Sent tx {}", pending_tx.tx_hash());
-            println!("Sent tx {:?}", pending_tx.tx_hash());
-            pending_tx
-                .with_timeout(Some(TX_TIMEOUT))
-                .watch()
-                .await?
-        }
-        REPAY_EXTERNAL_SELECTOR => {
-            let repay_action = host_market.repayExternal(journal.into(), seal.into(), amount, receiver);
-            tracing::info!("Broadcasting repay external transaction");
-            let pending_tx = repay_action.send().await?;
-            tracing::info!("Sent tx {}", pending_tx.tx_hash());
-            pending_tx
-                .with_timeout(Some(TX_TIMEOUT))
-                .watch()
-                .await?
-        }
-        _ => return Err(format!("Invalid method selector: {}", event.linea_method_selector).into()),
+    let method = if method_selector == MINT_EXTERNAL_SELECTOR {
+        "mintExternal"
+    } else if method_selector == REPAY_EXTERNAL_SELECTOR {
+        "repayExternal"
+    } else {
+        return Err("Invalid method selector".into());
     };
 
-    tracing::info!("Tx {:?} confirmed", tx_hash);
+    submit_transaction(
+        &provider,
+        market,
+        journal,
+        seal,
+        amount,
+        receiver,
+        method
+    ).await?;
+
     Ok(())
 }
 
@@ -336,5 +323,60 @@ fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtensionChai
         dst_chain_id: u32::from_be_bytes(log.data().data[28..32].try_into().unwrap()),
         amount: U256::from_be_slice(&log.data().data[32..64]),
     }
+}
+
+async fn submit_transaction(
+    provider: &ProviderType,
+    market_address: Address,
+    journal: Bytes,
+    seal: Bytes,
+    amount: Vec<U256>,
+    receiver: Address,
+    method: &str,
+) -> Result<TxHash, Box<dyn std::error::Error>> {
+    let market = IMaldaMarket::new(market_address, provider.clone());
+
+    let tx_hash = match method {
+        "outHere" => {
+            let action = market.outHere(journal.into(), seal.into(), amount, receiver)
+                .from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
+            tracing::info!("Broadcasting out here transaction");
+            println!("Broadcasting out here transaction");
+            let pending_tx = action.send().await?;
+            tracing::info!("Sent tx {}", pending_tx.tx_hash());
+            println!("Sent tx {:?}", pending_tx.tx_hash());
+            pending_tx
+                .with_timeout(Some(TX_TIMEOUT))
+                .watch()
+                .await?
+        },
+        "mintExternal" => {
+            let action = market.mintExternal(journal.into(), seal.into(), amount, receiver)
+                .from(address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3"));
+            tracing::info!("Broadcasting mint external transaction");
+            println!("Broadcasting mint external transaction");
+            let pending_tx = action.send().await?;
+            tracing::info!("Sent tx {}", pending_tx.tx_hash());
+            println!("Sent tx {:?}", pending_tx.tx_hash());
+            pending_tx
+                .with_timeout(Some(TX_TIMEOUT))
+                .watch()
+                .await?
+        },
+        "repayExternal" => {
+            let action = market.repayExternal(journal.into(), seal.into(), amount, receiver);
+            tracing::info!("Broadcasting repay external transaction");
+            let pending_tx = action.send().await?;
+            tracing::info!("Sent tx {}", pending_tx.tx_hash());
+            pending_tx
+                .with_timeout(Some(TX_TIMEOUT))
+                .watch()
+                .await?
+        },
+        _ => return Err(format!("Invalid method: {}", method).into()),
+    };
+
+    tracing::info!("Tx {:?} confirmed", tx_hash);
+    Ok(tx_hash)
 }
 
