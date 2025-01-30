@@ -27,14 +27,14 @@ pub const RPC_URL_ARBITRUM: &str =
     "https://arb-mainnet.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
 pub const RPC_URL_LINEA_SEPOLIA: &str =
-    "https://linea-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
+    "https://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY";
 pub const RPC_URL_SCROLL_SEPOLIA: &str =
     "https://scroll-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ETHEREUM_SEPOLIA: &str =
     "https://eth-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_BASE_SEPOLIA: &str =
     "https://base-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
-pub const RPC_URL_OPTIMISM_SEPOLIA: &str = "http://localhost:8545";
+pub const RPC_URL_OPTIMISM_SEPOLIA: &str = "https://opt-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const RPC_URL_ARBITRUM_SEPOLIA: &str =
     "https://arb-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
