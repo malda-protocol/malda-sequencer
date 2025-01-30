@@ -1,10 +1,10 @@
 use alloy::{
-    primitives::{Address, U256, address},
+    primitives::{Address, U256, address, Bytes},
     providers::{
         fillers::{
-            CachedNonceManager, ChainIdFiller, GasFiller, JoinFill, NonceFiller,
+            BlobGasFiller, CachedNonceManager, ChainIdFiller, GasFiller, JoinFill, NonceFiller,
         },
-        Provider, ProviderBuilder, WsConnect,
+        Provider, ProviderBuilder, WsConnect, Identity, RootProvider,
     },
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
@@ -35,17 +35,17 @@ use risc0_ethereum_contracts::encode_seal;
 use hex;
 
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
-
+pub const PRIVATE_KEY_SENDER: &str = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9286d1f37712ca1d16a56a81a1bf";
 
 type ProviderType = alloy::providers::fillers::FillProvider<
     JoinFill<
         JoinFill<
-            alloy::providers::Identity,
-            JoinFill<GasFiller, JoinFill<NonceFiller<CachedNonceManager>, ChainIdFiller>>,
+            Identity,
+            JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
         >,
         alloy::providers::fillers::WalletFiller<EthereumWallet>,
     >,
-    alloy::providers::RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
+    RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
     alloy::transports::http::Http<alloy::transports::http::Client>,
     alloy::network::Ethereum,
 >;
@@ -150,27 +150,22 @@ async fn process_event(log: Log, market: Address, chain_id: u64) -> Result<(), B
     result
 }
 
-async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std::error::Error>> {
-    let event = parse_withdraw_on_extension_chain_event(&log);
-
-    println!("Event: {:?}", event);
-    
-    let users = vec![vec![event.sender]];
-    let markets = vec![vec![market]];
-    let amount = vec![event.amount];
-    let dst_chain_id = event.dst_chain_id;
-    let receiver = Address::ZERO;
-    
-    let chain_ids = vec![LINEA_SEPOLIA_CHAIN_ID as u64];
-
+async fn get_proof_data_prove_with_retry(
+    users: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
+    dst_chain_ids: Vec<Vec<u64>>,
+    src_chain_ids: Vec<u64>,
+    max_attempts: u32,
+    delay_between_attempts: Duration,
+) -> Result<(Bytes, Bytes), Box<dyn std::error::Error>> {
     let mut attempts = 0;
     let proof_info = loop {
-        match get_proof_data_prove(users.clone(), markets.clone(), vec![vec![dst_chain_id as u64]], chain_ids.clone()).await {
+        match get_proof_data_prove(users.clone(), markets.clone(), dst_chain_ids.clone(), src_chain_ids.clone()).await {
             Ok(proof_info) => break proof_info,
-            Err(e) if attempts < 3 => {
+            Err(e) if attempts < max_attempts => {
                 attempts += 1;
                 eprintln!("Attempt {} failed: {:?}, retrying...", attempts, e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(delay_between_attempts).await;
             },
             Err(e) => {
                 return Err(format!("Failed to get proof data after {} attempts: {:?}", attempts, e).into());
@@ -179,34 +174,58 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
     };
     
     let receipt = proof_info.receipt;
-    let seal = encode_seal(&receipt)?;
-    let journal = receipt.journal.bytes.clone();
+    let seal = Bytes::from(encode_seal(&receipt)?);
+    let journal = Bytes::from(receipt.journal.bytes);
 
     println!("Journal as hex string: {:?}", hex::encode(&journal));
     println!("Seal as hex string: {:?}", hex::encode(&seal));
 
+    Ok((journal, seal))
+}
+
+async fn create_provider(rpc_url: Url, private_key: &str) -> Result<ProviderType, Box<dyn std::error::Error>> {
+    let signer: PrivateKeySigner = private_key
+        .parse()
+        .expect("should parse private key");
+    let wallet = EthereumWallet::from(signer);
+
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(rpc_url);
+
+    Ok(provider)
+}
+
+async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std::error::Error>> {
+    let event = parse_withdraw_on_extension_chain_event(&log);
+    println!("Event: {:?}", event);
+    
+    let users = vec![vec![event.sender]];
+    let markets = vec![vec![market]];
+    let amount = vec![event.amount];
+    let dst_chain_id = event.dst_chain_id;
+    let receiver = Address::ZERO;
+    
+    let src_chain_ids = vec![LINEA_SEPOLIA_CHAIN_ID as u64];
+    let dst_chain_ids = vec![vec![dst_chain_id as u64]];
+
+    let (journal, seal) = get_proof_data_prove_with_retry(
+        users,
+        markets,
+        dst_chain_ids,
+        src_chain_ids,
+        3,
+        Duration::from_secs(1)
+    ).await?;
+    
     let rpc_url_submission = match dst_chain_id as u64 {
         OPTIMISM_SEPOLIA_CHAIN_ID => Url::parse(RPC_URL_OPTIMISM_SEPOLIA)?,
         ETHEREUM_SEPOLIA_CHAIN_ID => Url::parse(RPC_URL_ETHEREUM_SEPOLIA)?,
         _ => return Err(format!("Unsupported destination chain ID: {}", dst_chain_id).into()),
     };
-    let private_key_sender = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9286d1f37712ca1d16a56a81a1bf";
 
-    let signer: PrivateKeySigner = private_key_sender
-        .parse()
-        .expect("should parse private key");
-    let wallet = EthereumWallet::from(signer);
-
-    let provider: ProviderType = ProviderBuilder::new()
-        .filler(JoinFill::new(
-            GasFiller,
-            JoinFill::new(
-                NonceFiller::<CachedNonceManager>::default(),
-                ChainIdFiller::default(),
-            ),
-        ))
-        .wallet(wallet)
-        .on_http(rpc_url_submission);
+    let provider = create_provider(rpc_url_submission, PRIVATE_KEY_SENDER).await?;
 
     let host_market = IMaldaMarket::new(market, provider.clone());
 
@@ -229,7 +248,6 @@ async fn process_event_host(log: Log, market: Address) -> Result<(), Box<dyn std
 
 async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dyn std::error::Error>> {
     let event = parse_supplied_event(&log);
-
     println!("Event: {:?}", event);
 
     let method_selector = event.linea_method_selector.as_str();
@@ -242,45 +260,25 @@ async fn process_event_extension(log: Log, market: Address) -> Result<(), Box<dy
     let markets = vec![vec![market]];
     let amount = vec![event.amount];
     let receiver = Address::ZERO;
-    
-    let chain_ids = vec![event.src_chain_id as u64];
+    let src_chain_ids = vec![event.src_chain_id as u64];
+    let dst_chain_ids = vec![vec![LINEA_SEPOLIA_CHAIN_ID as u64]];
 
     if event.src_chain_id == ETHEREUM_SEPOLIA_CHAIN_ID as u32 {
         tokio::time::sleep(tokio::time::Duration::from_secs(72)).await;
     }
-    let mut attempts = 0;
-    let proof_info = loop {
-        match get_proof_data_prove(users.clone(), markets.clone(), vec![vec![LINEA_SEPOLIA_CHAIN_ID as u64]], chain_ids.clone()).await {
-            Ok(proof_info) => break proof_info,
-            Err(e) if attempts < 3 => {
-                attempts += 1;
-                eprintln!("Attempt {} failed: {:?}, retrying...", attempts, e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            },
-            Err(e) => {
-                return Err(format!("Failed to get proof data after {} attempts: {:?}", attempts, e).into());
-            },
-        }
-    };
+
+    let (journal, seal) = get_proof_data_prove_with_retry(
+        users,
+        markets,
+        dst_chain_ids,
+        src_chain_ids,
+        3,
+        Duration::from_secs(1)
+    ).await?;
     
-    let receipt = proof_info.receipt;
-    let seal = encode_seal(&receipt)?;
-    let journal = receipt.journal.bytes.clone();
-
-    println!("Journal as hex string: {:?}", hex::encode(&journal));
-    println!("Seal as hex string: {:?}", hex::encode(&seal));
-
     let rpc_url_submission = Url::parse("https://linea-sepolia.g.alchemy.com/v2/fSI-SMz_VGgi1ZwahhztYMCV51uTaN9e")?;
-    let private_key_sender = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9286d1f37712ca1d16a56a81a1bf";
 
-    let signer: PrivateKeySigner = private_key_sender
-        .parse()
-        .expect("should parse private key");
-    let wallet = EthereumWallet::from(signer);
-
-    let provider = ProviderBuilder::new().with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(rpc_url_submission);
+    let provider = create_provider(rpc_url_submission, PRIVATE_KEY_SENDER).await?;
 
     let host_market = IMaldaMarket::new(market, provider.clone());
 
@@ -330,20 +328,6 @@ fn parse_supplied_event(log: &alloy::rpc::types::Log) -> SuppliedEvent {
         linea_method_selector: hex::encode(&data[160..164]),
     }
 }
-
-// Event parsing functions
-fn parse_liquidate_external_event(log: &Log) -> LiquidateExternalEvent {
-    LiquidateExternalEvent {
-        msg_sender: Address::from_slice(&log.topics()[1][12..]),
-        src_sender: Address::from_slice(&log.topics()[2][12..]),
-        user_to_liquidate: Address::from_slice(&log.topics()[3][12..]),
-        receiver: Address::from_slice(&log.data().data[..32]),
-        collateral: Address::from_slice(&log.data().data[32..64]),
-        src_chain_id: u32::from_be_bytes(log.data().data[64..68].try_into().unwrap()),
-        amount: U256::from_be_slice(&log.data().data[68..100]),
-    }
-}
-
 
 fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtensionChainEvent {
     WithdrawOnExtensionChainEvent {
