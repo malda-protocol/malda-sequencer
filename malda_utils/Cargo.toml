@@ -5,26 +5,26 @@ edition = "2021"
 
 
 [dependencies]
-alloy-primitives = { version = "0.8.8", default-features = false }
-alloy-sol-types = { version = "0.8.8" }
-risc0-steel = { git = "https://github.com/risc0/risc0-ethereum", tag = "v1.2.0" }
-risc0-zkvm = { version = "=1.2.1", default-features = false, features = ['std', 'unstable'] }
-serde = { version = "1.0.143", features = ["derive"] }
-url = { version = "2.5" }
-k256 = { version = "=0.13.3", features = ["arithmetic", "serde", "expose-field", "std", "ecdsa"], default-features = false }
-eyre = "0.6.8"
-snap = "1"
-ssz_types = "0.8.0"
-ethereum_ssz_derive = "0.7.0"
-ethereum_ssz = "0.7.0"
-alloy-rlp = "0.3"
-alloy-consensus = "0.6.4"
-revm = { version = "18.0", default-features = false, features = ["std"] }
+alloy-primitives = { workspace = true }
+alloy-sol-types = { workspace = true }
+risc0-steel = { workspace = true }
+risc0-zkvm = { workspace = true, default-features = false, features = ['std', 'unstable'] }
+serde = { workspace = true }
+url = { workspace = true }
+k256 = { workspace = true }
+eyre = { workspace = true }
+snap = { workspace = true }
+ssz_types = { workspace = true }
+ethereum_ssz_derive = { workspace = true }
+ethereum_ssz = { workspace = true }
+alloy-rlp = { workspace = true }
+alloy-consensus = { workspace = true }
+revm = { workspace = true }
 
-alloy-primitives-old = { package = "alloy-primitives", version = "=0.7.7" }
-alloy = "0.6.4"
-consensus-core = { git = "https://github.com/a16z/helios" , tag = "0.6.0" }
-tree_hash = "0.7.0"
+alloy-primitives-old = { workspace = true }
+alloy = { workspace = true }
+consensus-core = { workspace = true }
+tree_hash = { workspace = true }
 
 
 
