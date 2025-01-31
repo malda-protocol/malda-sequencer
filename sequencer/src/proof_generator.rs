@@ -3,6 +3,11 @@ use eyre::Result;
 use tokio::sync::mpsc;
 use tracing::{info, error, debug, warn};
 use std::time::Duration;
+use tokio::task;
+use tokio::time::{sleep, Instant};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use futures::future::join_all;
 
 use crate::event_processor::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove;
@@ -23,6 +28,7 @@ pub struct ProofGenerator {
     proof_sender: mpsc::Sender<ProofReadyEvent>,
     max_retries: u32,
     retry_delay: Duration,
+    last_proof_time: Arc<Mutex<Instant>>,
 }
 
 impl ProofGenerator {
@@ -37,12 +43,16 @@ impl ProofGenerator {
             proof_sender,
             max_retries,
             retry_delay,
+            last_proof_time: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting proof generator, waiting for events...");
         
+        let mut processing_tasks = Vec::new();
+        const MAX_CONCURRENT_TASKS: usize = 10;
+
         while let Some(event) = self.event_receiver.recv().await {
             info!(
                 "Proof generator received event: type={}", 
@@ -53,50 +63,67 @@ impl ProofGenerator {
                 }
             );
 
-            // Get the relevant fields based on event type
-            let (market, chain_id, event_type) = match &event {
-                ProcessedEvent::HostWithdraw { market, dst_chain_id, .. } => {
-                    (market, dst_chain_id, "HostWithdraw")
-                },
-                ProcessedEvent::HostBorrow { market, dst_chain_id, .. } => {
-                    (market, dst_chain_id, "HostBorrow")
-                },
-                ProcessedEvent::ExtensionSupply { market, dst_chain_id, .. } => {
-                    (market, dst_chain_id, "ExtensionSupply")
+            let proof_sender = self.proof_sender.clone();
+            let max_retries = self.max_retries;
+            let retry_delay = self.retry_delay;
+            let last_proof_time = Arc::clone(&self.last_proof_time);
+
+            let task = task::spawn(async move {
+                let mut last_time = last_proof_time.lock().await;
+                let elapsed = last_time.elapsed();
+                if elapsed < Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY) {
+                    let wait_time = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY) - elapsed;
+                    debug!("Waiting {}s before generating next proof", wait_time.as_secs());
+                    sleep(wait_time).await;
                 }
-            };
+                *last_time = Instant::now();
+                drop(last_time);
 
-            debug!(
-                "Received event for proof generation: market={:?}, type={}, chain={}",
-                market, event_type, chain_id
-            );
+                let proof_generator = ProofGeneratorWorker {
+                    max_retries,
+                    retry_delay,
+                };
 
-            match self.process_event(event).await {
-                Ok(proof_event) => {
-                    info!(
-                        "Successfully generated proof for market={:?}, method={}, chain={}",
-                        proof_event.market, proof_event.method, proof_event.dst_chain_id
-                    );
-                    debug!("Proof details - journal size: {}, seal size: {}", 
-                        proof_event.journal.len(), proof_event.seal.len()
-                    );
-
-                    if let Err(e) = self.proof_sender.send(proof_event).await {
-                        error!("Failed to send proof ready event: {}", e);
-                    } else {
-                        debug!("Sent proof to transaction manager");
+                match proof_generator.process_event(event).await {
+                    Ok(proof_event) => {
+                        info!(
+                            "Successfully generated proof for market={:?}, method={}, chain={}",
+                            proof_event.market, proof_event.method, proof_event.dst_chain_id
+                        );
+                        
+                        if let Err(e) = proof_sender.send(proof_event).await {
+                            error!("Failed to send proof ready event: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to generate proof: {}", e);
                     }
                 }
-                Err(e) => {
-                    error!("Failed to generate proof: {}", e);
-                }
+            });
+
+            processing_tasks.push(task);
+
+            if processing_tasks.len() >= MAX_CONCURRENT_TASKS {
+                join_all(processing_tasks).await;
+                processing_tasks = Vec::new();
             }
+        }
+
+        if !processing_tasks.is_empty() {
+            join_all(processing_tasks).await;
         }
 
         warn!("Proof generator channel closed");
         Ok(())
     }
+}
 
+struct ProofGeneratorWorker {
+    max_retries: u32,
+    retry_delay: Duration,
+}
+
+impl ProofGeneratorWorker {
     async fn process_event(&self, event: ProcessedEvent) -> Result<ProofReadyEvent> {
         match &event {
             ProcessedEvent::HostWithdraw { .. } => {

@@ -7,6 +7,8 @@ use eyre::{Result, WrapErr};
 use tokio::sync::mpsc;
 use tracing::{info, error, warn, debug};
 use std::time::Duration;
+use tokio::task;
+use futures::future::join_all;
 
 use crate::{
     proof_generator::ProofReadyEvent,
@@ -20,7 +22,7 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionConfig {
     pub max_retries: u32,
     pub retry_delay: Duration,
@@ -47,22 +49,43 @@ impl TransactionManager {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting transaction manager");
         
+        let mut processing_tasks = Vec::new();
+        const MAX_CONCURRENT_TASKS: usize = 10;
+
         while let Some(event) = self.event_receiver.recv().await {
-            match self.process_transaction(event).await {
-                Ok(tx_hash) => {
-                    info!("Transaction submitted successfully: {:?}", tx_hash);
+            let config = self.config.clone();
+            
+            let task = task::spawn(async move {
+                match Self::process_transaction(event, &config).await {
+                    Ok(tx_hash) => {
+                        info!("Transaction submitted successfully: {:?}", tx_hash);
+                    }
+                    Err(e) => {
+                        error!("Failed to process transaction: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to process transaction: {}", e);
-                }
+            });
+
+            processing_tasks.push(task);
+
+            // When we hit the concurrent task limit, wait for all tasks to complete
+            if processing_tasks.len() >= MAX_CONCURRENT_TASKS {
+                join_all(processing_tasks).await;
+                processing_tasks = Vec::new();
             }
         }
 
+        // Wait for any remaining tasks to complete
+        if !processing_tasks.is_empty() {
+            join_all(processing_tasks).await;
+        }
+
+        warn!("Transaction manager channel closed");
         Ok(())
     }
 
-    async fn get_provider_for_chain(&self, chain_id: u32) -> Result<ProviderType> {
-        let rpc_url = self.config.rpc_urls
+    async fn get_provider_for_chain(chain_id: u32, config: &TransactionConfig) -> Result<ProviderType> {
+        let rpc_url = config.rpc_urls
             .iter()
             .find(|(id, _)| *id == chain_id)
             .map(|(_, url)| url.clone())
@@ -74,21 +97,21 @@ impl TransactionManager {
     }
 
     async fn submit_with_retry(
-        &self,
         provider: &ProviderType,
         event: &ProofReadyEvent,
+        config: &TransactionConfig,
     ) -> Result<TxHash> {
         let mut attempts = 0;
         loop {
-            match self.submit_transaction(provider, event).await {
+            match Self::submit_transaction(provider, event).await {
                 Ok(tx_hash) => return Ok(tx_hash),
-                Err(e) if attempts < self.config.max_retries => {
+                Err(e) if attempts < config.max_retries => {
                     attempts += 1;
                     warn!(
                         "Transaction attempt {} failed: {}. Retrying...",
                         attempts, e
                     );
-                    tokio::time::sleep(self.config.retry_delay).await;
+                    tokio::time::sleep(config.retry_delay).await;
                 }
                 Err(e) => {
                     return Err(e).wrap_err(format!(
@@ -101,7 +124,6 @@ impl TransactionManager {
     }
 
     async fn validate_transaction_receipt(
-        &self,
         provider: &ProviderType,
         tx_hash: TxHash,
         event: &ProofReadyEvent,
@@ -142,7 +164,7 @@ impl TransactionManager {
         Ok(())
     }
 
-    async fn submit_transaction(&self, provider: &ProviderType, event: &ProofReadyEvent) -> Result<TxHash> {
+    async fn submit_transaction(provider: &ProviderType, event: &ProofReadyEvent) -> Result<TxHash> {
         let market = IMaldaMarket::new(event.market, provider.clone());
         
         let tx_hash = match event.method.as_str() {
@@ -241,7 +263,7 @@ impl TransactionManager {
         };
 
         // Validate the transaction
-        match self.validate_transaction_receipt(provider, tx_hash, event).await {
+        match Self::validate_transaction_receipt(provider, tx_hash, event).await {
             Ok(_) => {
                 info!("Transaction {:?} confirmed and validated", tx_hash);
                 Ok(tx_hash)
@@ -253,14 +275,14 @@ impl TransactionManager {
         }
     }
 
-    async fn process_transaction(&self, event: ProofReadyEvent) -> Result<TxHash> {
+    async fn process_transaction(event: ProofReadyEvent, config: &TransactionConfig) -> Result<TxHash> {
         info!(
-            "Processing transaction for market {:?}, method: {}, chain: {}", 
+            "Processing transaction for market={:?}, method={}, chain={}",
             event.market, event.method, event.dst_chain_id
         );
 
-        let provider = self.get_provider_for_chain(event.dst_chain_id).await?;
-        self.submit_with_retry(&provider, &event).await
+        let provider = Self::get_provider_for_chain(event.dst_chain_id, config).await?;
+        Self::submit_with_retry(&provider, &event, config).await
     }
 }
 
