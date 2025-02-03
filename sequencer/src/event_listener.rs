@@ -8,6 +8,7 @@ use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tracing::{info, error, debug, warn};
+use sequencer::logger::{PipelineLogger, PipelineStep};
 
 #[derive(Debug)]
 pub struct EventConfig {
@@ -27,13 +28,19 @@ pub struct RawEvent {
 pub struct EventListener {
     config: EventConfig,
     event_sender: mpsc::Sender<RawEvent>,
+    logger: PipelineLogger,
 }
 
 impl EventListener {
-    pub fn new(config: EventConfig, event_sender: mpsc::Sender<RawEvent>) -> Self {
+    pub fn new(
+        config: EventConfig, 
+        event_sender: mpsc::Sender<RawEvent>,
+        logger: PipelineLogger,
+    ) -> Self {
         Self {
             config,
             event_sender,
+            logger,
         }
     }
 
@@ -69,6 +76,19 @@ impl EventListener {
                 self.config.chain_id, self.config.market
             );
 
+            if let Err(e) = self.logger.log_step(
+                log.transaction_hash.expect("Log should have tx hash"), 
+                PipelineStep::EventReceived {
+                    chain_id: self.config.chain_id as u32,
+                    block_number: u64::try_from(log.block_number.expect("Log should have block number"))
+                        .expect("Block number should fit in u64"),
+                    market: self.config.market,
+                    event_type: self.config.event_signature.clone(),
+                }
+            ).await {
+                error!("Failed to log event: {}", e);
+            }
+
             let raw_event = RawEvent {
                 log,
                 market: self.config.market,
@@ -88,11 +108,11 @@ impl EventListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::test::*;
+    use crate::constants::{test::*, EVENT_CHANNEL_CAPACITY};
+    use std::path::PathBuf;
 
     #[tokio::test]
-    async fn test_event_listener_creation() {
-        let (tx, _rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+    async fn test_event_listener_creation() -> Result<()> {
         let config = EventConfig {
             ws_url: TEST_WS_URL.to_string(),
             market: Address::ZERO,
@@ -100,6 +120,9 @@ mod tests {
             chain_id: TEST_CHAIN_ID,
         };
 
-        let _listener = EventListener::new(config, tx);
+        let (tx, _rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
+        let _listener = EventListener::new(config, tx, logger);
+        Ok(())
     }
 } 

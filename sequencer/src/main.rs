@@ -38,6 +38,9 @@ use proof_generator::ProofGenerator;
 mod transaction_manager;
 use transaction_manager::{TransactionManager, TransactionConfig};
 
+use sequencer::logger::PipelineLogger;
+use std::path::PathBuf;
+
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ProviderType = alloy::providers::fillers::FillProvider<
@@ -95,6 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn event listeners
     let mut handles = vec![];
     
+    let logger = PipelineLogger::new(PathBuf::from("pipeline.log")).await?;
+    
     for market in markets {
         for (ws_url, chain_id, events) in chain_configs.iter() {
             for event in events {
@@ -110,7 +115,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     chain_id: *chain_id,
                 };
                 
-                let listener = EventListener::new(config, event_tx.clone());
+                let listener = EventListener::new(
+                    config,
+                    event_tx.clone(),
+                    logger.clone(),
+                );
                 let handle = tokio::spawn(async move {
                     if let Err(e) = listener.start().await {
                         error!("Event listener failed: {:?}", e);
@@ -125,9 +134,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All event listeners started");
 
+    // Create logger before spawning tasks
+    let event_logger = logger.clone();
+    let proof_logger = logger.clone();
+
     // Spawn event processor
     let processor_handle = tokio::spawn(async move {
-        let mut processor = EventProcessor::new(event_rx, processed_tx);
+        let mut processor = EventProcessor::new(event_rx, processed_tx, event_logger);
         if let Err(e) = processor.start().await {
             error!("Event processor failed: {:?}", e);
         }
@@ -141,6 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             proof_tx,
             MAX_PROOF_RETRIES,
             PROOF_RETRY_DELAY,
+            proof_logger,
         );
         if let Err(e) = generator.start().await {
             error!("Proof generator failed: {:?}", e);
@@ -161,7 +175,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn transaction manager
     let tx_manager_handle = tokio::spawn(async move {
-        let mut manager = TransactionManager::new(proof_rx, tx_config);
+        let mut manager = TransactionManager::new(
+            proof_rx,
+            tx_config,
+            logger.clone(),
+        );
         if let Err(e) = manager.start().await {
             error!("Transaction manager failed: {:?}", e);
         }

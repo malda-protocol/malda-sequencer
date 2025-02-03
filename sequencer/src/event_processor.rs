@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, U256, TxHash},
 };
 use eyre::Result;
 use tokio::sync::mpsc;
@@ -8,6 +8,7 @@ use tokio::task;
 use futures::future::join_all;
 use tokio::time::sleep;
 use std::time::Duration;
+use hex;
 
 use crate::{
     event_listener::RawEvent,
@@ -18,22 +19,26 @@ use crate::{
 use malda_rs::constants::{LINEA_SEPOLIA_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID};
 
 use crate::constants::ETHEREUM_BLOCK_DELAY;
+use sequencer::logger::{PipelineLogger, PipelineStep};
 
 #[derive(Debug)]
 pub enum ProcessedEvent {
     HostWithdraw {
+        tx_hash: TxHash,
         sender: Address,
         dst_chain_id: u32,
         amount: U256,
         market: Address,
     },
     HostBorrow {
+        tx_hash: TxHash,
         sender: Address,
         dst_chain_id: u32,
         amount: U256,
         market: Address,
     },
     ExtensionSupply {
+        tx_hash: TxHash,
         from: Address,
         amount: U256,
         src_chain_id: u32,
@@ -46,23 +51,25 @@ pub enum ProcessedEvent {
 pub struct EventProcessor {
     event_receiver: mpsc::Receiver<RawEvent>,
     processed_sender: mpsc::Sender<ProcessedEvent>,
+    logger: PipelineLogger,
 }
 
 impl EventProcessor {
     pub fn new(
         event_receiver: mpsc::Receiver<RawEvent>,
         processed_sender: mpsc::Sender<ProcessedEvent>,
+        logger: PipelineLogger,
     ) -> Self {
         Self {
             event_receiver,
             processed_sender,
+            logger,
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting event processor");
         
-        // Create a buffer to store processing tasks
         let mut processing_tasks = Vec::new();
         const MAX_CONCURRENT_TASKS: usize = 10;
 
@@ -73,26 +80,27 @@ impl EventProcessor {
             );
 
             let processed_sender = self.processed_sender.clone();
+            let logger = self.logger.clone();
             
             // Spawn a new task for processing this event
             let task = task::spawn(async move {
-                match Self::process_event(raw_event).await {
+                match Self::process_event(raw_event, &logger).await {
                     Ok(processed) => {
                         // Log the processed event
                         match &processed {
-                            ProcessedEvent::HostWithdraw { sender, dst_chain_id, amount, market } => {
+                            ProcessedEvent::HostWithdraw { tx_hash: _, sender, dst_chain_id, amount, market } => {
                                 info!(
                                     "Processed host withdraw: sender={:?} dst_chain={} amount={} market={:?}",
                                     sender, dst_chain_id, amount, market
                                 );
                             }
-                            ProcessedEvent::HostBorrow { sender, dst_chain_id, amount, market } => {
+                            ProcessedEvent::HostBorrow { tx_hash: _, sender, dst_chain_id, amount, market } => {
                                 info!(
                                     "Processed host borrow: sender={:?} dst_chain={} amount={} market={:?}",
                                     sender, dst_chain_id, amount, market
                                 );
                             }
-                            ProcessedEvent::ExtensionSupply { from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
+                            ProcessedEvent::ExtensionSupply { tx_hash: _, from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
                                 info!(
                                     "Processed extension supply: from={:?} amount={} src_chain={} dst_chain={} market={:?} method={}",
                                     from, amount, src_chain_id, dst_chain_id, market, method_selector
@@ -123,15 +131,12 @@ impl EventProcessor {
 
             processing_tasks.push(task);
 
-            // If we have too many pending tasks, wait for some to complete
             if processing_tasks.len() >= MAX_CONCURRENT_TASKS {
-                // Wait for all current tasks to complete before continuing
                 join_all(processing_tasks).await;
                 processing_tasks = Vec::new();
             }
         }
 
-        // Wait for any remaining tasks to complete
         if !processing_tasks.is_empty() {
             join_all(processing_tasks).await;
         }
@@ -140,10 +145,12 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_event(raw_event: RawEvent) -> Result<ProcessedEvent> {
+    async fn process_event(raw_event: RawEvent, logger: &PipelineLogger) -> Result<ProcessedEvent> {
         let chain_id = raw_event.chain_id;
         let market = raw_event.market;
         let log = raw_event.log;
+        let tx_hash = log.transaction_hash.expect("Log should have tx hash");
+        debug!("Processing event with tx_hash: {}", hex::encode(tx_hash.0));
 
         // Add delay for ETH Sepolia events
         if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
@@ -154,23 +161,53 @@ impl EventProcessor {
         let processed = if chain_id == LINEA_SEPOLIA_CHAIN_ID {
             // Process host chain events
             let event = parse_withdraw_on_extension_chain_event(&log);
-            ProcessedEvent::HostWithdraw {
+            let result = ProcessedEvent::HostWithdraw {
+                tx_hash,
                 sender: event.sender,
                 dst_chain_id: event.dst_chain_id,
                 amount: event.amount,
                 market,
-            }
+            };
+
+            // Log the processed event
+            logger.log_step(
+                tx_hash,
+                PipelineStep::EventProcessed {
+                    chain_id: chain_id as u32,
+                    dst_chain_id: event.dst_chain_id,
+                    market,
+                    event_type: "HostWithdraw".to_string(),
+                    amount: event.amount,
+                }
+            ).await?;
+
+            result
         } else {
             // Process extension chain events
             let event = parse_supplied_event(&log);
-            ProcessedEvent::ExtensionSupply {
+            let result = ProcessedEvent::ExtensionSupply {
+                tx_hash,
                 from: event.from,
                 amount: event.amount,
                 src_chain_id: event.src_chain_id,
                 dst_chain_id: event.dst_chain_id,
                 market,
                 method_selector: event.linea_method_selector,
-            }
+            };
+
+            // Log the processed event
+            logger.log_step(
+                tx_hash,
+                PipelineStep::EventProcessed {
+                    chain_id: chain_id as u32,
+                    dst_chain_id: event.dst_chain_id,
+                    market,
+                    event_type: "ExtensionSupply".to_string(),
+                    amount: event.amount,
+                }
+            ).await?;
+
+            result
         };
 
         Ok(processed)
@@ -181,12 +218,16 @@ impl EventProcessor {
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
+    use std::path::PathBuf;
+    use sequencer::logger::PipelineLogger;
 
     #[tokio::test]
-    async fn test_event_processor() {
-        let (raw_tx, raw_rx) = mpsc::channel(100);
+    async fn test_event_processor() -> Result<()> {
+        let (_raw_tx, raw_rx) = mpsc::channel(100);
         let (processed_tx, _processed_rx) = mpsc::channel(100);
+        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
         
-        let _processor = EventProcessor::new(raw_rx, processed_tx);
+        let _processor = EventProcessor::new(raw_rx, processed_tx, logger);
+        Ok(())
     }
 } 
