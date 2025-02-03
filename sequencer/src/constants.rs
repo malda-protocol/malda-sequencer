@@ -48,8 +48,6 @@ pub const PROOF_REQUEST_DELAY: u64 = 15;
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-    
     pub const TEST_WS_URL: &str = "wss://example.com";
     pub const TEST_CHAIN_ID: u64 = 1;
     pub const TEST_EVENT_SIGNATURE: &str = "Event()";

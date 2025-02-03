@@ -1,7 +1,8 @@
 use alloy::{
-    primitives::TxHash,
+    primitives::{TxHash, U256},
     transports::http::reqwest::Url,
     providers::Provider,
+    rpc::types::TransactionReceipt,
 };
 use eyre::{Result, WrapErr};
 use tokio::sync::mpsc;
@@ -9,6 +10,9 @@ use tracing::{info, error, warn, debug};
 use std::time::Duration;
 use tokio::task;
 use futures::future::join_all;
+use sequencer::logger::{PipelineLogger, PipelineStep};
+use chrono;
+use hex;
 
 use crate::{
     proof_generator::ProofReadyEvent,
@@ -29,20 +33,30 @@ pub struct TransactionConfig {
     pub rpc_urls: Vec<(u32, String)>, // (chain_id, url)
 }
 
-#[derive(Debug)]
 pub struct TransactionManager {
     event_receiver: mpsc::Receiver<ProofReadyEvent>,
     config: TransactionConfig,
+    logger: PipelineLogger,
+}
+
+impl std::fmt::Debug for TransactionManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionManager")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TransactionManager {
     pub fn new(
         event_receiver: mpsc::Receiver<ProofReadyEvent>,
         config: TransactionConfig,
+        logger: PipelineLogger,
     ) -> Self {
         Self {
             event_receiver,
             config,
+            logger,
         }
     }
 
@@ -52,11 +66,16 @@ impl TransactionManager {
         let mut processing_tasks = Vec::new();
         const MAX_CONCURRENT_TASKS: usize = 10;
 
+        // Clone these before the loop to avoid self reference issues
+        let config = self.config.clone();
+        let logger = self.logger.clone();
+
         while let Some(event) = self.event_receiver.recv().await {
-            let config = self.config.clone();
+            let config = config.clone();
+            let logger = logger.clone();
             
             let task = task::spawn(async move {
-                match Self::process_transaction(event, &config).await {
+                match Self::process_transaction(event, &config, &logger).await {
                     Ok(tx_hash) => {
                         info!("Transaction submitted successfully: {:?}", tx_hash);
                     }
@@ -100,10 +119,11 @@ impl TransactionManager {
         provider: &ProviderType,
         event: &ProofReadyEvent,
         config: &TransactionConfig,
+        logger: &PipelineLogger,
     ) -> Result<TxHash> {
         let mut attempts = 0;
         loop {
-            match Self::submit_transaction(provider, event).await {
+            match Self::submit_transaction(provider, event, logger).await {
                 Ok(tx_hash) => return Ok(tx_hash),
                 Err(e) if attempts < config.max_retries => {
                     attempts += 1;
@@ -127,7 +147,7 @@ impl TransactionManager {
         provider: &ProviderType,
         tx_hash: TxHash,
         event: &ProofReadyEvent,
-    ) -> Result<()> {
+    ) -> Result<TransactionReceipt> {
         debug!("Waiting for receipt for transaction {:?}", tx_hash);
         let receipt = provider
             .get_transaction_receipt(tx_hash)
@@ -161,10 +181,10 @@ impl TransactionManager {
             "Transaction validated successfully: hash={:?}, block={:?}", 
             tx_hash, receipt.block_number
         );
-        Ok(())
+        Ok(receipt)
     }
 
-    async fn submit_transaction(provider: &ProviderType, event: &ProofReadyEvent) -> Result<TxHash> {
+    async fn submit_transaction(provider: &ProviderType, event: &ProofReadyEvent, logger: &PipelineLogger) -> Result<TxHash> {
         let market = IMaldaMarket::new(event.market, provider.clone());
         
         let tx_hash = match event.method.as_str() {
@@ -184,7 +204,20 @@ impl TransactionManager {
                 
                 let pending_tx = action.send().await
                     .wrap_err("Failed to send outHere transaction")?;
-                info!("Transaction sent with hash {}", pending_tx.tx_hash());
+                let tx_hash = pending_tx.tx_hash();
+                
+                // Log transaction submission
+                logger.log_step(
+                    *tx_hash,
+                    PipelineStep::TransactionSubmitted {
+                        tx_hash: *tx_hash,
+                        method: event.method.clone(),
+                        gas_used: U256::from(0u64),
+                        gas_price: U256::from(provider.get_gas_price().await?),
+                    }
+                ).await?;
+
+                info!("Transaction sent with hash {}", tx_hash);
 
                 debug!("Waiting for transaction confirmation with timeout {:?}", TX_TIMEOUT);
                 match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
@@ -214,7 +247,20 @@ impl TransactionManager {
                 
                 let pending_tx = action.send().await
                     .wrap_err("Failed to send mintExternal transaction")?;
-                info!("Transaction sent with hash {}", pending_tx.tx_hash());
+                let tx_hash = pending_tx.tx_hash();
+
+                // Log transaction submission
+                logger.log_step(
+                    *tx_hash,
+                    PipelineStep::TransactionSubmitted {
+                        tx_hash: *tx_hash,
+                        method: event.method.clone(),
+                        gas_used: U256::from(0u64),
+                        gas_price: U256::from(provider.get_gas_price().await?),
+                    }
+                ).await?;
+
+                info!("Transaction sent with hash {}", tx_hash);
 
                 match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
                     Ok(hash) => {
@@ -243,7 +289,20 @@ impl TransactionManager {
                 
                 let pending_tx = action.send().await
                     .wrap_err("Failed to send repayExternal transaction")?;
-                info!("Transaction sent with hash {}", pending_tx.tx_hash());
+                let tx_hash = pending_tx.tx_hash();
+
+                // Log transaction submission
+                logger.log_step(
+                    *tx_hash,
+                    PipelineStep::TransactionSubmitted {
+                        tx_hash: *tx_hash,
+                        method: event.method.clone(),
+                        gas_used: U256::from(0u64),
+                        gas_price: U256::from(provider.get_gas_price().await?),
+                    }
+                ).await?;
+
+                info!("Transaction sent with hash {}", tx_hash);
 
                 match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
                     Ok(hash) => {
@@ -264,8 +323,20 @@ impl TransactionManager {
 
         // Validate the transaction
         match Self::validate_transaction_receipt(provider, tx_hash, event).await {
-            Ok(_) => {
+            Ok(receipt) => {
                 info!("Transaction {:?} confirmed and validated", tx_hash);
+                
+                // Log transaction verification
+                logger.log_step(
+                    tx_hash,
+                    PipelineStep::TransactionVerified {
+                        tx_hash,
+                        method: event.method.clone(),
+                        block_number: receipt.block_number.unwrap_or_default(),
+                        status: if receipt.status() { 1 } else { 0 },
+                    }
+                ).await?;
+
                 Ok(tx_hash)
             },
             Err(e) => {
@@ -275,14 +346,25 @@ impl TransactionManager {
         }
     }
 
-    async fn process_transaction(event: ProofReadyEvent, config: &TransactionConfig) -> Result<TxHash> {
+    async fn process_transaction(event: ProofReadyEvent, config: &TransactionConfig, logger: &PipelineLogger) -> Result<TxHash> {
         info!(
             "Processing transaction for market={:?}, method={}, chain={}",
             event.market, event.method, event.dst_chain_id
         );
 
         let provider = Self::get_provider_for_chain(event.dst_chain_id, config).await?;
-        Self::submit_with_retry(&provider, &event, config).await
+        let tx_hash = Self::submit_with_retry(&provider, &event, config, logger).await?;
+
+        // Log successful transaction completion
+        let current_time = chrono::Utc::now();
+        logger.write_to_log(&format!(
+            "{}, TxHash: {}, Transaction: Finished, tx={}\n",
+            current_time.format("%Y-%m-%d %H:%M:%S"),
+            hex::encode(event.tx_hash),  // Changed from original_tx_hash to tx_hash
+            hex::encode(tx_hash),        // New transaction hash
+        )).await?;
+
+        Ok(tx_hash)
     }
 }
 
@@ -293,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_manager_creation() {
-        let (tx, rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+        let (_tx, rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
         let config = TransactionConfig {
             max_retries: MAX_TX_RETRIES,
             retry_delay: TX_RETRY_DELAY,

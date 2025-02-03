@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, Bytes, U256};
+use alloy::primitives::{Address, Bytes, U256, TxHash};
 use eyre::Result;
 use tokio::sync::mpsc;
 use tracing::{info, error, debug, warn};
@@ -11,9 +11,11 @@ use futures::future::join_all;
 
 use crate::event_processor::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove;
+use sequencer::logger::{PipelineLogger, PipelineStep};
 
 #[derive(Debug)]
 pub struct ProofReadyEvent {
+    pub tx_hash: TxHash,
     pub market: Address,
     pub journal: Bytes,
     pub seal: Bytes,
@@ -29,6 +31,7 @@ pub struct ProofGenerator {
     max_retries: u32,
     retry_delay: Duration,
     last_proof_time: Arc<Mutex<Instant>>,
+    logger: PipelineLogger,
 }
 
 impl ProofGenerator {
@@ -37,6 +40,7 @@ impl ProofGenerator {
         proof_sender: mpsc::Sender<ProofReadyEvent>,
         max_retries: u32,
         retry_delay: Duration,
+        logger: PipelineLogger,
     ) -> Self {
         Self {
             event_receiver,
@@ -44,6 +48,7 @@ impl ProofGenerator {
             max_retries,
             retry_delay,
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
+            logger,
         }
     }
 
@@ -67,6 +72,7 @@ impl ProofGenerator {
             let max_retries = self.max_retries;
             let retry_delay = self.retry_delay;
             let last_proof_time = Arc::clone(&self.last_proof_time);
+            let logger = self.logger.clone();
 
             let task = task::spawn(async move {
                 let mut last_time = last_proof_time.lock().await;
@@ -84,7 +90,7 @@ impl ProofGenerator {
                     retry_delay,
                 };
 
-                match proof_generator.process_event(event).await {
+                match proof_generator.process_event(event, &logger).await {
                     Ok(proof_event) => {
                         info!(
                             "Successfully generated proof for market={:?}, method={}, chain={}",
@@ -124,21 +130,9 @@ struct ProofGeneratorWorker {
 }
 
 impl ProofGeneratorWorker {
-    async fn process_event(&self, event: ProcessedEvent) -> Result<ProofReadyEvent> {
-        match &event {
-            ProcessedEvent::HostWithdraw { .. } => {
-                info!("Starting proof generation for HostWithdraw event");
-            },
-            ProcessedEvent::HostBorrow { .. } => {
-                info!("Starting proof generation for HostBorrow event");
-            },
-            ProcessedEvent::ExtensionSupply { .. } => {
-                info!("Starting proof generation for ExtensionSupply event");
-            }
-        }
-
+    async fn process_event(&self, event: ProcessedEvent, logger: &PipelineLogger) -> Result<ProofReadyEvent> {
         let result = match event {
-            ProcessedEvent::HostWithdraw { sender, dst_chain_id, amount, market } => {
+            ProcessedEvent::HostWithdraw { tx_hash, sender, dst_chain_id, amount, market } => {
                 info!("Preparing proof data for HostWithdraw");
                 let users = vec![vec![sender]];
                 let markets = vec![vec![market]];
@@ -150,6 +144,9 @@ impl ProofGeneratorWorker {
                     users, markets, dst_chain_ids, src_chain_ids
                 );
 
+                let start_time = Instant::now();
+                debug!("Starting proof generation at {:?}", start_time);
+
                 let (journal, seal) = self.generate_proof_with_retry(
                     users,
                     markets,
@@ -157,7 +154,23 @@ impl ProofGeneratorWorker {
                     src_chain_ids,
                 ).await?;
 
-                Ok(ProofReadyEvent {
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                debug!("Proof generation completed in {}ms", duration_ms);
+
+                // Log the proof generation
+                logger.log_step(
+                    tx_hash,
+                    PipelineStep::ProofGenerated {
+                        duration_ms,
+                        journal: hex::encode(&journal),
+                        seal: hex::encode(&seal),
+                    }
+                ).await?;
+
+                info!("Successfully completed proof generation");
+
+                ProofReadyEvent {
+                    tx_hash,
                     market,
                     journal,
                     seal,
@@ -165,9 +178,9 @@ impl ProofGeneratorWorker {
                     receiver: Address::ZERO,
                     method: "outHere".to_string(),
                     dst_chain_id,
-                })
+                }
             },
-            ProcessedEvent::HostBorrow { sender, dst_chain_id, amount, market } => {
+            ProcessedEvent::HostBorrow { tx_hash, sender, dst_chain_id, amount, market } => {
                 info!("Preparing proof data for HostBorrow");
                 let users = vec![vec![sender]];
                 let markets = vec![vec![market]];
@@ -179,6 +192,9 @@ impl ProofGeneratorWorker {
                     users, markets, dst_chain_ids, src_chain_ids
                 );
 
+                let start_time = Instant::now();
+                debug!("Starting proof generation at {:?}", start_time);
+
                 let (journal, seal) = self.generate_proof_with_retry(
                     users,
                     markets,
@@ -186,7 +202,23 @@ impl ProofGeneratorWorker {
                     src_chain_ids,
                 ).await?;
 
-                Ok(ProofReadyEvent {
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                debug!("Proof generation completed in {}ms", duration_ms);
+
+                // Log the proof generation
+                logger.log_step(
+                    tx_hash,
+                    PipelineStep::ProofGenerated {
+                        duration_ms,
+                        journal: hex::encode(&journal),
+                        seal: hex::encode(&seal),
+                    }
+                ).await?;
+
+                info!("Successfully completed proof generation");
+
+                ProofReadyEvent {
+                    tx_hash,
                     market,
                     journal,
                     seal,
@@ -194,9 +226,9 @@ impl ProofGeneratorWorker {
                     receiver: Address::ZERO,
                     method: "outHere".to_string(),
                     dst_chain_id,
-                })
+                }
             },
-            ProcessedEvent::ExtensionSupply { from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
+            ProcessedEvent::ExtensionSupply { tx_hash, from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
                 info!("Preparing proof data for ExtensionSupply");
                 let users = vec![vec![from]];
                 let markets = vec![vec![market]];
@@ -208,12 +240,30 @@ impl ProofGeneratorWorker {
                     users, markets, dst_chain_ids, src_chain_ids
                 );
 
+                let start_time = Instant::now();
+                debug!("Starting proof generation at {:?}", start_time);
+
                 let (journal, seal) = self.generate_proof_with_retry(
                     users,
                     markets,
                     dst_chain_ids,
                     src_chain_ids,
                 ).await?;
+
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                debug!("Proof generation completed in {}ms", duration_ms);
+
+                // Log the proof generation
+                logger.log_step(
+                    tx_hash,
+                    PipelineStep::ProofGenerated {
+                        duration_ms,
+                        journal: hex::encode(&journal),
+                        seal: hex::encode(&seal),
+                    }
+                ).await?;
+
+                info!("Successfully completed proof generation");
 
                 let method = if method_selector == crate::events::MINT_EXTERNAL_SELECTOR {
                     "mintExternal"
@@ -223,7 +273,8 @@ impl ProofGeneratorWorker {
                     return Err(eyre::eyre!("Invalid method selector: {}", method_selector));
                 };
 
-                Ok(ProofReadyEvent {
+                ProofReadyEvent {
+                    tx_hash,
                     market,
                     journal,
                     seal,
@@ -231,15 +282,11 @@ impl ProofGeneratorWorker {
                     receiver: Address::ZERO,
                     method: method.to_string(),
                     dst_chain_id,
-                })
+                }
             }
         };
 
-        match &result {
-            Ok(_) => info!("Successfully completed proof generation"),
-            Err(e) => error!("Failed to generate proof: {}", e),
-        }
-        result
+        Ok(result)
     }
 
     async fn generate_proof_with_retry(
@@ -312,15 +359,19 @@ mod tests {
     use crate::constants::{PROOF_CHANNEL_CAPACITY, MAX_PROOF_RETRIES, PROOF_RETRY_DELAY};
 
     #[tokio::test]
-    async fn test_proof_generator_creation() {
-        let (event_tx, event_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+    async fn test_proof_generator_creation() -> Result<()> {
+        let (_event_tx, event_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
         let (proof_tx, _proof_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+        
+        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
         
         let _generator = ProofGenerator::new(
             event_rx,
             proof_tx,
             MAX_PROOF_RETRIES,
             PROOF_RETRY_DELAY,
+            logger,
         );
+        Ok(())
     }
 } 
