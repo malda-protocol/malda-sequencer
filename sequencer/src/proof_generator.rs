@@ -8,6 +8,7 @@ use tokio::time::{sleep, Instant};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use futures::future::join_all;
+use std::path::PathBuf;
 
 use crate::event_processor::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove;
@@ -372,6 +373,13 @@ mod tests {
             PROOF_RETRY_DELAY,
             logger,
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_process_event() -> Result<()> {
+        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
+        // ... rest of test code ...
         Ok(())
     }
 } 

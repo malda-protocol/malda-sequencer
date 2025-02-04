@@ -46,6 +46,8 @@ pub const ETHEREUM_BLOCK_DELAY: u64 = 72;
 // Add this with other constants
 pub const PROOF_REQUEST_DELAY: u64 = 15;
 
+pub const BATCH_SUBMITTER: Address = address!("249C35525E96d6f7ad0661AE771e34ACf228cCe2");
+
 #[cfg(test)]
 pub mod test {
     pub const TEST_WS_URL: &str = "wss://example.com";

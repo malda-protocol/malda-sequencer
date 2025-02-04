@@ -24,7 +24,7 @@ use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
 use risc0_zkvm::{
-    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts
+    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts, compute_image_id
 };
 
 use alloy_consensus::Header;
@@ -34,6 +34,7 @@ use anyhow::{Result, Error};
 use tokio;
 use url::Url;
 use futures::future::join_all;
+use hex;
 
 /// Executes proof data queries across multiple chains in parallel
 ///
@@ -155,6 +156,11 @@ pub async fn get_proof_data_prove(
                 .unwrap()
         });
 
+        let image_id = compute_image_id(GET_PROOF_DATA_ELF);
+        println!("Image ID: {:?}", image_id);
+        println!("Image ID: 0x{}", hex::encode(image_id.unwrap()));
+        panic!("test");
+        
         default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::groth16())
     })
     .await?;

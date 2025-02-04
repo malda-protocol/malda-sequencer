@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn event listeners
     let mut handles = vec![];
     
-    let logger = PipelineLogger::new(PathBuf::from("pipeline.log")).await?;
+    let logger = PipelineLogger::new(PathBuf::from("batch_pipeline.log")).await?;
     
     for market in markets {
         for (ws_url, chain_id, events) in chain_configs.iter() {

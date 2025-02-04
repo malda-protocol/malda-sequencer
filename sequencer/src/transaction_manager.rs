@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{TxHash, U256},
+    primitives::{TxHash, U256, FixedBytes},
     transports::http::reqwest::Url,
     providers::Provider,
     rpc::types::TransactionReceipt,
@@ -14,15 +14,23 @@ use sequencer::logger::{PipelineLogger, PipelineStep};
 use chrono;
 use hex;
 
+type Bytes4 = FixedBytes<4>; 
+
 use crate::{
     proof_generator::ProofReadyEvent,
     ProviderType,
     create_provider,
-    types::IMaldaMarket,
     constants::{
         TX_TIMEOUT,
         SEQUENCER_ADDRESS,
         SEQUENCER_PRIVATE_KEY,
+        BATCH_SUBMITTER,
+    },
+    types::{IBatchSubmitter, BatchProcessMsg},
+    events::{
+        MINT_EXTERNAL_SELECTOR_FB4,
+        REPAY_EXTERNAL_SELECTOR_FB4,
+        OUT_HERE_SELECTOR_FB4,
     },
 };
 
@@ -134,10 +142,7 @@ impl TransactionManager {
                     tokio::time::sleep(config.retry_delay).await;
                 }
                 Err(e) => {
-                    return Err(e).wrap_err(format!(
-                        "Failed to submit transaction after {} attempts",
-                        attempts
-                    ));
+                    return Err(e);
                 }
             }
         }
@@ -185,163 +190,72 @@ impl TransactionManager {
     }
 
     async fn submit_transaction(provider: &ProviderType, event: &ProofReadyEvent, logger: &PipelineLogger) -> Result<TxHash> {
-        let market = IMaldaMarket::new(event.market, provider.clone());
+        info!("Preparing batch submission for market {:?}", event.market);
         
-        let tx_hash = match event.method.as_str() {
-            "outHere" => {
-                info!("Preparing outHere transaction for market {:?}", event.market);
-                let action = market
-                    .outHere(
-                        event.journal.clone(),
-                        event.seal.clone(),
-                        event.amount.clone(),
-                        event.receiver,
-                    )
-                    .from(SEQUENCER_ADDRESS);
+        // Create batch submitter contract instance
+        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
-                info!("Broadcasting outHere transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
-                    event.journal.len(), event.seal.len(), event.amount, event.receiver);
-                
-                let pending_tx = action.send().await
-                    .wrap_err("Failed to send outHere transaction")?;
-                let tx_hash = pending_tx.tx_hash();
-                
-                // Log transaction submission
-                logger.log_step(
-                    *tx_hash,
-                    PipelineStep::TransactionSubmitted {
-                        tx_hash: *tx_hash,
-                        method: event.method.clone(),
-                        gas_used: U256::from(0u64),
-                        gas_price: U256::from(provider.get_gas_price().await?),
-                    }
-                ).await?;
-
-                info!("Transaction sent with hash {}", tx_hash);
-
-                debug!("Waiting for transaction confirmation with timeout {:?}", TX_TIMEOUT);
-                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                    Ok(hash) => {
-                        info!("Transaction confirmed with hash {:?}", hash);
-                        hash
-                    },
-                    Err(e) => {
-                        error!("outHere transaction failed: {}", e);
-                        return Err(e).wrap_err("Failed to confirm outHere transaction");
+        // Construct BatchProcessMsg
+        let msg = BatchProcessMsg {
+            receiver: event.receiver,
+            journalData: event.journal.clone(),
+            seal: event.seal.clone(),
+            mTokens: vec![event.market], // Single market for now
+            amounts: event.amount.clone(),
+            selectors: vec![
+                // Match method name to selector
+                match event.method.as_str() {
+                    "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
+                    "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),
+                    "repayExternal" => Bytes4::from_slice(REPAY_EXTERNAL_SELECTOR_FB4),
+                    method => {
+                        error!("Invalid transaction method: {}", method);
+                        return Err(eyre::eyre!("Invalid method: {}", method));
                     }
                 }
-            },
-            "mintExternal" => {
-                info!("Preparing mintExternal transaction for market {:?}", event.market);
-                let action = market
-                    .mintExternal(
-                        event.journal.clone(),
-                        event.seal.clone(),
-                        event.amount.clone(),
-                        event.receiver,
-                    )
-                    .from(SEQUENCER_ADDRESS);
-
-                info!("Broadcasting mintExternal transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
-                    event.journal.len(), event.seal.len(), event.amount, event.receiver);
-                
-                let pending_tx = action.send().await
-                    .wrap_err("Failed to send mintExternal transaction")?;
-                let tx_hash = pending_tx.tx_hash();
-
-                // Log transaction submission
-                logger.log_step(
-                    *tx_hash,
-                    PipelineStep::TransactionSubmitted {
-                        tx_hash: *tx_hash,
-                        method: event.method.clone(),
-                        gas_used: U256::from(0u64),
-                        gas_price: U256::from(provider.get_gas_price().await?),
-                    }
-                ).await?;
-
-                info!("Transaction sent with hash {}", tx_hash);
-
-                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                    Ok(hash) => {
-                        info!("Transaction confirmed with hash {:?}", hash);
-                        hash
-                    },
-                    Err(e) => {
-                        error!("mintExternal transaction failed: {}", e);
-                        return Err(e).wrap_err("Failed to confirm mintExternal transaction");
-                    }
-                }
-            },
-            "repayExternal" => {
-                info!("Preparing repayExternal transaction for market {:?}", event.market);
-                let action = market
-                    .repayExternal(
-                        event.journal.clone(),
-                        event.seal.clone(),
-                        event.amount.clone(),
-                        event.receiver,
-                    )
-                    .from(SEQUENCER_ADDRESS);
-
-                info!("Broadcasting repayExternal transaction with params: journal_size={}, seal_size={}, amount={:?}, receiver={:?}",
-                    event.journal.len(), event.seal.len(), event.amount, event.receiver);
-                
-                let pending_tx = action.send().await
-                    .wrap_err("Failed to send repayExternal transaction")?;
-                let tx_hash = pending_tx.tx_hash();
-
-                // Log transaction submission
-                logger.log_step(
-                    *tx_hash,
-                    PipelineStep::TransactionSubmitted {
-                        tx_hash: *tx_hash,
-                        method: event.method.clone(),
-                        gas_used: U256::from(0u64),
-                        gas_price: U256::from(provider.get_gas_price().await?),
-                    }
-                ).await?;
-
-                info!("Transaction sent with hash {}", tx_hash);
-
-                match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                    Ok(hash) => {
-                        info!("Transaction confirmed with hash {:?}", hash);
-                        hash
-                    },
-                    Err(e) => {
-                        error!("repayExternal transaction failed: {}", e);
-                        return Err(e).wrap_err("Failed to confirm repayExternal transaction");
-                    }
-                }
-            },
-            method => {
-                error!("Invalid transaction method: {}", method);
-                return Err(eyre::eyre!("Invalid method: {}", method));
-            }
+            ],
+            startIndex: U256::from(0u64),
+            endIndex: U256::from(1u64), // Single transaction batch
         };
 
-        // Validate the transaction
-        match Self::validate_transaction_receipt(provider, tx_hash, event).await {
-            Ok(receipt) => {
-                info!("Transaction {:?} confirmed and validated", tx_hash);
-                
-                // Log transaction verification
-                logger.log_step(
-                    tx_hash,
-                    PipelineStep::TransactionVerified {
-                        tx_hash,
-                        method: event.method.clone(),
-                        block_number: receipt.block_number.unwrap_or_default(),
-                        status: if receipt.status() { 1 } else { 0 },
-                    }
-                ).await?;
+        info!(
+            "Broadcasting batch transaction with params: journal_size={}, seal_size={}, market={:?}, amount={:?}, receiver={:?}",
+            msg.journalData.len(),
+            msg.seal.len(),
+            msg.mTokens,
+            msg.amounts,
+            msg.receiver
+        );
 
-                Ok(tx_hash)
+        // Submit the batch
+        let action = batch_submitter
+            .batchProcess(msg)
+            .from(SEQUENCER_ADDRESS);
+
+        let pending_tx = action.send().await?;
+        let tx_hash = pending_tx.tx_hash();
+
+        // Log transaction submission
+        logger.log_step(
+            *tx_hash,
+            PipelineStep::TransactionSubmitted {
+                tx_hash: *tx_hash,
+                method: "submitBatch".to_string(),
+                gas_used: U256::from(0u64),
+                gas_price: U256::from(provider.get_gas_price().await?),
+            }
+        ).await?;
+
+        info!("Batch transaction sent with hash {}", tx_hash);
+
+        match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+            Ok(hash) => {
+                info!("Batch transaction confirmed with hash {:?}", hash);
+                Ok(hash)
             },
             Err(e) => {
-                error!("Transaction validation failed for hash {:?}: {}", tx_hash, e);
-                Err(e)
+                error!("Batch transaction failed: {}", e);
+                Err(e.into())
             }
         }
     }
@@ -371,7 +285,12 @@ impl TransactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{PROOF_CHANNEL_CAPACITY, MAX_TX_RETRIES, TX_RETRY_DELAY};
+    use crate::constants::{
+        PROOF_CHANNEL_CAPACITY,
+        MAX_TX_RETRIES,
+        TX_RETRY_DELAY,
+    };
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_transaction_manager_creation() {
@@ -379,9 +298,19 @@ mod tests {
         let config = TransactionConfig {
             max_retries: MAX_TX_RETRIES,
             retry_delay: TX_RETRY_DELAY,
-            rpc_urls: vec![],
+            rpc_urls: vec![(1, "http://localhost:8545".to_string())],
         };
 
-        let _manager = TransactionManager::new(rx, config);
+        // Create a temporary logger for testing
+        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log"))
+            .await
+            .expect("Failed to create test logger");
+
+        let manager = TransactionManager::new(rx, config, logger);
+        
+        // Basic assertions to ensure the manager was created correctly
+        assert_eq!(manager.config.max_retries, MAX_TX_RETRIES);
+        assert_eq!(manager.config.retry_delay, TX_RETRY_DELAY);
+        assert!(!manager.config.rpc_urls.is_empty());
     }
 } 
