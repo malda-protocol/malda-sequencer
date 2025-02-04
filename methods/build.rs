@@ -36,6 +36,7 @@ fn main() {
             use_docker,
         },
     )]));
+    
 
     // Copy and rename specific files
     let methods_path = out_dir.join("methods.rs");

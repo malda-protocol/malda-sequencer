@@ -6266,6 +6266,7 @@ name = "sequencer"
 version = "0.1.0"
 dependencies = [
  "alloy 0.6.4",
+ "chrono",
  "eyre",
  "futures",
  "futures-util",

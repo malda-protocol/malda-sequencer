@@ -1,9 +1,11 @@
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, U256, FixedBytes},
     rpc::types::Log,
 };
 use serde::{Deserialize, Serialize};
 use hex;
+
+type Bytes4 = FixedBytes<4>;   
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LiquidateExternalEvent {
@@ -93,6 +95,11 @@ pub const EXTENSION_EXTRACTED_SIG: &str = "mTokenGateway_Extracted(address,addre
 
 pub const MINT_EXTERNAL_SELECTOR: &str = "9d9339b3";
 pub const REPAY_EXTERNAL_SELECTOR: &str = "08fee263";
+pub const OUT_HERE_SELECTOR: &str = "b511d3b1";
+
+pub const MINT_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x9d, 0x93, 0x39, 0xb3];
+pub const REPAY_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x08, 0xfe, 0xe2, 0x63];
+pub const OUT_HERE_SELECTOR_FB4: &[u8] = &[0xb5, 0x11, 0xd3, 0xb1];
 
 // Add the parsing functions here
 pub fn parse_supplied_event(log: &Log) -> SuppliedEvent {

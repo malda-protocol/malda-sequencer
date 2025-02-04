@@ -20,4 +20,20 @@ alloy::sol! {
 
         function mint(uint256 amount) external;
     }
+
+    struct BatchProcessMsg {
+        address receiver;
+        bytes journalData;
+        bytes seal;
+        address[] mTokens;
+        uint256[] amounts;
+        bytes4[] selectors;
+        uint256 startIndex;
+        uint256 endIndex;
+    }
+
+    interface IBatchSubmitter {
+        function batchProcess(BatchProcessMsg memory msg) external;
+    }
 } 
+
