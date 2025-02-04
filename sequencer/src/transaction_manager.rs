@@ -232,7 +232,18 @@ impl TransactionManager {
             .batchProcess(msg)
             .from(SEQUENCER_ADDRESS);
 
-        let pending_tx = action.send().await?;
+        // Estimate gas with a buffer
+        let estimated_gas = action
+            .estimate_gas()
+            .await?;
+        let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
+        
+        debug!("Estimated gas: {}, using gas limit: {}", estimated_gas, gas_limit);
+
+        let pending_tx = action
+            .gas(gas_limit)
+            .send()
+            .await?;
         let tx_hash = pending_tx.tx_hash();
 
         // Log transaction submission
