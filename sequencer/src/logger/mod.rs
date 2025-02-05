@@ -42,6 +42,11 @@ pub enum PipelineStep {
         block_number: u64,
         status: u64,
     },
+    BatchProcessed {
+        chain_id: u32,
+        status: String,
+        tx_hash: TxHash,
+    },
 }
 
 #[derive(Debug)]
@@ -263,6 +268,24 @@ impl PipelineLogger {
                         // Remove the entry after successful write
                         pending_logs.remove(&event.tx_hash);
                     }
+                }
+                PipelineStep::BatchProcessed { chain_id, status, tx_hash } => {
+                    let log_line = format!(
+                        "{}, TxHash: {}, {}, {}, Status: {}\n",
+                        Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                        hex::encode(tx_hash.0),
+                        get_chain_name(*chain_id),
+                        get_event_name(&status),
+                        status,
+                    );
+
+                    let mut file = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&file_path)
+                        .await?;
+                    
+                    file.write_all(log_line.as_bytes()).await?;
                 }
             }
         }
