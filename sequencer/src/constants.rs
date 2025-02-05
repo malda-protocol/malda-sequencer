@@ -44,9 +44,9 @@ pub const LISTENER_SPAWN_DELAY: Duration = Duration::from_millis(100);
 pub const ETHEREUM_BLOCK_DELAY: u64 = 72;
 
 // Add this with other constants
-pub const PROOF_REQUEST_DELAY: u64 = 15;
+pub const PROOF_REQUEST_DELAY: u64 = 30;
 
-pub const BATCH_SUBMITTER: Address = address!("249C35525E96d6f7ad0661AE771e34ACf228cCe2");
+pub const BATCH_SUBMITTER: Address = address!("b4282799022073790c8Ae500Ac6C91C622021079");
 
 #[cfg(test)]
 pub mod test {
