@@ -271,12 +271,12 @@ impl PipelineLogger {
                 }
                 PipelineStep::BatchProcessed { chain_id, status, tx_hash } => {
                     let log_line = format!(
-                        "{}, TxHash: {}, {}, {}, Status: {}\n",
+                        "{}, TxHash: {}, {}, Status: {}, BatchHash: {}\n",
                         Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                        hex::encode(tx_hash.0),
+                        hex::encode(event.tx_hash.0), // init_hash we passed in
                         get_chain_name(*chain_id),
-                        get_event_name(&status),
                         status,
+                        hex::encode(tx_hash.0), // batch transaction hash
                     );
 
                     let mut file = OpenOptions::new()
