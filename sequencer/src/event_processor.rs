@@ -20,6 +20,7 @@ use malda_rs::constants::{LINEA_SEPOLIA_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID};
 
 use crate::constants::ETHEREUM_BLOCK_DELAY;
 use sequencer::logger::{PipelineLogger, PipelineStep};
+use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 
 #[derive(Debug)]
 pub enum ProcessedEvent {
@@ -185,6 +186,13 @@ impl EventProcessor {
         } else {
             // Process extension chain events
             let event = parse_supplied_event(&log);
+            
+            // Validate method selector before processing
+            if event.linea_method_selector != MINT_EXTERNAL_SELECTOR && 
+               event.linea_method_selector != REPAY_EXTERNAL_SELECTOR {
+                return Err(eyre::eyre!("Invalid method selector: {}", event.linea_method_selector));
+            }
+
             let result = ProcessedEvent::ExtensionSupply {
                 tx_hash,
                 from: event.from,

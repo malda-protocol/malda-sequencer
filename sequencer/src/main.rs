@@ -41,6 +41,9 @@ use transaction_manager::{TransactionManager, TransactionConfig};
 use sequencer::logger::PipelineLogger;
 use std::path::PathBuf;
 
+mod batch_event_listener;
+use batch_event_listener::{BatchEventListener, BatchEventConfig};
+
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ProviderType = alloy::providers::fillers::FillProvider<
@@ -94,6 +97,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID, vec![EXTENSION_SUPPLIED_SIG]),
     ];
     info!("Configured chains: {:?}", chain_configs.iter().map(|(_, id, _)| id).collect::<Vec<_>>());
+
+    // After initializing channels and before starting the main pipeline components
+    info!("Initializing batch event listeners...");
+    
+    // Batch submitter configurations for each chain
+    let batch_configs = vec![
+        (WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID),
+        (WS_URL_OPT_SEPOLIA, OPTIMISM_SEPOLIA_CHAIN_ID),
+        (WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID),
+    ];
+
+    // Spawn batch event listeners
+    let mut handles = vec![];
+    
+    let batch_logger = PipelineLogger::new(PathBuf::from("batch_pipeline.log")).await?;
+    
+    for (ws_url, chain_id) in batch_configs {
+        info!(
+            "Starting batch event listener for chain={}, submitter={:?}", 
+            chain_id, BATCH_SUBMITTER
+        );
+        
+        let config = BatchEventConfig {
+            ws_url: ws_url.to_string(),
+            batch_submitter: BATCH_SUBMITTER,
+            chain_id,
+        };
+        
+        let listener = BatchEventListener::new(config, batch_logger.clone());
+        let handle = tokio::spawn(async move {
+            if let Err(e) = listener.start().await {
+                error!("Batch event listener failed: {:?}", e);
+            }
+        });
+        
+        handles.push(handle);
+        tokio::time::sleep(LISTENER_SPAWN_DELAY).await;
+    }
+
+    info!("All batch event listeners started");
 
     // Spawn event listeners
     let mut handles = vec![];

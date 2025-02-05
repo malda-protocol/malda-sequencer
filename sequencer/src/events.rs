@@ -5,7 +5,8 @@ use alloy::{
 use serde::{Deserialize, Serialize};
 use hex;
 
-type Bytes4 = FixedBytes<4>;   
+type Bytes4 = FixedBytes<4>;  
+type Bytes32 = FixedBytes<32>;  
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LiquidateExternalEvent {
@@ -133,7 +134,7 @@ pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32)";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessFailedEvent {
-    pub init_hash: Bytes,
+    pub init_hash: Bytes32,
     pub reason: Bytes,
 }
 
@@ -142,18 +143,18 @@ pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
     let data = log.data().data.clone();
     
     BatchProcessFailedEvent {
-        init_hash: Bytes::from(data[0..32].to_vec()),
+        init_hash: Bytes32::from_slice(data[0..32].into()),
         reason: Bytes::from(data[32..].to_vec()),
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessSuccessEvent {
-    pub init_hash: Bytes,
+    pub init_hash: Bytes32,
 }
 
 pub fn parse_batch_process_success_event(log: &Log) -> BatchProcessSuccessEvent {
     BatchProcessSuccessEvent {
-        init_hash: Bytes::from(log.data().data[0..32].to_vec()),
+        init_hash: Bytes32::from_slice(log.data().data[0..32].into()),
     }
 }
