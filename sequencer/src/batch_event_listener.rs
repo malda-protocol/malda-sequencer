@@ -78,9 +78,9 @@ impl BatchEventListener {
                         self.config.chain_id, event.init_hash
                     );
 
-                    // Log success event
+                    // Log success event using init_hash
                     if let Err(e) = self.logger.log_step(
-                        event.init_hash, // Convert init_hash to TxHash
+                        event.init_hash,  // Use init_hash directly
                         PipelineStep::BatchProcessed { 
                             chain_id: self.config.chain_id as u32,
                             status: "Success".to_string(),
@@ -97,9 +97,9 @@ impl BatchEventListener {
                         self.config.chain_id, event.init_hash, event.reason
                     );
 
-                    // Log failure event
+                    // Log failure event using init_hash
                     if let Err(e) = self.logger.log_step(
-                        event.init_hash, // Convert init_hash to TxHash
+                        event.init_hash,  // Use init_hash directly
                         PipelineStep::BatchProcessed { 
                             chain_id: self.config.chain_id as u32,
                             status: format!("Failed: {}", event.reason),
