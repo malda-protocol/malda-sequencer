@@ -33,7 +33,7 @@ mod event_processor;
 use event_processor::EventProcessor;
 
 mod proof_generator;
-use proof_generator::ProofGenerator;
+use proof_generator::{ProofGenerator, ProofReadyEvent};
 
 mod transaction_manager;
 use transaction_manager::{TransactionManager, TransactionConfig};
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create channels with proper capacities
     let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
     let (processed_tx, processed_rx) = mpsc::channel(PROCESSED_CHANNEL_CAPACITY);
-    let (proof_tx, proof_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
+    let (proof_tx, proof_rx) = mpsc::channel::<Vec<ProofReadyEvent>>(PROOF_CHANNEL_CAPACITY);
 
     info!("Initialized channels");
 

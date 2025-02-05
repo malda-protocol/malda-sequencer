@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{Address, U256, FixedBytes},
+    primitives::{Address, U256, FixedBytes, Bytes},
     rpc::types::Log,
 };
 use serde::{Deserialize, Serialize};
@@ -128,3 +128,32 @@ pub fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtension
     }
 }
 
+pub const BATCH_PROCESS_FAILED_SIG: &str = "BatchProcessFailed(bytes32,bytes)";
+pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32)";
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchProcessFailedEvent {
+    pub init_hash: Bytes,
+    pub reason: Bytes,
+}
+
+pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
+    // For non-indexed events, all data is in the data field
+    let data = log.data().data.clone();
+    
+    BatchProcessFailedEvent {
+        init_hash: Bytes::from(data[0..32].to_vec()),
+        reason: Bytes::from(data[32..].to_vec()),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchProcessSuccessEvent {
+    pub init_hash: Bytes,
+}
+
+pub fn parse_batch_process_success_event(log: &Log) -> BatchProcessSuccessEvent {
+    BatchProcessSuccessEvent {
+        init_hash: Bytes::from(log.data().data[0..32].to_vec()),
+    }
+}

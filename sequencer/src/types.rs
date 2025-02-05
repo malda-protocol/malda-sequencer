@@ -22,14 +22,14 @@ alloy::sol! {
     }
 
     struct BatchProcessMsg {
-        address receiver;
+        address[] receivers;
         bytes journalData;
         bytes seal;
         address[] mTokens;
         uint256[] amounts;
         bytes4[] selectors;
+        bytes32[] initHashes;
         uint256 startIndex;
-        uint256 endIndex;
     }
 
     interface IBatchSubmitter {
