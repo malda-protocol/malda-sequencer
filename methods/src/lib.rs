@@ -650,4 +650,21 @@ mod tests {
             block_from_provider - block_from_commitment
         );
     }
+
+    #[tokio::test]
+    async fn prove_empty_proof() {
+        let start_time = std::time::Instant::now();
+        let session_info = get_proof_data_prove_sdk(
+            vec![], // empty users vectors
+            vec![], // empty markets vectors
+            vec![], // empty chain_ids vectors
+            vec![] // empty target chain ids
+        ).await.unwrap();
+
+        let duration = start_time.elapsed();
+        let cycles = session_info.stats.total_cycles / 1000;
+        println!("KCycles: {}", cycles);
+        println!("Duration: {:?}", duration);
+        panic!("test");
+    }
 }

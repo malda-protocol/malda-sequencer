@@ -50,18 +50,17 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
     let start_total = std::time::Instant::now();
     
     let start = std::time::Instant::now();
-    let ctx = VerifierContext::from_max_po2(21);
     let client = Client::from_env(risc0_zkvm::VERSION)?;
     println!("Client creation time: {:?}", start.elapsed());
 
     let start = std::time::Instant::now();
-    let image_id = compute_image_id(GET_PROOF_DATA_ELF)?;
-    let image_id_hex = hex::encode(image_id);
-    println!("Image compute time: {:?}", start.elapsed());
-
-    let start = std::time::Instant::now();
-    client.upload_img(&image_id_hex, GET_PROOF_DATA_ELF.to_vec())?;
-    println!("Image upload time: {:?}", start.elapsed());
+    // Convert Vec<u32> to Vec<u8> before encoding
+    let id_bytes: Vec<u8> = GET_PROOF_DATA_ID.iter()
+        .flat_map(|&x| x.to_le_bytes())
+        .collect();
+    let image_id_hex = hex::encode(id_bytes);
+    println!("Image ID: {}", image_id_hex);
+    println!("Image read time: {:?}", start.elapsed());
 
     let start = std::time::Instant::now();
     let input_id = client.upload_input(input_data)?;
@@ -79,15 +78,12 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
     )?;
 
     tracing::debug!("Bonsai proving SessionID: {}", session.uuid);
+    println!("Bonsai proving SessionID: {}", session.uuid);
 
 
-    let polling_interval = if let Ok(ms) = std::env::var("BONSAI_POLL_INTERVAL_MS") {
-        Duration::from_millis(ms.parse().context("invalid bonsai poll interval").unwrap_or(1000))
-    } else {
-        Duration::from_secs(1)
-    };
+    let polling_interval = Duration::from_millis(100);
 
-    let succinct_prove_info = loop {
+    let succinct_stats = loop {
         let res = session.status(&client)?;
         if res.status == "RUNNING" {
             std::thread::sleep(polling_interval);
@@ -95,7 +91,7 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
         }
         if res.status == "SUCCEEDED" {
             println!("Proving time: {:?}", start.elapsed());
-            let start = std::time::Instant::now();
+
             let receipt_url = res
                 .receipt_url
                 .ok_or(anyhow::Error::msg("API error, missing receipt on completed session"))?;
@@ -109,26 +105,12 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
                 stats.total_cycles
             );
 
-            let receipt_buf = client.download(&receipt_url)?;
-            let receipt: Receipt = bincode::deserialize(&receipt_buf)?;
-            println!("Receipt download time: {:?}", start.elapsed());
-
-            let start = std::time::Instant::now();
-            if opts.prove_guest_errors {
-                receipt.verify_integrity_with_context(&ctx).unwrap();
-            } else {
-                receipt.verify_with_context(&ctx, image_id).unwrap();
-            }
-            println!("Receipt verification time: {:?}", start.elapsed());
-            break ProveInfo {
-                receipt,
-                stats: SessionStats {
+            break SessionStats {
                     segments: stats.segments,
                     total_cycles: stats.total_cycles,
                     user_cycles: stats.cycles,
                     paging_cycles: 0,
                     reserved_cycles: 0,
-                },
             };
         } else {
             return Err(anyhow::Error::msg(format!(
@@ -140,16 +122,6 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
         }
     };
 
-    match opts.receipt_kind {
-        ReceiptKind::Composite | ReceiptKind::Succinct => {
-            println!("Total time (succinct): {:?}", start_total.elapsed());
-            return Ok(succinct_prove_info);
-        }
-        ReceiptKind::Groth16 => {}
-        _ => {
-            return Err(anyhow::Error::msg("Invalid receipt kind"));
-        }
-    }
 
     let start = std::time::Instant::now();
     let snark_session = client.create_snark(session.uuid)?;
@@ -185,17 +157,12 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
     let receipt_buf = client.download(&snark_receipt_url)?;
     let groth16_receipt: Receipt = bincode::deserialize(&receipt_buf)?;
     println!("Receipt download time: {:?}", start.elapsed());
-    let start = std::time::Instant::now();
-    groth16_receipt
-        .verify_integrity_with_context(&ctx)
-        .expect("failed to verify Groth16Receipt returned by Bonsai");
-    println!("Receipt verification time: {:?}", start.elapsed());
 
     println!("Total time (groth16): {:?}", start_total.elapsed());
     
     Ok(ProveInfo {
         receipt: groth16_receipt,
-        stats: succinct_prove_info.stats,
+        stats: succinct_stats,
     })
 }
 
