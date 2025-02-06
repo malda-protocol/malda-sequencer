@@ -59,6 +59,7 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
         .flat_map(|&x| x.to_le_bytes())
         .collect();
     let image_id_hex = hex::encode(id_bytes);
+    let image_id_hex: String = "2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863".to_string();
     println!("Image ID: {}", image_id_hex);
     println!("Image read time: {:?}", start.elapsed());
 
