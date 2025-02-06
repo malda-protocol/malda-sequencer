@@ -24,7 +24,7 @@ use risc0_steel::{
     ethereum::EthEvmEnv, host::BlockNumberOrTag, serde::RlpHeader, Contract, EvmInput,
 };
 use risc0_zkvm::{
-    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts
+    default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts, VerifierContext, ReceiptKind
 };
 
 use alloy_consensus::Header;
@@ -34,6 +34,170 @@ use anyhow::{Result, Error};
 use tokio;
 use url::Url;
 use futures::future::join_all;
+use bonsai_sdk;
+
+use std::time::Duration;
+use eyre::anyhow;
+use eyre::WrapErr;
+use eyre::bail;
+use eyre::ContextCompat;
+
+use bonsai_sdk::blocking::Client;
+use risc0_zkvm::{compute_image_id, serde::to_vec, Receipt, SessionStats};
+
+
+fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow::Error> {
+    let start_total = std::time::Instant::now();
+    
+    let start = std::time::Instant::now();
+    let ctx = VerifierContext::from_max_po2(21);
+    let client = Client::from_env(risc0_zkvm::VERSION)?;
+    println!("Client creation time: {:?}", start.elapsed());
+
+    let start = std::time::Instant::now();
+    let image_id = compute_image_id(GET_PROOF_DATA_ELF)?;
+    let image_id_hex = hex::encode(image_id);
+    println!("Image compute time: {:?}", start.elapsed());
+
+    let start = std::time::Instant::now();
+    client.upload_img(&image_id_hex, GET_PROOF_DATA_ELF.to_vec())?;
+    println!("Image upload time: {:?}", start.elapsed());
+
+    let start = std::time::Instant::now();
+    let input_id = client.upload_input(input_data)?;
+    println!("Input upload time: {:?}", start.elapsed());
+
+    let assumptions: Vec<String> = vec![];
+    let execute_only = false;
+
+    let start = std::time::Instant::now();
+    let session = client.create_session(
+        image_id_hex,
+        input_id,
+        assumptions,
+        execute_only,
+    )?;
+
+    tracing::debug!("Bonsai proving SessionID: {}", session.uuid);
+
+
+    let polling_interval = if let Ok(ms) = std::env::var("BONSAI_POLL_INTERVAL_MS") {
+        Duration::from_millis(ms.parse().context("invalid bonsai poll interval").unwrap_or(1000))
+    } else {
+        Duration::from_secs(1)
+    };
+
+    let succinct_prove_info = loop {
+        let res = session.status(&client)?;
+        if res.status == "RUNNING" {
+            std::thread::sleep(polling_interval);
+            continue;
+        }
+        if res.status == "SUCCEEDED" {
+            println!("Proving time: {:?}", start.elapsed());
+            let start = std::time::Instant::now();
+            let receipt_url = res
+                .receipt_url
+                .ok_or(anyhow::Error::msg("API error, missing receipt on completed session"))?;
+
+            let stats = res
+                .stats
+                .expect("Missing stats object on Bonsai status res");
+            tracing::debug!(
+                "Bonsai usage: cycles: {} total_cycles: {}",
+                stats.cycles,
+                stats.total_cycles
+            );
+
+            let receipt_buf = client.download(&receipt_url)?;
+            let receipt: Receipt = bincode::deserialize(&receipt_buf)?;
+            println!("Receipt download time: {:?}", start.elapsed());
+
+            let start = std::time::Instant::now();
+            if opts.prove_guest_errors {
+                receipt.verify_integrity_with_context(&ctx).unwrap();
+            } else {
+                receipt.verify_with_context(&ctx, image_id).unwrap();
+            }
+            println!("Receipt verification time: {:?}", start.elapsed());
+            break ProveInfo {
+                receipt,
+                stats: SessionStats {
+                    segments: stats.segments,
+                    total_cycles: stats.total_cycles,
+                    user_cycles: stats.cycles,
+                    paging_cycles: 0,
+                    reserved_cycles: 0,
+                },
+            };
+        } else {
+            return Err(anyhow::Error::msg(format!(
+                "Bonsai prover workflow [{}] exited: {} err: {}",
+                session.uuid,
+                res.status,
+                res.error_msg.unwrap_or("Bonsai workflow missing error_msg".into())
+            )));
+        }
+    };
+
+    match opts.receipt_kind {
+        ReceiptKind::Composite | ReceiptKind::Succinct => {
+            println!("Total time (succinct): {:?}", start_total.elapsed());
+            return Ok(succinct_prove_info);
+        }
+        ReceiptKind::Groth16 => {}
+        _ => {
+            return Err(anyhow::Error::msg("Invalid receipt kind"));
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let snark_session = client.create_snark(session.uuid)?;
+    println!("Snark session creation time: {:?}", start.elapsed());
+
+    let start = std::time::Instant::now();
+    let snark_receipt_url = loop {
+        let res = snark_session.status(&client)?;
+        match res.status.as_str() {
+            "RUNNING" => {
+                std::thread::sleep(polling_interval);
+                continue;
+            }
+            "SUCCEEDED" => {
+                break res.output.ok_or_else(|| anyhow::Error::msg(format!(
+                    "Bonsai prover workflow [{}] reported success, but provided no receipt",
+                    snark_session.uuid
+                )))?;
+            }
+            _ => {
+                return Err(anyhow::Error::msg(format!(
+                    "Bonsai prover workflow [{}] exited: {} err: {}",
+                    snark_session.uuid,
+                    res.status,
+                    res.error_msg.unwrap_or("Bonsai workflow missing error_msg".into())
+                )));
+            }
+        }
+    };
+    println!("Snark proving time: {:?}", start.elapsed());
+
+    let start = std::time::Instant::now();
+    let receipt_buf = client.download(&snark_receipt_url)?;
+    let groth16_receipt: Receipt = bincode::deserialize(&receipt_buf)?;
+    println!("Receipt download time: {:?}", start.elapsed());
+    let start = std::time::Instant::now();
+    groth16_receipt
+        .verify_integrity_with_context(&ctx)
+        .expect("failed to verify Groth16Receipt returned by Bonsai");
+    println!("Receipt verification time: {:?}", start.elapsed());
+
+    println!("Total time (groth16): {:?}", start_total.elapsed());
+    
+    Ok(ProveInfo {
+        receipt: groth16_receipt,
+        stats: succinct_prove_info.stats,
+    })
+}
 
 /// Executes proof data queries across multiple chains in parallel
 ///
@@ -92,6 +256,96 @@ pub async fn get_proof_data_exec(
         .expect("Failed to execute ZKVM"))
 }
 
+/// Creates the executor environment with proof data from multiple chains
+///
+/// # Arguments
+/// * `users` - Vector of user address vectors, one per chain
+/// * `markets` - Vector of market contract address vectors, one per chain
+/// * `target_chain_ids` - Vector of target chain IDs to query
+/// * `chain_ids` - Vector of chain IDs to query
+///
+/// # Returns
+/// * `ExecutorEnv` - Environment configured with proof data inputs
+async fn get_proof_data_env(
+    users: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
+    target_chain_ids: Vec<Vec<u64>>,
+    chain_ids: Vec<u64>,
+) -> ExecutorEnv<'static> {
+    // Verify outer arrays have same length
+    assert_eq!(users.len(), markets.len());
+    assert_eq!(users.len(), chain_ids.len());
+
+    // Create futures using tokio::spawn for true parallelism
+    let futures: Vec<_> = (0..chain_ids.len())
+        .map(|i| {
+            let users = users[i].clone();
+            let markets = markets[i].clone();
+            let chain_id = chain_ids[i];
+            let target_chain_id = target_chain_ids[i].clone();
+            tokio::spawn(async move {
+                get_proof_data_zkvm_input(users, markets, target_chain_id, chain_id).await
+            })
+        })
+        .collect();
+
+    // Execute all futures in parallel and collect results
+    let results = join_all(futures).await;
+    let all_inputs = results
+        .into_iter()
+        .filter_map(|r| r.ok()) // Handle any JoinError
+        .flat_map(|input| input)
+        .collect::<Vec<_>>();
+
+    // Create environment with inputs
+    ExecutorEnv::builder()
+        .write(&(chain_ids.len() as u64))
+        .unwrap()
+        .write_slice(&all_inputs)
+        .build()
+        .unwrap()
+}
+
+async fn get_proof_data_input(
+    users: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
+    target_chain_ids: Vec<Vec<u64>>,
+    chain_ids: Vec<u64>,
+) -> Vec<u8> {
+    // Verify outer arrays have same length
+    assert_eq!(users.len(), markets.len());
+    assert_eq!(users.len(), chain_ids.len());
+
+    // Create futures using tokio::spawn for true parallelism
+    let futures: Vec<_> = (0..chain_ids.len())
+        .map(|i| {
+            let users = users[i].clone();
+            let markets = markets[i].clone();
+            let chain_id = chain_ids[i];
+            let target_chain_id = target_chain_ids[i].clone();
+            tokio::spawn(async move {
+                get_proof_data_zkvm_input(users, markets, target_chain_id, chain_id).await
+            })
+        })
+        .collect();
+
+    // Execute all futures in parallel and collect results
+    let results = join_all(futures).await;
+    let all_inputs = results
+        .into_iter()
+        .filter_map(|r| r.ok()) // Handle any JoinError
+        .flat_map(|input| input)
+        .collect::<Vec<_>>();
+
+    // Create input with chain count
+    let input: Vec<u8> = bytemuck::pod_collect_to_vec(
+        &risc0_zkvm::serde::to_vec(&(chain_ids.len() as u64)).unwrap()
+    );
+
+    // Concatenate the chain count input with all the chain-specific inputs
+    [input, all_inputs].concat()
+}
+
 /// Generates ZK proofs for proof data queries across multiple chains
 ///
 /// # Arguments
@@ -118,44 +372,46 @@ pub async fn get_proof_data_prove(
     let prove_info = tokio::task::spawn_blocking(move || {
         // Create a new runtime for async operations within the blocking task
         let rt = tokio::runtime::Runtime::new().unwrap();
-
+        
         // Execute all async operations in the new runtime
-        let env = rt.block_on(async {
-            // Verify outer arrays have same length
-            assert_eq!(users.len(), markets.len());
-            assert_eq!(users.len(), chain_ids.len());
+        let start_time = std::time::Instant::now();
+        let env = rt.block_on(get_proof_data_env(users, markets, target_chain_ids, chain_ids));
+        let duration = start_time.elapsed();
+        println!("Env creation time: {:?}", duration);
 
-            // Create futures using tokio::spawn for true parallelism
-            let futures: Vec<_> = (0..chain_ids.len())
-                .map(|i| {
-                    let users = users[i].clone();
-                    let markets = markets[i].clone();
-                    let chain_id = chain_ids[i];
-                    let target_chain_id = target_chain_ids[i].clone();
-                    tokio::spawn(async move {
-                        get_proof_data_zkvm_input(users, markets, target_chain_id, chain_id).await
-                    })
-                })
-                .collect();
+        let start_time = std::time::Instant::now();
+        let proof = default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::succinct());
+        let duration = start_time.elapsed();
+        println!("Bonsai proof time: {:?}", duration);
+        proof
+    })
+    .await?;
 
-            // Execute all futures in parallel and collect results
-            let results = join_all(futures).await;
-            let all_inputs = results
-                .into_iter()
-                .filter_map(|r| r.ok()) // Handle any JoinError
-                .flat_map(|input| input)
-                .collect::<Vec<_>>();
+    prove_info
+}
 
-            // Create environment with inputs
-            ExecutorEnv::builder()
-                .write(&(chain_ids.len() as u64))
-                .unwrap()
-                .write_slice(&all_inputs)
-                .build()
-                .unwrap()
-        });
+pub async fn get_proof_data_prove_sdk(
+    users: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
+    target_chain_ids: Vec<Vec<u64>>,
+    chain_ids: Vec<u64>,
+) -> Result<ProveInfo, Error> {
+    // Move all the work including env creation into the blocking task
+    let prove_info = tokio::task::spawn_blocking(move || {
+        // Create a new runtime for async operations within the blocking task
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        
+        // Execute all async operations in the new runtime
+        let start_time = std::time::Instant::now();
+        let input = rt.block_on(get_proof_data_input(users, markets, target_chain_ids, chain_ids));
+        let duration = start_time.elapsed();
+        println!("Env creation time: {:?}", duration);
 
-        default_prover().prove_with_opts(env, GET_PROOF_DATA_ELF, &ProverOpts::groth16())
+        let start_time = std::time::Instant::now();
+        let proof = run_bonsai(input, ProverOpts::groth16());
+        let duration = start_time.elapsed();
+        println!("Bonsai proof time: {:?}", duration);
+        proof
     })
     .await?;
 
