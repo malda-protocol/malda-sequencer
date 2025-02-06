@@ -140,7 +140,7 @@ mod tests {
     async fn prove_get_proof_data_on_optimism123_sdk() {
         let user_optimism = address!("6c7d89c32ead20F980AD76A33377550F3F72a338");
         let market = WETH_MARKET_SEPOLIA;
-        let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
+        let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
         let session_info = get_proof_data_prove_sdk(
