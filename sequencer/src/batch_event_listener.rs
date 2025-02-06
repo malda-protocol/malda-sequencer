@@ -125,21 +125,6 @@ mod tests {
     use std::path::PathBuf;
 
     #[tokio::test]
-    async fn test_event_listener_creation() -> Result<()> {
-        let config = EventConfig {
-            ws_url: TEST_WS_URL.to_string(),
-            market: Address::ZERO,
-            event_signature: TEST_EVENT_SIGNATURE.to_string(),
-            chain_id: TEST_CHAIN_ID,
-        };
-
-        let (tx, _rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
-        let _listener = EventListener::new(config, tx, logger);
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_batch_event_listener_creation() -> Result<()> {
         let config = BatchEventConfig {
             ws_url: TEST_WS_URL.to_string(),

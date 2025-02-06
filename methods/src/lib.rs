@@ -27,7 +27,7 @@ mod tests {
     use malda_rs::{
         constants::*,
         viewcalls::{
-            get_current_sequencer_commitment, get_proof_data_exec, get_proof_data_prove,
+            get_current_sequencer_commitment, get_proof_data_exec, get_proof_data_prove, get_proof_data_prove_sdk
         },
         viewcalls_ethereum_light_client::get_proof_data_exec as get_proof_data_exec_ethereum_light_client,
     };
@@ -120,7 +120,7 @@ mod tests {
     async fn prove_get_proof_data_on_optimism123() {
         let user_optimism = address!("6c7d89c32ead20F980AD76A33377550F3F72a338");
         let market = WETH_MARKET_SEPOLIA;
-        let chain_id = OPTIMISM_SEPOLIA_CHAIN_ID;
+        let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
         let session_info = get_proof_data_prove(
@@ -129,10 +129,30 @@ mod tests {
             vec![vec![LINEA_CHAIN_ID]],
             vec![chain_id]
         ).await.unwrap();
-        let duration = start_time.elapsed();
-        println!("Duration: {:?}", duration);
-        // let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        // println!("Cycles: {}", cycles);
+        // let duration = start_time.elapsed();
+        // println!("Duration: {:?}", duration);
+        let cycles = session_info.stats.total_cycles / 1000;
+        println!("KCycles: {}", cycles);
+        panic!("test");
+    }
+
+    #[tokio::test]
+    async fn prove_get_proof_data_on_optimism123_sdk() {
+        let user_optimism = address!("6c7d89c32ead20F980AD76A33377550F3F72a338");
+        let market = WETH_MARKET_SEPOLIA;
+        let chain_id = LINEA_SEPOLIA_CHAIN_ID;
+
+        let start_time = std::time::Instant::now();
+        let session_info = get_proof_data_prove_sdk(
+            vec![vec![user_optimism]], 
+            vec![vec![market]], 
+            vec![vec![LINEA_CHAIN_ID]],
+            vec![chain_id]
+        ).await.unwrap();
+        // let duration = start_time.elapsed();
+        // println!("Duration: {:?}", duration);
+        let cycles = session_info.stats.total_cycles / 1000;
+        println!("KCycles: {}", cycles);
         panic!("test");
     }
 
