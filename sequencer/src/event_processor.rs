@@ -27,12 +27,12 @@ use sequencer::logger::{PipelineLogger, PipelineStep};
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use crate::types::IL1Block;
 use crate::create_provider;
-
+use serde::{Serialize, Deserialize};
 lazy_static! {
     pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProcessedEvent {
     HostWithdraw {
         tx_hash: TxHash,

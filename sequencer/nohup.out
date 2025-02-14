@@ -1983,3 +1983,343 @@ Bonsai proof time: 25.078624315s
 [2m2025-02-14T09:31:18.866114Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m117:[0m Successfully generated proofs for 1 events
 [2m2025-02-14T09:31:18.884227Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m264:[0m Broadcasting batch transaction for chain 59141 starting at index 0: journal_size=256, seal_size=260, markets=[0x8ef9d2057fed09fd18cbf393d789c6507cd3e875], tx_count=1
 [2m2025-02-14T09:31:18.902810Z[0m [31mERROR[0m tokio-runtime-worker ThreadId(05) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m141:[0m Failed to process batch for chain 59141: server returned an error response: error code 3: execution reverted, data: "0x439cc0cd"
+[2m2025-02-14T11:11:52.126536Z[0m [31mERROR[0m tokio-runtime-worker ThreadId(09) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/alloy-transport-ws-0.6.4/src/native.rs[0m[2m:[0m[2m171:[0m WS connection error [3merr[0m[2m=[0mWebSocket protocol error: Connection reset without closing handshake
+[2m2025-02-14T11:11:52.126602Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/alloy-pubsub-0.6.4/src/service.rs[0m[2m:[0m[2m63:[0m Reconnecting pubsub service backend.
+error: "--bin" takes one argument.
+Available binaries:
+    inject_events
+    sequencer
+
+   Compiling malda_rs v0.1.0 (/home/ubuntu/malda-zkcoprocessor/malda_rs)
+warning: unused imports: `ReceiptKind` and `VerifierContext`
+  --> malda_rs/src/viewcalls.rs:27:88
+   |
+27 |     default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts, VerifierContext, ReceiptKind
+   |                                                                                        ^^^^^^^^^^^^^^^  ^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `eyre::anyhow`
+  --> malda_rs/src/viewcalls.rs:40:5
+   |
+40 | use eyre::anyhow;
+   |     ^^^^^^^^^^^^
+
+warning: unused import: `eyre::WrapErr`
+  --> malda_rs/src/viewcalls.rs:41:5
+   |
+41 | use eyre::WrapErr;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `eyre::bail`
+  --> malda_rs/src/viewcalls.rs:42:5
+   |
+42 | use eyre::bail;
+   |     ^^^^^^^^^^
+
+warning: unused import: `eyre::ContextCompat`
+  --> malda_rs/src/viewcalls.rs:43:5
+   |
+43 | use eyre::ContextCompat;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `compute_image_id` and `serde::to_vec`
+  --> malda_rs/src/viewcalls.rs:46:18
+   |
+46 | use risc0_zkvm::{compute_image_id, serde::to_vec, Receipt, SessionStats};
+   |                  ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused variable: `image_id_hex`
+  --> malda_rs/src/viewcalls.rs:61:9
+   |
+61 |     let image_id_hex = hex::encode(id_bytes);
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_image_id_hex`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `receipt_url`
+  --> malda_rs/src/viewcalls.rs:96:17
+   |
+96 |             let receipt_url = res
+   |                 ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_receipt_url`
+
+warning: unused variable: `opts`
+  --> malda_rs/src/viewcalls.rs:49:36
+   |
+49 | fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow::Error> {
+   |                                    ^^^^ help: if this is intentional, prefix it with an underscore: `_opts`
+
+   Compiling sequencer v0.1.0 (/home/ubuntu/malda-zkcoprocessor/sequencer)
+warning: type alias `Bytes4` is never used
+ --> sequencer/src/events.rs:8:6
+  |
+8 | type Bytes4 = FixedBytes<4>;  
+  |      ^^^^^^
+  |
+  = note: `#[warn(dead_code)]` on by default
+
+warning: `sequencer` (lib) generated 1 warning
+warning: `malda_rs` (lib) generated 9 warnings (run `cargo fix --lib -p malda_rs` to apply 6 suggestions)
+warning: unused import: `tokio::task`
+ --> sequencer/src/proof_generator.rs:8:5
+  |
+8 | use tokio::task;
+  |     ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `futures::future::join_all`
+  --> sequencer/src/proof_generator.rs:12:5
+   |
+12 | use futures::future::join_all;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::PathBuf`
+  --> sequencer/src/proof_generator.rs:13:5
+   |
+13 | use std::path::PathBuf;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::task`
+  --> sequencer/src/transaction_manager.rs:11:5
+   |
+11 | use tokio::task;
+   |     ^^^^^^^^^^^
+
+warning: unused import: `chrono`
+  --> sequencer/src/transaction_manager.rs:14:5
+   |
+14 | use chrono;
+   |     ^^^^^^
+
+warning: unused import: `hex`
+  --> sequencer/src/transaction_manager.rs:15:5
+   |
+15 | use hex;
+   |     ^^^
+
+warning: unused import: `Log`
+ --> sequencer/src/batch_event_listener.rs:4:26
+  |
+4 |     rpc::types::{Filter, Log},
+  |                          ^^^
+
+warning: unused import: `tokio::sync::mpsc`
+ --> sequencer/src/batch_event_listener.rs:9:5
+  |
+9 | use tokio::sync::mpsc;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `warn`
+  --> sequencer/src/batch_event_listener.rs:10:35
+   |
+10 | use tracing::{info, error, debug, warn};
+   |                                   ^^^^
+
+warning: field `last_proof_time` is never read
+  --> sequencer/src/proof_generator.rs:36:5
+   |
+31 | pub struct ProofGenerator {
+   |            -------------- field in this struct
+...
+36 |     last_proof_time: Arc<Mutex<Instant>>,
+   |     ^^^^^^^^^^^^^^^
+
+warning: fields `max_retries` and `retry_delay` are never read
+  --> sequencer/src/transaction_manager.rs:39:9
+   |
+38 | pub struct TransactionConfig {
+   |            ----------------- fields in this struct
+39 |     pub max_retries: u32,
+   |         ^^^^^^^^^^^
+40 |     pub retry_delay: Duration,
+   |         ^^^^^^^^^^^
+   |
+   = note: `TransactionConfig` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated function `validate_transaction_receipt` is never used
+   --> sequencer/src/transaction_manager.rs:198:14
+    |
+58  | impl TransactionManager {
+    | ----------------------- associated function in this implementation
+...
+198 |     async fn validate_transaction_receipt(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sequencer` (bin "sequencer") generated 13 warnings (1 duplicate) (run `cargo fix --bin "sequencer"` to apply 9 suggestions)
+    Finished `release` profile [optimized] target(s) in 17.59s
+     Running `/home/ubuntu/malda-zkcoprocessor/target/release/sequencer`
+[2m2025-02-14T11:17:27.894980Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m83:[0m Starting sequencer...
+[2m2025-02-14T11:17:27.895013Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m91:[0m Initialized channels
+[2m2025-02-14T11:17:27.895018Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m103:[0m Configured markets: [0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, 0xf7e8c0e5b418081112fc045aaced424961fe8b99]
+[2m2025-02-14T11:17:27.895034Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m111:[0m Configured chains: [59141, 11155420, 11155111]
+[2m2025-02-14T11:17:27.895041Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m114:[0m Initializing batch event listeners...
+[2m2025-02-14T11:17:27.895059Z[0m [32m INFO[0m main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m129:[0m Starting batch event listener for chain=59141, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-02-14T11:17:27.895164Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m40:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=59141
+[2m2025-02-14T11:17:27.895192Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m48:[0m Connecting to WebSocket at wss://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:27.996697Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m129:[0m Starting batch event listener for chain=11155420, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-02-14T11:17:27.996922Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m40:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=11155420
+[2m2025-02-14T11:17:27.996975Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m48:[0m Connecting to WebSocket at wss://opt-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.097423Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m129:[0m Starting batch event listener for chain=11155111, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-02-14T11:17:28.097476Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m40:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=11155111
+[2m2025-02-14T11:17:28.097490Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m48:[0m Connecting to WebSocket at wss://eth-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.198746Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m151:[0m All batch event listeners started
+[2m2025-02-14T11:17:28.198802Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.198861Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.198889Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.258424Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m63:[0m Subscribing to batch events
+[2m2025-02-14T11:17:28.299686Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.299799Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.299817Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.332158Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m63:[0m Subscribing to batch events
+[2m2025-02-14T11:17:28.400502Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.400582Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.400602Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://opt-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.439879Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-02-14T11:17:28.442610Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m63:[0m Subscribing to batch events
+[2m2025-02-14T11:17:28.502058Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.502269Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.502321Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://eth-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.544890Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-02-14T11:17:28.581823Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0x8ef9d2057fed09fd18cbf393d789c6507cd3e875}), topics: [FilterSet({0xebeabb72629991c0657c42b5db17113f1eb371cca1f8f30ee73c9f66232c2a62}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:28.604201Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.604293Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.604308Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.619202Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-02-14T11:17:28.648596Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0x8ef9d2057fed09fd18cbf393d789c6507cd3e875}), topics: [FilterSet({0xffb02ed8426abe4f31f431f9f4c6075fcf5916fb1ba83041a0979073b27a3d71}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:28.675465Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:28.706038Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.706278Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-02-14T11:17:28.706368Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://linea-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.736698Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0x8ef9d2057fed09fd18cbf393d789c6507cd3e875}), topics: [FilterSet({0xcd38d215870af7df9d5c592a1c0956e6e1e15312fbe981d9edd81f84db39fafd}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:28.753956Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:28.807502Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.807710Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.807770Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://opt-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.839792Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:28.867056Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0x8ef9d2057fed09fd18cbf393d789c6507cd3e875}), topics: [FilterSet({0xcd38d215870af7df9d5c592a1c0956e6e1e15312fbe981d9edd81f84db39fafd}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:28.908416Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.908616Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m48:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-02-14T11:17:28.908724Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m56:[0m Connecting to WebSocket at wss://eth-sepolia.g.alchemy.com/v2/uGenJq8d9bfW9gXcaUZln_ZBDhS61oJY
+[2m2025-02-14T11:17:28.928443Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0xf7e8c0e5b418081112fc045aaced424961fe8b99}), topics: [FilterSet({0xebeabb72629991c0657c42b5db17113f1eb371cca1f8f30ee73c9f66232c2a62}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:28.956887Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:29.009241Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m190:[0m All event listeners started
+[2m2025-02-14T11:17:29.009298Z[0m [32m INFO[0m                 main ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m244:[0m All components initialized and running
+[2m2025-02-14T11:17:29.009365Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m103:[0m Starting event processor
+[2m2025-02-14T11:17:29.009379Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m59:[0m Starting proof generator, waiting for events...
+[2m2025-02-14T11:17:29.009406Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m72:[0m Starting transaction manager
+[2m2025-02-14T11:17:29.014616Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:29.050838Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0xf7e8c0e5b418081112fc045aaced424961fe8b99}), topics: [FilterSet({0xffb02ed8426abe4f31f431f9f4c6075fcf5916fb1ba83041a0979073b27a3d71}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:29.141613Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:29.157623Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0xf7e8c0e5b418081112fc045aaced424961fe8b99}), topics: [FilterSet({0xcd38d215870af7df9d5c592a1c0956e6e1e15312fbe981d9edd81f84db39fafd}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:29.247929Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:17:29.274293Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m67:[0m Subscribing to events with filter: Filter { block_option: Range { from_block: None, to_block: None }, address: FilterSet({0xf7e8c0e5b418081112fc045aaced424961fe8b99}), topics: [FilterSet({0xcd38d215870af7df9d5c592a1c0956e6e1e15312fbe981d9edd81f84db39fafd}), FilterSet({}), FilterSet({}), FilterSet({})] }
+[2m2025-02-14T11:17:29.415800Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m71:[0m Successfully subscribed to events
+[2m2025-02-14T11:19:40.185224Z[0m [31mERROR[0m tokio-runtime-worker ThreadId(11) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/alloy-transport-ws-0.6.4/src/native.rs[0m[2m:[0m[2m171:[0m WS connection error [3merr[0m[2m=[0mWebSocket protocol error: Connection reset without closing handshake
+[2m2025-02-14T11:19:40.185355Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/alloy-pubsub-0.6.4/src/service.rs[0m[2m:[0m[2m63:[0m Reconnecting pubsub service backend.
+[2m2025-02-14T11:24:01.245004Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m74:[0m Received event on chain 11155111 for market 0xf7e8c0e5b418081112fc045aaced424961fe8b99
+[2m2025-02-14T11:24:01.245076Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m109:[0m Processing event from chain 11155111 for market 0xf7e8c0e5b418081112fc045aaced424961fe8b99
+[2m2025-02-14T11:24:01.245133Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m186:[0m Processing event with tx_hash: c35ae1f0aa69180d01d50dabebf8f860469b83db0a095175849fc1d490e79a66
+[2m2025-02-14T11:24:01.245157Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705581, waiting 12 seconds
+[2m2025-02-14T11:24:13.247047Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705582, waiting 12 seconds
+[2m2025-02-14T11:24:25.247509Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705583, waiting 12 seconds
+[2m2025-02-14T11:24:37.249027Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705584, waiting 12 seconds
+[2m2025-02-14T11:24:49.250902Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705584, waiting 12 seconds
+[2m2025-02-14T11:25:01.252033Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m192:[0m ETH Sepolia event block 7705587 not yet reached, current block 7705585, waiting 12 seconds
+[2m2025-02-14T11:25:13.253703Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m136:[0m Processed extension supply: from=0x5f4a2babca5fac4bfe0e80b58c7c048ac0798a2e amount=4100326 src_chain=11155111 dst_chain=59141 market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 method=08fee263
+[2m2025-02-14T11:25:13.253794Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m143:[0m Attempting to send processed event to proof generator: type=ExtensionSupply
+[2m2025-02-14T11:25:13.253855Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/event_processor.rs[0m[2m:[0m[2m155:[0m Successfully sent event to proof generator
+[2m2025-02-14T11:25:13.253898Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m68:[0m Received event for processing: type=ExtensionSupply
+[2m2025-02-14T11:25:15.276708Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m249:[0m Starting batch proof generation for 1 source chains at Instant { tv_sec: 1392490, tv_nsec: 787373353 }
+[2m2025-02-14T11:25:15.276809Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m302:[0m Starting proof generation attempt for markets=[[0xf7e8c0e5b418081112fc045aaced424961fe8b99]], src_chains=[11155111], dst_chains=[[59141]]
+[2m2025-02-14T11:25:15.452559Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(18) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864887 (0xf240a1a5d3f4a45dae15571dfc5d80cdf6ab6d84af9eb3192da834c9ba164146)    
+[2m2025-02-14T11:25:15.452606Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(18) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'hash()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:25:17.924437Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(25) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864887 (0xf240a1a5d3f4a45dae15571dfc5d80cdf6ab6d84af9eb3192da834c9ba164146)    
+[2m2025-02-14T11:25:17.924531Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(25) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'number()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:25:19.275845Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(28) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 7705587 (0x0cd1747220ddd724f6a8f5eb7b9e2adfee262bfff101602655e65a7f22f5dce7)    
+[2m2025-02-14T11:25:19.275937Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(28) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'aggregate3((address,bool,bytes)[])' on 0xcA11bde05977b3631167028862bE2a173976CA11    
+Env creation time: 5.965954668s
+Client creation time: 33.713203ms
+Image ID: 2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863
+Image read time: 9.69µs
+Input upload time: 1.315580395s
+Bonsai proving SessionID: 778ff888-08ae-4458-bfde-1e52a253409d
+Proving time: 12.454881051s
+Snark session creation time: 347.567455ms
+Snark proving time: 11.791846653s
+Receipt download time: 463.413329ms
+Total time (groth16): 26.407238817s
+Bonsai proof time: 26.410619951s
+[2m2025-02-14T11:25:47.658275Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m315:[0m Successfully generated proof data
+[2m2025-02-14T11:25:47.658293Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m319:[0m Successfully encoded seal
+[2m2025-02-14T11:25:47.658300Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m329:[0m Generated proof - journal size: 256, seal size: 260
+[2m2025-02-14T11:25:47.658312Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m333:[0m Proof details - journal: 0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000705f4a2babca5fac4bfe0e80b58c7c048ac0798a2ef7e8c0e5b418081112fc045aaced424961fe8b9900000000000000000000000000000000000000000000000000000000014601c300000000000000000000000000000000000000000000000000000000003d090000aa36a70000e70500000000000000000000000000000000, seal: 0xc101b42b27a2d328c8175f94722b2033d75fd4bed8c338896e22261c41d8d63b117e3e052439b962b2e1c7b69c29663fedb5cab7d2f6c93a2ae682b633269b547e6919e913c6ac75725153d7f01ebaded0e0f830f723516420a5fe1a426aa38af6cbe6a52deb208cbc516f5628c94a88f598bbd3c78a5e1cc1fb69d33b61858da6b5b6612c3743f05e7b1559a1bda65e0b618cdeaddbdc8a4eebc288231b4851c3f9a44a2b7c53ae0777255e0e5bf62646049aa847852fe2188eea308c47a459ce3e64f000857cb77931895d941083ae6779621a69b949e95e2863788f90f9bd2cda6d47223e879ec6a075dc68dac384755733f493b9bb33353416ce65f56827b4ed2883
+[2m2025-02-14T11:25:47.658320Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m265:[0m Batch proof generation completed in 32381ms
+[2m2025-02-14T11:25:47.658377Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m117:[0m Successfully generated proofs for 1 events
+[2m2025-02-14T11:25:47.665814Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m290:[0m Broadcasting batch transaction for chain 59141 starting at index 0: journal_size=256, seal_size=260, markets=[0xf7e8c0e5b418081112fc045aaced424961fe8b99], tx_count=1
+[2m2025-02-14T11:25:47.998183Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m311:[0m Estimated gas: 421761, using gas limit: 632641
+[2m2025-02-14T11:25:48.969497Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m332:[0m Batch transaction sent with hash 0x64f8dec715817d6268c3e0e6e2174be1a90dc3bc7eb51e1abd3a6a53528316cf
+[2m2025-02-14T11:25:50.668568Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m76:[0m Batch process success on chain 59141: init_hash=0xc35ae1f0aa69180d01d50dabebf8f860469b83db0a095175849fc1d490e79a66
+[2m2025-02-14T11:25:56.904241Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m336:[0m Batch transaction confirmed with hash 0x64f8dec715817d6268c3e0e6e2174be1a90dc3bc7eb51e1abd3a6a53528316cf
+[2m2025-02-14T11:25:57.056820Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m148:[0m Batch transaction submitted successfully for chain 59141: 0x64f8dec715817d6268c3e0e6e2174be1a90dc3bc7eb51e1abd3a6a53528316cf (indices 0-1)
+[2m2025-02-14T11:26:31.664711Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m68:[0m Received event for processing: type=ExtensionSupply
+[2m2025-02-14T11:26:33.685870Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m249:[0m Starting batch proof generation for 1 source chains at Instant { tv_sec: 1392569, tv_nsec: 196537353 }
+[2m2025-02-14T11:26:33.685954Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m302:[0m Starting proof generation attempt for markets=[[0xf7e8c0e5b418081112fc045aaced424961fe8b99]], src_chains=[11155111], dst_chains=[[59140]]
+[2m2025-02-14T11:26:33.861082Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(46) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864926 (0xc93003271283a2b11c840b464b0713b7c0f2506b8593a68aa911456bc7cf2897)    
+[2m2025-02-14T11:26:33.861102Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(46) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'hash()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:26:35.310810Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(42) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864926 (0xc93003271283a2b11c840b464b0713b7c0f2506b8593a68aa911456bc7cf2897)    
+[2m2025-02-14T11:26:35.310900Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(42) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'number()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:26:36.321497Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(45) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 7705593 (0x85e4ac6d2e6d42e7c7776d1d02a6d464b3f93c1b055403d84b763491455449f1)    
+[2m2025-02-14T11:26:36.321527Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(45) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'aggregate3((address,bool,bytes)[])' on 0xcA11bde05977b3631167028862bE2a173976CA11    
+Env creation time: 5.271446375s
+Client creation time: 14.119177ms
+Image ID: 2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863
+Image read time: 7.468µs
+Input upload time: 989.859894ms
+Bonsai proving SessionID: 40b00b65-7ad1-419b-94d6-5af178241e54
+Proving time: 11.290150279s
+Snark session creation time: 363.25533ms
+Snark proving time: 11.904991728s
+Receipt download time: 485.742116ms
+Total time (groth16): 25.048427475s
+Bonsai proof time: 25.051888912s
+[2m2025-02-14T11:27:04.012444Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m315:[0m Successfully generated proof data
+[2m2025-02-14T11:27:04.012516Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m319:[0m Successfully encoded seal
+[2m2025-02-14T11:27:04.012539Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m329:[0m Generated proof - journal size: 256, seal size: 260
+[2m2025-02-14T11:27:04.012573Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m333:[0m Proof details - journal: 0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000705f4a2babca5fac4bfe0e80b58c7c048ac0798a2ef7e8c0e5b418081112fc045aaced424961fe8b9900000000000000000000000000000000000000000000000000000000014601c300000000000000000000000000000000000000000000000000000000003d090000aa36a70000e70500000000000000000000000000000000, seal: 0xc101b42b291021662b693d66254ea7ac8fb9cf25e326a025ad321a4cfb78f827aeda899a21bfcabab5855d0fb4c6ebc57751087eef52df393dc285861ea8e1888c8c8c621daf81d247b1917f4da6f7506436e748423c8bdd70bce4631c35bb95f11634901c4061eaeff90c76a3b11777c7dcfc56f657a5c5bd14d57cc23b0a7048e6ceb601a977ed891e948ae1d5737c67f6b6fb6799a8e4134969f750df9a5a771e9c342ca60bac59e3bc0f8670b7148ccf822a6e4c84ef5759a116084a5d184320836c2909db579b43047d8aaea0ac05399b65084d43dbb122ac24b35cec1dead7995f0802f523b1e6d8f93720b1b1d99e08af24ba3fd6fa32445a67defe1299e58aa6
+[2m2025-02-14T11:27:04.012599Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m265:[0m Batch proof generation completed in 30326ms
+[2m2025-02-14T11:27:04.012642Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m117:[0m Successfully generated proofs for 1 events
+[2m2025-02-14T11:27:04.012730Z[0m [31mERROR[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m154:[0m Failed to process batch for chain 59140: No RPC URL configured for chain 59140
+[2m2025-02-14T11:28:23.240562Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m68:[0m Received event for processing: type=ExtensionSupply
+[2m2025-02-14T11:28:25.266247Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m249:[0m Starting batch proof generation for 1 source chains at Instant { tv_sec: 1392680, tv_nsec: 776914576 }
+[2m2025-02-14T11:28:25.266370Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m302:[0m Starting proof generation attempt for markets=[[0xf7e8c0e5b418081112fc045aaced424961fe8b99]], src_chains=[11155111], dst_chains=[[59141]]
+[2m2025-02-14T11:28:25.466662Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(59) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864982 (0x474148f7ccee6fde8d941903d1089b02b068e58e6c807eca8d430793355b6fe0)    
+[2m2025-02-14T11:28:25.466707Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(59) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'hash()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:28:26.927445Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(56) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 23864982 (0x474148f7ccee6fde8d941903d1089b02b068e58e6c807eca8d430793355b6fe0)    
+[2m2025-02-14T11:28:26.927552Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(56) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'number()' on 0x4200000000000000000000000000000000000015    
+[2m2025-02-14T11:28:28.406680Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(64) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 7705602 (0xa3b4df4ab5b790a326f42956d3700bf4a8f557ec09d93e8c58ee2c2155d24962)    
+[2m2025-02-14T11:28:28.406712Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(64) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'aggregate3((address,bool,bytes)[])' on 0xcA11bde05977b3631167028862bE2a173976CA11    
+Env creation time: 5.591379206s
+Client creation time: 19.627223ms
+Image ID: 2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863
+Image read time: 3.852µs
+Input upload time: 1.267465031s
+Bonsai proving SessionID: e02db383-a7a7-4542-9ef6-6db57604086e
+Proving time: 11.923011087s
+Snark session creation time: 329.472548ms
+Snark proving time: 12.393211314s
+Receipt download time: 487.837182ms
+Total time (groth16): 26.420926052s
+Bonsai proof time: 26.422074162s
+[2m2025-02-14T11:28:57.281941Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m315:[0m Successfully generated proof data
+[2m2025-02-14T11:28:57.281958Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m319:[0m Successfully encoded seal
+[2m2025-02-14T11:28:57.281966Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m329:[0m Generated proof - journal size: 256, seal size: 260
+[2m2025-02-14T11:28:57.281977Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m333:[0m Proof details - journal: 0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000705f4a2babca5fac4bfe0e80b58c7c048ac0798a2ef7e8c0e5b418081112fc045aaced424961fe8b9900000000000000000000000000000000000000000000000000000000014601c300000000000000000000000000000000000000000000000000000000003d090000aa36a70000e70500000000000000000000000000000000, seal: 0xc101b42b1b1ae30d53cf960ceb16b95a48d8d35980b3593eb5025756822fa5250278176a1d5888b9bc60b0301a031d98cfc2e30e0f1b4f370e305602395a9bf4de93b7ff1882158f0846c88ecbfc7d2f2ef5137dd6b83ff3e25ed8b2fd3821a3d5f5333f152ab68e26786d1dff5be68f2af0f520ae204ebd656075ba532e99b4a575227a1053621b4d44aa29f02036df0a1db403bb87e704980a9404aab60e3f7ffc5fbc2b3b23150830f517f6a44eb3b9e74c3a9130ce939faa480934b004bae0e75d721fabe415003bd5e1ae0838add24ee7ada83a41b18ab86fe5109b136e88fdd6e6013161bf3909eb3347a8254a21c3236accd0bc3f95cae0e272ceefe5288b5dec
+[2m2025-02-14T11:28:57.281994Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m265:[0m Batch proof generation completed in 32015ms
+[2m2025-02-14T11:28:57.282009Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m117:[0m Successfully generated proofs for 1 events
+[2m2025-02-14T11:28:57.289260Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m290:[0m Broadcasting batch transaction for chain 59141 starting at index 0: journal_size=256, seal_size=260, markets=[0xf7e8c0e5b418081112fc045aaced424961fe8b99], tx_count=1
+[2m2025-02-14T11:28:57.667682Z[0m [34mDEBUG[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m311:[0m Estimated gas: 413136, using gas limit: 619704
+[2m2025-02-14T11:28:58.452656Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m332:[0m Batch transaction sent with hash 0xa433abba41901d16369d81a8829ad6fead33e70986225c3b3e08d75425a55095
+[2m2025-02-14T11:29:00.602119Z[0m [31mERROR[0m tokio-runtime-worker ThreadId(09) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m95:[0m Batch process failed on chain 59141: init_hash=0x055d7d4261d4104a3e7a365fb8cd6ebcdd06cfe14b8e0a4d8bb6c6e429d2e9ef, reason=0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000244e487b71000000000000000000000000000000000000000000000000000000000000001100000000000000000000000000000000000000000000000000000000
+[2m2025-02-14T11:29:06.292302Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(02) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m336:[0m Batch transaction confirmed with hash 0xa433abba41901d16369d81a8829ad6fead33e70986225c3b3e08d75425a55095
+[2m2025-02-14T11:29:06.399832Z[0m [32m INFO[0m tokio-runtime-worker ThreadId(13) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m148:[0m Batch transaction submitted successfully for chain 59141: 0xa433abba41901d16369d81a8829ad6fead33e70986225c3b3e08d75425a55095 (indices 0-1)
