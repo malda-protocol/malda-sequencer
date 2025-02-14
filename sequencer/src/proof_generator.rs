@@ -11,7 +11,7 @@ use futures::future::join_all;
 use std::path::PathBuf;
 
 use crate::event_processor::ProcessedEvent;
-use malda_rs::viewcalls::get_proof_data_prove;
+use malda_rs::viewcalls::get_proof_data_prove_sdk;
 use sequencer::logger::{PipelineLogger, PipelineStep};
 
 #[derive(Debug, Clone)]
@@ -57,54 +57,78 @@ impl ProofGenerator {
         info!("Starting proof generator, waiting for events...");
         
         let mut batch = Vec::new();
-        let mut batch_timer = tokio::time::interval(Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY));
-        batch_timer.tick().await; // Skip first tick
+        let batch_timeout = Duration::from_secs(crate::constants::BATCH_WINDOW);
+        let mut last_proof_time = Instant::now();
 
         loop {
-            tokio::select! {
-                Some(event) = self.event_receiver.recv() => {
-                    info!(
-                        "Queued event for batch processing: type={}", 
-                        match &event {
-                            ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
-                            ProcessedEvent::HostBorrow { .. } => "HostBorrow",
-                            ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
+            // Wait for the first event
+            if let Some(event) = self.event_receiver.recv().await {
+                info!(
+                    "Received event for processing: type={}", 
+                    match &event {
+                        ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
+                        ProcessedEvent::HostBorrow { .. } => "HostBorrow",
+                        ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
+                    }
+                );
+                batch.push(event);
+
+                // Set deadline for batch collection
+                let deadline = Instant::now() + batch_timeout;
+
+                // Collect any additional events until deadline
+                while Instant::now() < deadline {
+                    match self.event_receiver.try_recv() {
+                        Ok(event) => {
+                            info!("Additional event received during batch window");
+                            batch.push(event);
                         }
-                    );
-                    batch.push(event);
-                }
-                _ = batch_timer.tick() => {
-                    if !batch.is_empty() {
-                        let events_to_process = std::mem::take(&mut batch);
-                        let proof_sender = self.proof_sender.clone();
-                        let max_retries = self.max_retries;
-                        let retry_delay = self.retry_delay;
-                        let logger = self.logger.clone();
-
-                        tokio::spawn(async move {
-                            let proof_generator = ProofGeneratorWorker {
-                                max_retries,
-                                retry_delay,
-                            };
-
-                            match proof_generator.process_batch(events_to_process, &logger).await {
-                                Ok(proof_events) => {
-                                    info!(
-                                        "Successfully generated proofs for {} events",
-                                        proof_events.len()
-                                    );
-                                    
-                                    if let Err(e) = proof_sender.send(proof_events).await {
-                                        error!("Failed to send proof ready events: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to generate proofs for batch: {}", e);
-                                }
-                            }
-                        });
+                        Err(_) => {
+                            sleep(Duration::from_millis(100)).await;
+                        }
                     }
                 }
+
+                // Check if we need to wait for the proof delay
+                let time_since_last_proof = last_proof_time.elapsed();
+                let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
+                
+                if time_since_last_proof < proof_delay {
+                    let wait_time = proof_delay - time_since_last_proof;
+                    debug!("Waiting {:?} to respect proof delay", wait_time);
+                    sleep(wait_time).await;
+                }
+
+                // Process whatever we've collected
+                let events_to_process = std::mem::take(&mut batch);
+                let proof_sender = self.proof_sender.clone();
+                let max_retries = self.max_retries;
+                let retry_delay = self.retry_delay;
+                let logger = self.logger.clone();
+
+                tokio::spawn(async move {
+                    let proof_generator = ProofGeneratorWorker {
+                        max_retries,
+                        retry_delay,
+                    };
+
+                    match proof_generator.process_batch(events_to_process, &logger).await {
+                        Ok(proof_events) => {
+                            info!(
+                                "Successfully generated proofs for {} events",
+                                proof_events.len()
+                            );
+                            
+                            if let Err(e) = proof_sender.send(proof_events).await {
+                                error!("Failed to send proof ready events: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to generate proofs for batch: {}", e);
+                        }
+                    }
+                });
+                last_proof_time = Instant::now();
             }
         }
     }
@@ -281,7 +305,7 @@ impl ProofGeneratorWorker {
         );
 
         loop {
-            match get_proof_data_prove(
+            match get_proof_data_prove_sdk(
                 users.clone(),
                 markets.clone(),
                 dst_chain_ids.clone(),

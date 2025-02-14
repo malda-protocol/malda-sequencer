@@ -9,6 +9,10 @@ use futures::future::join_all;
 use tokio::time::sleep;
 use std::time::Duration;
 use hex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use lazy_static::lazy_static;
+use tokio::time::interval;
+use url::Url;
 
 use crate::{
     event_listener::RawEvent,
@@ -16,11 +20,17 @@ use crate::{
 };
 
 // Import the chain ID constant from malda_rs
-use malda_rs::constants::{LINEA_SEPOLIA_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID};
+use malda_rs::constants::{LINEA_SEPOLIA_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID, L1_BLOCK_ADDRESS_OPTIMISM, RPC_URL_OPTIMISM_SEPOLIA};
 
 use crate::constants::ETHEREUM_BLOCK_DELAY;
 use sequencer::logger::{PipelineLogger, PipelineStep};
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
+use crate::types::IL1Block;
+use crate::create_provider;
+
+lazy_static! {
+    pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
+}
 
 #[derive(Debug)]
 pub enum ProcessedEvent {
@@ -61,6 +71,27 @@ impl EventProcessor {
         processed_sender: mpsc::Sender<ProcessedEvent>,
         logger: PipelineLogger,
     ) -> Self {
+        // Start the background task to update Ethereum block number
+        task::spawn(async {
+            let mut interval = interval(Duration::from_secs(6));
+            let provider = create_provider(Url::parse(RPC_URL_OPTIMISM_SEPOLIA).unwrap(), "0xbd0974bec39a17e36ba2a6b4d238ff944bacb481cbed5efcae784d7bf4a2ff80").await.map_err(|e| eyre::eyre!("Failed to create provider: {}", e)).unwrap();
+            let l1_block_contract = IL1Block::new(L1_BLOCK_ADDRESS_OPTIMISM, provider);
+
+            loop {
+                interval.tick().await;
+                match l1_block_contract.number().call().await {
+                    Ok(number_return) => {
+                        let block_number = number_return._0;
+                        ETHEREUM_BLOCK_NUMBER.store(block_number, Ordering::SeqCst);
+                        // debug!("Updated Ethereum block number to {}", block_number);
+                    },
+                    Err(e) => {
+                        error!("Failed to fetch Ethereum block number: {}", e);
+                    }
+                }
+            }
+        });
+
         Self {
             event_receiver,
             processed_sender,
@@ -147,6 +178,7 @@ impl EventProcessor {
     }
 
     async fn process_event(raw_event: RawEvent, logger: &PipelineLogger) -> Result<ProcessedEvent> {
+
         let chain_id = raw_event.chain_id;
         let market = raw_event.market;
         let log = raw_event.log;
@@ -155,8 +187,15 @@ impl EventProcessor {
 
         // Add delay for ETH Sepolia events
         if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
-            debug!("ETH Sepolia event detected, waiting {} seconds", ETHEREUM_BLOCK_DELAY);
-            sleep(Duration::from_secs(ETHEREUM_BLOCK_DELAY)).await;
+            let event_block = log.block_number.expect("Log should have block number");
+            while event_block > ETHEREUM_BLOCK_NUMBER.load(Ordering::SeqCst) {
+                debug!("ETH Sepolia event block {} not yet reached, current block {}, waiting {} seconds", 
+                    event_block, 
+                    ETHEREUM_BLOCK_NUMBER.load(Ordering::SeqCst), 
+                    ETHEREUM_BLOCK_DELAY
+                );
+                sleep(Duration::from_secs(ETHEREUM_BLOCK_DELAY)).await;
+            }
         }
 
         let processed = if chain_id == LINEA_SEPOLIA_CHAIN_ID {

@@ -41,12 +41,15 @@ pub const SEQUENCER_PRIVATE_KEY: &str = "0xbc4e6261e470a5f67ec85062c0901cb87a1c9
 
 // Timing configurations
 pub const LISTENER_SPAWN_DELAY: Duration = Duration::from_millis(100);
-pub const ETHEREUM_BLOCK_DELAY: u64 = 72;
+pub const ETHEREUM_BLOCK_DELAY: u64 = 12;
 
 // Add this with other constants
 pub const PROOF_REQUEST_DELAY: u64 = 15;
 
 pub const BATCH_SUBMITTER: Address = address!("b4282799022073790c8Ae500Ac6C91C622021079");
+
+/// The time window to wait for additional events to batch together (in seconds)
+pub const BATCH_WINDOW: u64 = 2;
 
 #[cfg(test)]
 pub mod test {
