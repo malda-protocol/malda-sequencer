@@ -1,6 +1,8 @@
 use alloy::primitives::{Address, Bytes, U256, TxHash};
 use eyre::Result;
 use tokio::sync::mpsc;
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
 use tracing::{info, error, debug, warn};
 use std::time::Duration;
 use tokio::task;
@@ -27,7 +29,7 @@ pub struct ProofReadyEvent {
 }
 
 pub struct ProofGenerator {
-    event_receiver: mpsc::Receiver<ProcessedEvent>,
+    event_receiver: Box<dyn Stream<Item = ProcessedEvent> + Unpin + Send>,
     proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
     max_retries: u32,
     retry_delay: Duration,
@@ -37,14 +39,14 @@ pub struct ProofGenerator {
 
 impl ProofGenerator {
     pub fn new(
-        event_receiver: mpsc::Receiver<ProcessedEvent>,
+        event_receiver: impl Stream<Item = ProcessedEvent> + Unpin + Send + 'static,
         proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
         logger: PipelineLogger,
     ) -> Self {
         Self {
-            event_receiver,
+            event_receiver: Box::new(event_receiver),
             proof_sender,
             max_retries,
             retry_delay,
@@ -62,7 +64,7 @@ impl ProofGenerator {
 
         loop {
             // Wait for the first event
-            if let Some(event) = self.event_receiver.recv().await {
+            if let Some(event) = self.event_receiver.next().await {
                 info!(
                     "Received event for processing: type={}", 
                     match &event {
@@ -78,14 +80,12 @@ impl ProofGenerator {
 
                 // Collect any additional events until deadline
                 while Instant::now() < deadline {
-                    match self.event_receiver.try_recv() {
-                        Ok(event) => {
+                    tokio::select! {
+                        Some(event) = self.event_receiver.next() => {
                             info!("Additional event received during batch window");
                             batch.push(event);
                         }
-                        Err(_) => {
-                            sleep(Duration::from_millis(100)).await;
-                        }
+                        _ = sleep(Duration::from_millis(100)) => {}
                     }
                 }
 

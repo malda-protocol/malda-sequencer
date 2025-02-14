@@ -107,6 +107,19 @@ impl TransactionManager {
                                         "Failed to process batch for chain {}: {}",
                                         chain_id, e
                                     );
+                                    // Log failure for each event in the batch
+                                    for event in chain_events {
+                                        if let Err(log_err) = logger.log_step(
+                                            event.tx_hash,
+                                            PipelineStep::TransactionFailed {
+                                                tx_hash: event.tx_hash,
+                                                error: format!("Batch processing failed: {}", e),
+                                                chain_id,
+                                            }
+                                        ).await {
+                                            error!("Failed to log transaction failure: {}", log_err);
+                                        }
+                                    }
                                 }
                             }
                         }));
@@ -142,6 +155,19 @@ impl TransactionManager {
                                 "Failed to process batch for chain {}: {}",
                                 chain_id, e
                             );
+                            // Log failure for each event in the batch
+                            for event in chain_events {
+                                if let Err(log_err) = logger.log_step(
+                                    event.tx_hash,
+                                    PipelineStep::TransactionFailed {
+                                        tx_hash: event.tx_hash,
+                                        error: format!("Batch processing failed: {}", e),
+                                        chain_id,
+                                    }
+                                ).await {
+                                    error!("Failed to log transaction failure: {}", log_err);
+                                }
+                            }
                         }
                     }
                 }));

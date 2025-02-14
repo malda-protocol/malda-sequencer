@@ -28,9 +28,11 @@ use crate::{
 mod event_listener;
 use event_listener::{EventListener, EventConfig};
 use tokio::sync::mpsc;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 mod event_processor;
 use event_processor::EventProcessor;
+use event_processor::ProcessedEvent;
 
 mod proof_generator;
 use proof_generator::{ProofGenerator, ProofReadyEvent};
@@ -43,6 +45,10 @@ use std::path::PathBuf;
 
 mod batch_event_listener;
 use batch_event_listener::{BatchEventListener, BatchEventConfig};
+
+use tokio::net::UnixListener;
+use tokio::io::AsyncReadExt;
+use std::fs;
 
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -79,9 +85,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create channels with proper capacities
     let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
     let (processed_tx, processed_rx) = mpsc::channel(PROCESSED_CHANNEL_CAPACITY);
+    let (manual_tx, manual_rx) = mpsc::channel(32);
     let (proof_tx, proof_rx) = mpsc::channel::<Vec<ProofReadyEvent>>(PROOF_CHANNEL_CAPACITY);
 
     info!("Initialized channels");
+
+    // Merge manual and processed events
+    let processed_stream = ReceiverStream::new(processed_rx);
+    let manual_stream = ReceiverStream::new(manual_rx);
+    let merged_stream = processed_stream.merge(manual_stream);
 
     // Markets
     let markets = vec![
@@ -193,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn proof generator
     let proof_generator_handle = tokio::spawn(async move {
         let mut generator = ProofGenerator::new(
-            processed_rx,
+            merged_stream,
             proof_tx,
             MAX_PROOF_RETRIES,
             PROOF_RETRY_DELAY,
@@ -230,6 +242,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     handles.push(tx_manager_handle);
 
     info!("All components initialized and running");
+
+    // Set up Unix socket for manual event injection
+    let socket_path = "/tmp/sequencer.sock";
+    // Remove the socket file if it exists
+    let _ = fs::remove_file(socket_path);
+    let listener = UnixListener::bind(socket_path)?;
+    
+    let manual_tx_clone = manual_tx.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let tx = manual_tx_clone.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    if let Ok(_) = socket.read_to_end(&mut buf).await {
+                        if let Ok(event) = serde_json::from_slice::<ProcessedEvent>(&buf) {
+                            if let Err(e) = tx.send(event).await {
+                                error!("Failed to forward manual event: {}", e);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    });
 
     // Wait for all tasks to complete
     for handle in handles {
