@@ -35,5 +35,9 @@ alloy::sol! {
     interface IBatchSubmitter {
         function batchProcess(BatchProcessMsg memory msg) external;
     }
+
+    interface IL1Block {
+        function number() external view returns (uint64);
+    }
 } 
 
