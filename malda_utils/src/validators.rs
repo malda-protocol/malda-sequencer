@@ -63,7 +63,7 @@ pub fn validate_get_proof_data_call(
     let mut calls = Vec::with_capacity(account.len());
 
     for ((user, market), target_chain_id) in account.iter().zip(asset.iter()).zip(target_chain_ids.iter()) {
-        assert!(*market == WETH_MARKET_SEPOLIA || *market == USDC_MARKET_SEPOLIA, "market is not mWETH or mUSDC");
+        assert!(*market == WETH_MARKET_SEPOLIA || *market == USDC_MARKET_SEPOLIA || *market == USDC_MOCK_MARKET_SEPOLIA || *market == WSTETH_MOCK_MARKET_SEPOLIA, "market is not mWETH or mUSDC");
         // Selector for getProofData(address,uint32)
         let selector = [0x07, 0xd9, 0x23, 0xe9];
         let user_bytes: [u8; 32] = user.into_word().into();

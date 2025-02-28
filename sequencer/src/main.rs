@@ -99,6 +99,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let markets = vec![
         WETH_MARKET_SEPOLIA,
         USDC_MARKET_SEPOLIA,
+        USDC_MOCK_MARKET_SEPOLIA,
+        WSTETH_MOCK_MARKET_SEPOLIA,
     ];
     info!("Configured markets: {:?}", markets);
 
