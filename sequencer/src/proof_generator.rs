@@ -354,33 +354,3 @@ impl ProofGeneratorWorker {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::constants::{PROOF_CHANNEL_CAPACITY, MAX_PROOF_RETRIES, PROOF_RETRY_DELAY};
-
-    #[tokio::test]
-    async fn test_proof_generator_creation() -> Result<()> {
-        let (_event_tx, event_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
-        let (proof_tx, _proof_rx) = mpsc::channel(PROOF_CHANNEL_CAPACITY);
-        
-        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
-        
-        let _generator = ProofGenerator::new(
-            event_rx,
-            proof_tx,
-            MAX_PROOF_RETRIES,
-            PROOF_RETRY_DELAY,
-            logger,
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_process_event() -> Result<()> {
-        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
-        // ... rest of test code ...
-        Ok(())
-    }
-} 

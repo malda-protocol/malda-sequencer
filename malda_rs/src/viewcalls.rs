@@ -53,15 +53,17 @@ fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow
     let client = Client::from_env(risc0_zkvm::VERSION)?;
     println!("Client creation time: {:?}", start.elapsed());
 
-    let start = std::time::Instant::now();
+    // let start = std::time::Instant::now();
     // Convert Vec<u32> to Vec<u8> before encoding
     let id_bytes: Vec<u8> = GET_PROOF_DATA_ID.iter()
         .flat_map(|&x| x.to_le_bytes())
         .collect();
     let image_id_hex = hex::encode(id_bytes);
-    let image_id_hex: String = "2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863".to_string();
     println!("Image ID: {}", image_id_hex);
-    println!("Image read time: {:?}", start.elapsed());
+    let image_id_hex: String = "baccc32c692d4db9deea29da9d7bc8ba0d9346e61438fd8aa0654a819e346acf".to_string();
+    // let image_id_hex: String = "2df73778d83db383511ada84662a60342c5106a66cfb3ecb09e2b45a97887863".to_string();
+    // println!("Image ID: {}", image_id_hex);
+    // println!("Image read time: {:?}", start.elapsed());
 
     let start = std::time::Instant::now();
     let input_id = client.upload_input(input_data)?;

@@ -67,19 +67,19 @@ mod tests {
         let chain_id = LINEA_SEPOLIA_CHAIN_ID;
 
         let start_time = std::time::Instant::now();
-        let session_info = get_proof_data_exec(
+        let session_info = get_proof_data_prove(
             vec![vec![user_linea]], 
             vec![vec![asset]], 
             vec![vec![OPTIMISM_CHAIN_ID]],
             vec![chain_id]
         ).await.unwrap();
-        let duration = start_time.elapsed();
+        // let duration = start_time.elapsed();
 
-        let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
-        println!("journal: 0x{}", hex::encode(&session_info.journal));
-        println!("Cycles: {}", cycles);
-        println!("Duration: {:?}", duration);
-        panic!("test");
+        // let cycles = session_info.segments.iter().map(|s| s.cycles).sum::<u32>();
+        // println!("journal: 0x{}", hex::encode(&session_info.journal));
+        // println!("Cycles: {}", cycles);
+        // println!("Duration: {:?}", duration);
+        // panic!("test");
     }
 
     #[tokio::test]
