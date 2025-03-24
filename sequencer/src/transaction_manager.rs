@@ -126,7 +126,7 @@ impl TransactionManager {
                 let db = db.clone();
                 
                 chain_tasks.push(tokio::spawn(async move {
-                    println!("Processing chain {} batch", chain_id);
+                    
                     match Self::process_chain_batch(
                         &db,
                         &chain_events,
@@ -195,6 +195,8 @@ impl TransactionManager {
         let journal_data = events[0].journal.clone();
         let seal = events[0].seal.clone();
 
+        println!("Started Processing chain {} batch", chain_id);
+
         for event in events {
             receivers.push(event.receiver);
             markets.push(event.market);
@@ -253,25 +255,32 @@ impl TransactionManager {
 
         info!("Batch transaction sent with hash {}", tx_hash);
 
-        // Update database with batch transaction hash - process all updates concurrently
-        let update_futures: Vec<_> = events.iter().map(|event| {
+        // Update database when batch transaction is initialized
+        let init_time = chrono::Utc::now();
+        let init_update_futures: Vec<_> = events.iter().map(|event| {
             let db = db.clone();
             let tx_hash = tx_hash;
+            println!("Trying to update DB for processing chain {} batch", chain_id);
             async move {
                 if let Err(e) = db.update_event(EventUpdate {
                     tx_hash: event.tx_hash,
                     batch_tx_hash: Some(format!("0x{}", hex::encode(tx_hash.0))),
-                    status: EventStatus::BatchSubmitted,
+                    status: EventStatus::BatchSubmitStarted,
+                    event_type: Some(event.method.clone()),
+                    dst_chain_id: Some(event.dst_chain_id),
+                    msg_sender: Some(event.receiver),
+                    amount: Some(event.amount[0]),
                     ..Default::default()
                 }).await {
-                    error!("Failed to update batch transaction hash in database for event {}: {:?}", event.tx_hash, e);
+                    error!("Failed to update batch initiation in database for event {}: {:?}", event.tx_hash, e);
                 } else {
-                    debug!("Successfully updated batch transaction hash in database for event {}", event.tx_hash);
+                    info!("Updated event {} status to BatchInitiated at {}", event.tx_hash, init_time);
+                    println!("Updated DB for chain {} batch", chain_id);
                 }
             }
         }).collect();
 
-        join_all(update_futures).await;
+        join_all(init_update_futures).await;
 
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
             Ok(hash) => {
@@ -283,6 +292,29 @@ impl TransactionManager {
                     .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
                 if receipt.status() {
+                    // Update database when batch transaction is confirmed
+                    let confirm_time = chrono::Utc::now();
+                    let confirm_update_futures: Vec<_> = events.iter().map(|event| {
+                        let db = db.clone();
+                        async move {
+                            if let Err(e) = db.update_event(EventUpdate {
+                                tx_hash: event.tx_hash,
+                                batch_tx_hash: Some(format!("0x{}", hex::encode(hash.0))),
+                                status: EventStatus::BatchSubmitted,
+                                event_type: Some(event.method.clone()),
+                                dst_chain_id: Some(event.dst_chain_id),
+                                msg_sender: Some(event.receiver),
+                                amount: Some(event.amount[0]),
+                                ..Default::default()
+                            }).await {
+                                error!("Failed to update batch confirmation in database for event {}: {:?}", event.tx_hash, e);
+                            } else {
+                                info!("Updated event {} status to BatchConfirmed at {}", event.tx_hash, confirm_time);
+                            }
+                        }
+                    }).collect();
+
+                    join_all(confirm_update_futures).await;
                     Ok(hash)
                 } else {
                     Err(eyre::eyre!("Transaction failed"))
