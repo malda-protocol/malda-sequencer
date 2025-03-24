@@ -39,9 +39,6 @@ use proof_generator::{ProofGenerator, ProofReadyEvent};
 mod transaction_manager;
 use transaction_manager::{TransactionManager, TransactionConfig};
 
-use sequencer::logger::PipelineLogger;
-use std::path::PathBuf;
-
 mod batch_event_listener;
 use batch_event_listener::{BatchEventListener, BatchEventConfig};
 
@@ -90,11 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load .env file
     dotenv().ok();
 
-    // Initialize logger with path
-    let log_path = PathBuf::from("sequencer.log");
-    let logger = PipelineLogger::new(log_path).await?;
-
-    // First create the channels
+    // Create channels
     let (event_sender, event_receiver) = mpsc::channel::<RawEvent>(100);
     let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
     let (proof_sender, proof_receiver) = mpsc::channel::<Vec<ProofReadyEvent>>(100);
@@ -117,12 +110,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => error!("Failed to write test event: {:?}", e),
     }
 
-    // Now create event processor with all required arguments
-    let processed_sender_clone = processed_sender.clone();
+    // Create event processor
     let mut event_processor = EventProcessor::new(
-        event_receiver,
-        processed_sender_clone,
-        logger.clone(),
+        event_receiver, // Clone the receiver
+        processed_sender.clone(),
         db.clone()
     );
 
@@ -156,8 +147,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn batch event listeners
     let mut handles = vec![];
     
-    let batch_logger = PipelineLogger::new(PathBuf::from("batch_pipeline.log")).await?;
-    
     for (ws_url, chain_id) in batch_configs {
         info!(
             "Starting batch event listener for chain={}, submitter={:?}", 
@@ -170,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             chain_id,
         };
         
-        let listener = BatchEventListener::new(config, batch_logger.clone());
+        let listener = BatchEventListener::new(config);
         let handle = tokio::spawn(async move {
             if let Err(e) = listener.start().await {
                 error!("Batch event listener failed: {:?}", e);
@@ -185,8 +174,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn event listeners
     let mut handles = vec![];
-    
-    let logger = PipelineLogger::new(PathBuf::from("batch_pipeline.log")).await?;
     
     for market in markets {
         for (ws_url, chain_id, events) in chain_configs.iter() {
@@ -206,7 +193,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let listener = EventListener::new(
                     config,
                     event_sender.clone(),
-                    logger.clone(),
                 );
                 let handle = tokio::spawn(async move {
                     if let Err(e) = listener.start().await {
@@ -222,25 +208,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All event listeners started");
 
-    // Create logger before spawning tasks
-    let _event_logger = logger.clone();
-    let _proof_logger = logger.clone();
-
-    // Spawn event processor
-    let processor_handle = tokio::spawn(async move {
-        if let Err(e) = event_processor.start().await {
-            error!("Event processor failed: {:?}", e);
-        }
-    });
-    handles.push(processor_handle);
-
-    // Create proof generator with database
-    let mut proof_generator = ProofGenerator::new(
+    // Create proof generator
+    let proof_generator = ProofGenerator::new(
         processed_receiver,
         proof_sender,
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
-        logger.clone(),
         db.clone(),
     );
 
@@ -249,21 +222,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_retries: 3,
         retry_delay: Duration::from_secs(1),
         rpc_urls: vec![
-            (1, "http://ethereum-rpc-url".to_string()),
-            (10, "http://optimism-rpc-url".to_string()),
-            (59144, "http://linea-rpc-url".to_string()),
+            (1, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
+            (10, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
+            (59144, RPC_URL_LINEA_SEPOLIA.to_string()),
         ],
     };
 
-    // Create transaction manager with database
+    // Create transaction manager
     let mut transaction_manager = TransactionManager::new(
         proof_receiver,
         tx_config,
-        logger.clone(),
         db.clone(),
     );
 
-    // Spawn proof generator
+    // Spawn processors
+    let processor_handle = tokio::spawn(async move {
+        if let Err(e) = event_processor.start().await {
+            error!("Event processor failed: {:?}", e);
+        }
+    });
+    handles.push(processor_handle);
+
     let proof_generator_handle = tokio::spawn(async move {
         if let Err(e) = proof_generator.start().await {
             error!("Proof generator failed: {:?}", e);
@@ -271,7 +250,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     handles.push(proof_generator_handle);
 
-    // Spawn transaction manager
     let tx_manager_handle = tokio::spawn(async move {
         if let Err(e) = transaction_manager.start().await {
             error!("Transaction manager failed: {:?}", e);

@@ -10,7 +10,6 @@ use tokio::sync::mpsc;
 use tracing::{warn, debug};
 use std::time::Duration;
 use futures::future::join_all;
-use sequencer::logger::{PipelineLogger, PipelineStep};
 use hex;
 use eyre::WrapErr;
 use rand::Rng;
@@ -48,7 +47,6 @@ pub struct TransactionConfig {
 pub struct TransactionManager {
     event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
     config: TransactionConfig,
-    logger: PipelineLogger,
     db: Database,
 }
 
@@ -64,13 +62,11 @@ impl TransactionManager {
     pub fn new(
         event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
         config: TransactionConfig,
-        logger: PipelineLogger,
         db: Database,
     ) -> Self {
         Self {
             event_receiver,
             config,
-            logger,
             db,
         }
     }
@@ -83,7 +79,6 @@ impl TransactionManager {
             let mut chain_start_idx = 0;
             let mut chain_tasks = Vec::new();
             let config = self.config.clone();
-            let logger = self.logger.clone();
 
             // Process all events including the last batch
             for (idx, event) in proof_events.iter().enumerate() {
@@ -92,7 +87,6 @@ impl TransactionManager {
                     if let Some(chain_id) = current_chain_id {
                         let chain_events = proof_events[chain_start_idx..idx].to_vec();
                         let config = config.clone();
-                        let logger = logger.clone();
                         
                         chain_tasks.push(tokio::spawn(async move {
                             match Self::process_chain_batch(
@@ -101,7 +95,6 @@ impl TransactionManager {
                                 idx,
                                 chain_id,
                                 &config,
-                                &logger
                             ).await {
                                 Ok(tx_hash) => {
                                     info!(
@@ -114,19 +107,6 @@ impl TransactionManager {
                                         "Failed to process batch for chain {}: {}",
                                         chain_id, e
                                     );
-                                    // Log failure for each event in the batch
-                                    for event in chain_events {
-                                        if let Err(log_err) = logger.log_step(
-                                            event.tx_hash,
-                                            PipelineStep::TransactionFailed {
-                                                tx_hash: event.tx_hash,
-                                                error: format!("Batch processing failed: {}", e),
-                                                chain_id,
-                                            }
-                                        ).await {
-                                            error!("Failed to log transaction failure: {}", log_err);
-                                        }
-                                    }
                                 }
                             }
                         }));
@@ -140,7 +120,6 @@ impl TransactionManager {
             if let Some(chain_id) = current_chain_id {
                 let chain_events = proof_events[chain_start_idx..].to_vec();
                 let config = config.clone();
-                let logger = logger.clone();
                 
                 chain_tasks.push(tokio::spawn(async move {
                     match Self::process_chain_batch(
@@ -149,7 +128,6 @@ impl TransactionManager {
                         proof_events.len(),
                         chain_id,
                         &config,
-                        &logger
                     ).await {
                         Ok(tx_hash) => {
                             info!(
@@ -162,19 +140,6 @@ impl TransactionManager {
                                 "Failed to process batch for chain {}: {}",
                                 chain_id, e
                             );
-                            // Log failure for each event in the batch
-                            for event in chain_events {
-                                if let Err(log_err) = logger.log_step(
-                                    event.tx_hash,
-                                    PipelineStep::TransactionFailed {
-                                        tx_hash: event.tx_hash,
-                                        error: format!("Batch processing failed: {}", e),
-                                        chain_id,
-                                    }
-                                ).await {
-                                    error!("Failed to log transaction failure: {}", log_err);
-                                }
-                            }
                         }
                     }
                 }));
@@ -249,11 +214,8 @@ impl TransactionManager {
         _end_idx: usize,
         chain_id: u32,
         config: &TransactionConfig,
-        logger: &PipelineLogger,
     ) -> Result<TxHash> {
         let provider = Self::get_provider_for_chain(chain_id, config).await?;
-
-        // Create batch submitter contract instance
         let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
@@ -323,19 +285,6 @@ impl TransactionManager {
             .await?;
         let tx_hash = pending_tx.tx_hash();
 
-        // Log transaction submission for each event in the batch
-        for event in events {
-            logger.log_step(
-                event.tx_hash,
-                PipelineStep::TransactionSubmitted {
-                    tx_hash: *tx_hash,
-                    method: "batchProcess".to_string(),
-                    gas_used: U256::from(0u64),
-                    gas_price: U256::from(provider.get_gas_price().await?),
-                }
-            ).await?;
-        }
-
         info!("Batch transaction sent with hash {}", tx_hash);
 
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
@@ -346,31 +295,12 @@ impl TransactionManager {
                     .get_transaction_receipt(hash)
                     .await?
                     .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
-                
-                // Log completion for each event in the batch
-                for event in events {
-                    logger.log_step(
-                        event.tx_hash,
-                        PipelineStep::TransactionSubmitted {
-                            tx_hash: hash,
-                            method: "batchProcess".to_string(),
-                            gas_used: U256::from(receipt.gas_used),
-                            gas_price: U256::from(receipt.effective_gas_price),
-                        }
-                    ).await?;
 
-                    logger.log_step(
-                        event.tx_hash,
-                        PipelineStep::TransactionVerified {
-                            tx_hash: hash,
-                            block_number: receipt.block_number.unwrap_or_default(),
-                            method: "batchProcess".to_string(),
-                            status: if receipt.status() { 1 } else { 0 },
-                        }
-                    ).await?;
+                if receipt.status() {
+                    Ok(hash)
+                } else {
+                    Err(eyre::eyre!("Transaction failed"))
                 }
-                
-                Ok(hash)
             },
             Err(e) => {
                 error!("Batch transaction failed: {}", e);
@@ -447,12 +377,7 @@ mod tests {
             rpc_urls: vec![(1, "http://localhost:8545".to_string())],
         };
 
-        // Create a temporary logger for testing
-        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log"))
-            .await
-            .expect("Failed to create test logger");
-
-        let manager = TransactionManager::new(rx, config, logger, Database::new());
+        let manager = TransactionManager::new(rx, config, Database::new());
         
         // Basic assertions to ensure the manager was created correctly
         assert_eq!(manager.config.max_retries, MAX_TX_RETRIES);

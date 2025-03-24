@@ -1,20 +1,18 @@
 use alloy::{
     primitives::Address,
     providers::{Provider, ProviderBuilder, WsConnect},
-    rpc::types::{Filter, Log},
+    rpc::types::Filter,
     transports::http::reqwest::Url,
 };
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
-use tracing::{info, error, debug, warn};
-use sequencer::logger::{PipelineLogger, PipelineStep};
+use tracing::{info, error, debug};
 
 use crate::events::{
     BATCH_PROCESS_FAILED_SIG, BATCH_PROCESS_SUCCESS_SIG,
     parse_batch_process_failed_event, parse_batch_process_success_event,
 };
-
 
 #[derive(Debug)]
 pub struct BatchEventConfig {
@@ -25,14 +23,12 @@ pub struct BatchEventConfig {
 
 pub struct BatchEventListener {
     config: BatchEventConfig,
-    logger: PipelineLogger,
 }
 
 impl BatchEventListener {
-    pub fn new(config: BatchEventConfig, logger: PipelineLogger) -> Self {
+    pub fn new(config: BatchEventConfig) -> Self {
         Self { 
             config,
-            logger,
         }
     }
 
@@ -77,18 +73,6 @@ impl BatchEventListener {
                         "Batch process success on chain {}: init_hash={:?}",
                         self.config.chain_id, event.init_hash
                     );
-
-                    // Log success event using init_hash
-                    if let Err(e) = self.logger.log_step(
-                        event.init_hash,  // Use init_hash directly
-                        PipelineStep::BatchProcessed { 
-                            chain_id: self.config.chain_id as u32,
-                            status: "Success".to_string(),
-                            tx_hash: log.transaction_hash.expect("Log should have tx hash"),
-                        }
-                    ).await {
-                        error!("Failed to log batch success event: {}", e);
-                    }
                 }
                 Some(log) = failure_stream.next() => {
                     let event = parse_batch_process_failed_event(&log);
@@ -96,18 +80,6 @@ impl BatchEventListener {
                         "Batch process failed on chain {}: init_hash={:?}, reason={:?}",
                         self.config.chain_id, event.init_hash, event.reason
                     );
-
-                    // Log failure event using init_hash
-                    if let Err(e) = self.logger.log_step(
-                        event.init_hash,  // Use init_hash directly
-                        PipelineStep::BatchProcessed { 
-                            chain_id: self.config.chain_id as u32,
-                            status: format!("Failed: {}", event.reason),
-                            tx_hash: log.transaction_hash.expect("Log should have tx hash"),
-                        }
-                    ).await {
-                        error!("Failed to log batch failure event: {}", e);
-                    }
                 }
                 else => break,
             }
@@ -122,7 +94,6 @@ impl BatchEventListener {
 mod tests {
     use super::*;
     use crate::constants::{test::*, EVENT_CHANNEL_CAPACITY};
-    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_batch_event_listener_creation() -> Result<()> {
@@ -132,8 +103,7 @@ mod tests {
             chain_id: TEST_CHAIN_ID,
         };
 
-        let logger = PipelineLogger::new(PathBuf::from("test_batch_pipeline.log")).await?;
-        let _listener = BatchEventListener::new(config, logger);
+        let _listener = BatchEventListener::new(config);
         Ok(())
     }
 } 

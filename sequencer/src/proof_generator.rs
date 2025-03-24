@@ -10,11 +10,9 @@ use tokio::time::{sleep, Instant};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use futures::future::join_all;
-use std::path::PathBuf;
 
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
-use sequencer::logger::{PipelineLogger, PipelineStep};
 use crate::ProcessedEvent;
 
 #[derive(Debug, Clone)]
@@ -35,7 +33,6 @@ pub struct ProofGenerator {
     max_retries: u32,
     retry_delay: Duration,
     last_proof_time: Arc<Mutex<Instant>>,
-    logger: PipelineLogger,
     db: Database,
 }
 
@@ -45,7 +42,6 @@ impl ProofGenerator {
         proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
-        logger: PipelineLogger,
         db: Database,
     ) -> Self {
         Self {
@@ -54,7 +50,6 @@ impl ProofGenerator {
             max_retries,
             retry_delay,
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
-            logger,
             db,
         }
     }
@@ -107,7 +102,6 @@ impl ProofGenerator {
                 let proof_sender = self.proof_sender.clone();
                 let max_retries = self.max_retries;
                 let retry_delay = self.retry_delay;
-                let logger = self.logger.clone();
                 let db = self.db.clone();
 
                 tokio::spawn(async move {
@@ -117,7 +111,7 @@ impl ProofGenerator {
                         db,
                     };
 
-                    match proof_generator.process_batch(events_to_process, &logger).await {
+                    match proof_generator.process_batch(events_to_process).await {
                         Ok(proof_events) => {
                             info!(
                                 "Successfully generated proofs for {} events",
@@ -146,7 +140,7 @@ struct ProofGeneratorWorker {
 }
 
 impl ProofGeneratorWorker {
-    async fn process_batch(&self, events: Vec<ProcessedEvent>, logger: &PipelineLogger) -> Result<Vec<ProofReadyEvent>> {
+    async fn process_batch(&self, events: Vec<ProcessedEvent>) -> Result<Vec<ProofReadyEvent>> {
         // Update status to ProofRequested for all events
         for event in &events {
             let tx_hash = match event {
@@ -288,18 +282,8 @@ impl ProofGeneratorWorker {
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
-        // Log the proof generation for each event
+        // Update database status for each event
         for (tx_hash, _, _, _, _) in &event_details {
-            logger.log_step(
-                *tx_hash,
-                PipelineStep::ProofGenerated {
-                    duration_ms,
-                    journal: hex::encode(&journal),
-                    seal: hex::encode(&seal),
-                }
-            ).await?;
-
-            // Update database status with correct field types
             let update = EventUpdate {
                 tx_hash: *tx_hash,
                 status: EventStatus::ProofReceived,
