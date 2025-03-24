@@ -8,7 +8,6 @@ use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::{debug, error, info};
-use sequencer::logger::{PipelineLogger, PipelineStep};
 use serde::{Serialize, Deserialize};
 use sequencer::events::{parse_withdraw_on_extension_chain_event, parse_supplied_event};
 use sequencer::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR, HOST_BORROW_ON_EXTENSION_CHAIN_SIG, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, EXTENSION_SUPPLIED_SIG};
