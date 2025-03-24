@@ -79,6 +79,7 @@ impl TransactionManager {
             let mut chain_start_idx = 0;
             let mut chain_tasks = Vec::new();
             let config = self.config.clone();
+            let db = self.db.clone();
 
             // Process all events including the last batch
             for (idx, event) in proof_events.iter().enumerate() {
@@ -87,9 +88,11 @@ impl TransactionManager {
                     if let Some(chain_id) = current_chain_id {
                         let chain_events = proof_events[chain_start_idx..idx].to_vec();
                         let config = config.clone();
+                        let db = db.clone();
                         
                         chain_tasks.push(tokio::spawn(async move {
                             match Self::process_chain_batch(
+                                &db,
                                 &chain_events,
                                 chain_start_idx,
                                 idx,
@@ -120,9 +123,12 @@ impl TransactionManager {
             if let Some(chain_id) = current_chain_id {
                 let chain_events = proof_events[chain_start_idx..].to_vec();
                 let config = config.clone();
+                let db = db.clone();
                 
                 chain_tasks.push(tokio::spawn(async move {
+                    println!("Processing chain {} batch", chain_id);
                     match Self::process_chain_batch(
+                        &db,
                         &chain_events,
                         chain_start_idx,
                         proof_events.len(),
@@ -168,6 +174,7 @@ impl TransactionManager {
     }
 
     async fn process_chain_batch(
+        db: &Database,
         events: &[ProofReadyEvent],
         start_idx: usize,
         _end_idx: usize,
@@ -245,6 +252,26 @@ impl TransactionManager {
         let tx_hash = pending_tx.tx_hash();
 
         info!("Batch transaction sent with hash {}", tx_hash);
+
+        // Update database with batch transaction hash - process all updates concurrently
+        let update_futures: Vec<_> = events.iter().map(|event| {
+            let db = db.clone();
+            let tx_hash = tx_hash;
+            async move {
+                if let Err(e) = db.update_event(EventUpdate {
+                    tx_hash: event.tx_hash,
+                    batch_tx_hash: Some(format!("0x{}", hex::encode(tx_hash.0))),
+                    status: EventStatus::BatchSubmitted,
+                    ..Default::default()
+                }).await {
+                    error!("Failed to update batch transaction hash in database for event {}: {:?}", event.tx_hash, e);
+                } else {
+                    debug!("Successfully updated batch transaction hash in database for event {}", event.tx_hash);
+                }
+            }
+        }).collect();
+
+        join_all(update_futures).await;
 
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
             Ok(hash) => {
