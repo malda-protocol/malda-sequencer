@@ -1,10 +1,9 @@
 use eyre::Result;
-use tracing::{info, error};
+use tracing::{info, error, debug, warn};
 use alloy::primitives::{Address, Bytes, U256, TxHash};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
-use tracing::{debug, warn};
 use std::time::Duration;
 use tokio::task;
 use tokio::time::{sleep, Instant};
@@ -60,7 +59,7 @@ impl ProofGenerator {
         }
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn start(mut self) -> Result<()> {
         info!("Starting proof generator, waiting for events...");
         
         let mut batch = Vec::new();
@@ -68,7 +67,6 @@ impl ProofGenerator {
         let mut last_proof_time = Instant::now();
 
         loop {
-            // Wait for the first event
             if let Some(event) = self.event_receiver.recv().await {
                 info!(
                     "Received event for processing: type={}", 
@@ -110,11 +108,13 @@ impl ProofGenerator {
                 let max_retries = self.max_retries;
                 let retry_delay = self.retry_delay;
                 let logger = self.logger.clone();
+                let db = self.db.clone();
 
                 tokio::spawn(async move {
                     let proof_generator = ProofGeneratorWorker {
                         max_retries,
                         retry_delay,
+                        db,
                     };
 
                     match proof_generator.process_batch(events_to_process, &logger).await {
@@ -137,87 +137,35 @@ impl ProofGenerator {
             }
         }
     }
+}
 
-    async fn process_events(&self, events: Vec<ProcessedEvent>) -> Result<()> {
-        // Log proof request
+struct ProofGeneratorWorker {
+    max_retries: u32,
+    retry_delay: Duration,
+    db: Database,
+}
+
+impl ProofGeneratorWorker {
+    async fn process_batch(&self, events: Vec<ProcessedEvent>, logger: &PipelineLogger) -> Result<Vec<ProofReadyEvent>> {
+        // Update status to ProofRequested for all events
         for event in &events {
             let tx_hash = match event {
                 ProcessedEvent::HostWithdraw { tx_hash, .. } => tx_hash,
                 ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
                 ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
             };
-
-            info!("Updating event status to ProofRequested: {}", tx_hash);
+            
             let update = EventUpdate {
                 tx_hash: *tx_hash,
                 status: EventStatus::ProofRequested,
                 ..Default::default()
             };
-            self.db.update_event(update).await?;
-        }
 
-        // Clone events before moving into generate_proof_inner
-        match self.generate_proof_inner(events.clone()).await {
-            Ok(proofs) => {
-                // Log proof received
-                for proof in &proofs {
-                    info!("Updating event status to ProofReceived: {}", proof.tx_hash);
-                    let update = EventUpdate {
-                        tx_hash: proof.tx_hash,
-                        status: EventStatus::ProofReceived,
-                        proof_data: Some(proof.journal.clone().to_vec()),
-                        ..Default::default()
-                    };
-                    self.db.update_event(update).await?;
-                }
-
-                // Send proofs to next stage
-                self.proof_sender.send(proofs).await?;
-            }
-            Err(e) => {
-                error!("Failed to generate proof: {:?}", e);
-                // Now we can still use events here
-                for event in &events {
-                    let tx_hash = match event {
-                        ProcessedEvent::HostWithdraw { tx_hash, .. } => tx_hash,
-                        ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
-                        ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
-                    };
-                    let update = EventUpdate {
-                        tx_hash: *tx_hash,
-                        status: EventStatus::Failed { error: e.to_string() },
-                        ..Default::default()
-                    };
-                    self.db.update_event(update).await?;
-                }
+            if let Err(e) = self.db.update_event(update).await {
+                error!("Failed to update event status to ProofRequested: {:?}", e);
             }
         }
 
-        Ok(())
-    }
-
-    async fn generate_proof_inner(&self, events: Vec<ProcessedEvent>) -> Result<Vec<ProofReadyEvent>> {
-        // Your actual proof generation logic here
-        // For now, return dummy data to make it compile
-        Ok(vec![])
-    }
-
-    fn get_tx_hash(event: &ProcessedEvent) -> TxHash {
-        match event {
-            ProcessedEvent::HostWithdraw { tx_hash, .. } => *tx_hash,
-            ProcessedEvent::HostBorrow { tx_hash, .. } => *tx_hash,
-            ProcessedEvent::ExtensionSupply { tx_hash, .. } => *tx_hash,
-        }
-    }
-}
-
-struct ProofGeneratorWorker {
-    max_retries: u32,
-    retry_delay: Duration,
-}
-
-impl ProofGeneratorWorker {
-    async fn process_batch(&self, events: Vec<ProcessedEvent>, logger: &PipelineLogger) -> Result<Vec<ProofReadyEvent>> {
         // Sort events by src_chain (Linea first) and dst_chain
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
@@ -329,7 +277,6 @@ impl ProofGeneratorWorker {
             start_time
         );
 
-
         // Generate single proof for all events
         let (journal, seal) = self.generate_proof_with_retry(
             users.clone(),
@@ -351,6 +298,19 @@ impl ProofGeneratorWorker {
                     seal: hex::encode(&seal),
                 }
             ).await?;
+
+            // Update database status with correct field types
+            let update = EventUpdate {
+                tx_hash: *tx_hash,
+                status: EventStatus::ProofReceived,
+                proof_data: Some(journal.to_vec()),
+                error: None,
+                ..Default::default()
+            };
+
+            if let Err(e) = self.db.update_event(update).await {
+                error!("Failed to update event status to ProofReceived: {:?}", e);
+            }
         }
 
         // Create proof events for each original event
