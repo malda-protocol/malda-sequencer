@@ -1,23 +1,27 @@
+use eyre::Result;
+use tracing::{info, error};
 use alloy::{
     primitives::{TxHash, U256, FixedBytes},
     transports::http::reqwest::Url,
     providers::Provider,
     rpc::types::TransactionReceipt,
 };
-use eyre::{Result, WrapErr};
 use tokio::sync::mpsc;
-use tracing::{info, error, warn, debug};
+use tracing::{warn, debug};
 use std::time::Duration;
-use tokio::task;
 use futures::future::join_all;
 use sequencer::logger::{PipelineLogger, PipelineStep};
-use chrono;
 use hex;
+use eyre::WrapErr;
+use rand::Rng;
+use sequencer::database::{Database, EventStatus, EventUpdate};
+use crate::ProofReadyEvent;
+use chrono;
 
 type Bytes4 = FixedBytes<4>; 
 
 use crate::{
-    proof_generator::ProofReadyEvent,
+    // proof_generator::ProofReadyEvent,
     ProviderType,
     create_provider,
     constants::{
@@ -45,6 +49,7 @@ pub struct TransactionManager {
     event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
     config: TransactionConfig,
     logger: PipelineLogger,
+    db: Database,
 }
 
 impl std::fmt::Debug for TransactionManager {
@@ -60,11 +65,13 @@ impl TransactionManager {
         event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
         config: TransactionConfig,
         logger: PipelineLogger,
+        db: Database,
     ) -> Self {
         Self {
             event_receiver,
             config,
             logger,
+            db,
         }
     }
 
@@ -371,6 +378,54 @@ impl TransactionManager {
             }
         }
     }
+
+    async fn submit_batch(&self, proofs: Vec<ProofReadyEvent>) -> Result<()> {
+        let batch_id = format!("batch_{}", chrono::Utc::now().timestamp());
+
+        // Log batch submission start
+        for proof in &proofs {
+            let update = EventUpdate {
+                tx_hash: proof.tx_hash,
+                status: EventStatus::BatchSubmitStarted,
+                batch_id: Some(batch_id.clone()),
+                ..Default::default()
+            };
+            
+            if let Err(e) = self.db.update_event(update).await {
+                error!("Failed to update batch submit started status: {:?}", e);
+            }
+        }
+
+        // Your existing batch submission code...
+        let tx_hash = self.submit_batch_inner(proofs.clone()).await?;
+
+        // Log batch submission complete
+        for proof in &proofs {
+            let update = EventUpdate {
+                tx_hash: proof.tx_hash,
+                status: EventStatus::BatchSubmitted,
+                batch_tx_hash: Some(tx_hash.to_string()),
+                ..Default::default()
+            };
+            
+            if let Err(e) = self.db.update_event(update).await {
+                error!("Failed to update batch submitted status: {:?}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn submit_batch_inner(&self, proofs: Vec<ProofReadyEvent>) -> Result<TxHash> {
+        // Implement your actual batch submission logic here
+        // For now, return dummy hash to make it compile
+        Ok(TxHash::from_slice(&[0; 32]))
+    }
+}
+
+fn generate_batch_id() -> String {
+    let random_bytes: [u8; 32] = rand::thread_rng().gen();
+    hex::encode(random_bytes)
 }
 
 #[cfg(test)]
@@ -397,7 +452,7 @@ mod tests {
             .await
             .expect("Failed to create test logger");
 
-        let manager = TransactionManager::new(rx, config, logger);
+        let manager = TransactionManager::new(rx, config, logger, Database::new());
         
         // Basic assertions to ensure the manager was created correctly
         assert_eq!(manager.config.max_retries, MAX_TX_RETRIES);

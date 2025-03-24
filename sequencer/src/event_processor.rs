@@ -3,9 +3,8 @@ use alloy::{
 };
 use eyre::Result;
 use tokio::sync::mpsc;
-use tracing::{info, error, debug, warn};
+use tracing::{info, error, debug};
 use tokio::task;
-use futures::future::join_all;
 use tokio::time::sleep;
 use std::time::Duration;
 use hex;
@@ -13,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 use tokio::time::interval;
 use url::Url;
+use eyre::eyre;
 
 use crate::{
     event_listener::RawEvent,
@@ -28,6 +28,7 @@ use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use crate::types::IL1Block;
 use crate::create_provider;
 use serde::{Serialize, Deserialize};
+use sequencer::database::{Database, EventStatus, EventUpdate};
 lazy_static! {
     pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
 }
@@ -63,6 +64,7 @@ pub struct EventProcessor {
     event_receiver: mpsc::Receiver<RawEvent>,
     processed_sender: mpsc::Sender<ProcessedEvent>,
     logger: PipelineLogger,
+    db: Database,
 }
 
 impl EventProcessor {
@@ -70,6 +72,7 @@ impl EventProcessor {
         event_receiver: mpsc::Receiver<RawEvent>,
         processed_sender: mpsc::Sender<ProcessedEvent>,
         logger: PipelineLogger,
+        db: Database,
     ) -> Self {
         // Start the background task to update Ethereum block number
         task::spawn(async {
@@ -96,88 +99,94 @@ impl EventProcessor {
             event_receiver,
             processed_sender,
             logger,
+            db,
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        info!("Starting event processor");
+        info!("Starting event processor...");
         
-        let mut processing_tasks = Vec::new();
-        const MAX_CONCURRENT_TASKS: usize = 10;
-
         while let Some(raw_event) = self.event_receiver.recv().await {
-            debug!(
-                "Processing event from chain {} for market {:?}",
-                raw_event.chain_id, raw_event.market
-            );
-
-            let processed_sender = self.processed_sender.clone();
-            let logger = self.logger.clone();
-            
-            // Spawn a new task for processing this event
-            let task = task::spawn(async move {
-                match Self::process_event(raw_event, &logger).await {
-                    Ok(processed) => {
-                        // Log the processed event
-                        match &processed {
-                            ProcessedEvent::HostWithdraw { tx_hash: _, sender, dst_chain_id, amount, market } => {
-                                info!(
-                                    "Processed host withdraw: sender={:?} dst_chain={} amount={} market={:?}",
-                                    sender, dst_chain_id, amount, market
-                                );
-                            }
-                            ProcessedEvent::HostBorrow { tx_hash: _, sender, dst_chain_id, amount, market } => {
-                                info!(
-                                    "Processed host borrow: sender={:?} dst_chain={} amount={} market={:?}",
-                                    sender, dst_chain_id, amount, market
-                                );
-                            }
-                            ProcessedEvent::ExtensionSupply { tx_hash: _, from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
-                                info!(
-                                    "Processed extension supply: from={:?} amount={} src_chain={} dst_chain={} market={:?} method={}",
-                                    from, amount, src_chain_id, dst_chain_id, market, method_selector
-                                );
-                            }
-                        }
-
-                        info!(
-                            "Attempting to send processed event to proof generator: type={}", 
-                            match &processed {
-                                ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
-                                ProcessedEvent::HostBorrow { .. } => "HostBorrow",
-                                ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
-                            }
-                        );
-
-                        if let Err(e) = processed_sender.send(processed).await {
-                            error!("Failed to send to proof generator: {}", e);
-                        } else {
-                            info!("Successfully sent event to proof generator");
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to process event: {}", e);
+            match self.process_raw_event(raw_event).await {
+                Ok(processed) => {
+                    if let Err(e) = self.processed_sender.send(processed).await {
+                        error!("Failed to send processed event: {:?}", e);
                     }
                 }
-            });
-
-            processing_tasks.push(task);
-
-            if processing_tasks.len() >= MAX_CONCURRENT_TASKS {
-                join_all(processing_tasks).await;
-                processing_tasks = Vec::new();
+                Err(e) => {
+                    error!("Failed to process event: {:?}", e);
+                }
             }
         }
 
-        if !processing_tasks.is_empty() {
-            join_all(processing_tasks).await;
-        }
-
-        warn!("Event processor channel closed");
         Ok(())
     }
 
-    async fn process_event(raw_event: RawEvent, logger: &PipelineLogger) -> Result<ProcessedEvent> {
+    async fn process_raw_event(&self, raw_event: RawEvent) -> Result<ProcessedEvent> {
+        let tx_hash = raw_event.log.transaction_hash
+            .ok_or_else(|| eyre!("No transaction hash"))?;
+
+        // Initial event receipt
+        let update = EventUpdate {
+            tx_hash,
+            event_type: Some(raw_event.market.to_string()),
+            src_chain_id: Some(raw_event.chain_id.try_into().unwrap()),
+            status: EventStatus::Received,
+            ..Default::default()
+        };
+
+        if let Err(e) = self.db.update_event(update).await {
+            error!("Failed to write event to database: {:?}", e);
+        }
+
+        // Process the event
+        let processed = self.process_event(raw_event).await?;
+
+        // Extract fields based on ProcessedEvent variant
+        let (dst_chain_id, msg_sender, amount) = match &processed {
+            ProcessedEvent::HostWithdraw { dst_chain_id, sender, amount, .. } => {
+                (Some(*dst_chain_id), Some(*sender), Some(*amount))
+            },
+            ProcessedEvent::HostBorrow { dst_chain_id, sender, amount, .. } => {
+                (Some(*dst_chain_id), Some(*sender), Some(*amount))
+            },
+            ProcessedEvent::ExtensionSupply { dst_chain_id, from, amount, .. } => {
+                (Some(*dst_chain_id), Some(*from), Some(*amount))
+            },
+        };
+
+        // Update with processed information
+        let update = EventUpdate {
+            tx_hash,
+            dst_chain_id: dst_chain_id.map(|id| id.try_into().unwrap()),
+            msg_sender,
+            amount,
+            status: EventStatus::Processed,
+            ..Default::default()
+        };
+
+        if let Err(e) = self.db.update_event(update).await {
+            error!("Failed to update processed status: {:?}", e);
+        }
+
+        Ok(processed)
+    }
+
+    async fn process_event(&self, raw_event: RawEvent) -> Result<ProcessedEvent> {
+        // Log when event is received
+        info!("Attempting to write received event to database: {:?}", raw_event.log.transaction_hash);
+        
+        if let Some(tx_hash) = &raw_event.log.transaction_hash {
+            if let Err(e) = self.db.update_event(EventUpdate {
+                tx_hash: *tx_hash,
+                status: EventStatus::Received,
+                ..Default::default()
+            }).await {
+                error!("Failed to write received event to database: {:?}", e);
+            } else {
+                info!("Successfully wrote received event to database");
+            }
+        }
 
         let chain_id = raw_event.chain_id;
         let market = raw_event.market;
@@ -210,7 +219,7 @@ impl EventProcessor {
             };
 
             // Log the processed event
-            logger.log_step(
+            self.logger.log_step(
                 tx_hash,
                 PipelineStep::EventProcessed {
                     chain_id: chain_id as u32,
@@ -243,7 +252,7 @@ impl EventProcessor {
             };
 
             // Log the processed event
-            logger.log_step(
+            self.logger.log_step(
                 tx_hash,
                 PipelineStep::EventProcessed {
                     chain_id: chain_id as u32,
@@ -256,6 +265,19 @@ impl EventProcessor {
 
             result
         };
+
+        // Log when event is processed
+        if let Some(tx_hash) = log.transaction_hash {
+            if let Err(e) = self.db.update_event(EventUpdate {
+                tx_hash: tx_hash,
+                status: EventStatus::Processed,
+                ..Default::default()
+            }).await {
+                error!("Failed to update processed status in database: {:?}", e);
+            } else {
+                info!("Successfully updated processed status in database");
+            }
+        }
 
         Ok(processed)
     }
@@ -273,8 +295,9 @@ mod tests {
         let (_raw_tx, raw_rx) = mpsc::channel(100);
         let (processed_tx, _processed_rx) = mpsc::channel(100);
         let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
+        let db = Database::new();
         
-        let _processor = EventProcessor::new(raw_rx, processed_tx, logger);
+        let _processor = EventProcessor::new(raw_rx, processed_tx, logger, db);
         Ok(())
     }
 } 

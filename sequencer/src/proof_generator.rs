@@ -1,9 +1,10 @@
-use alloy::primitives::{Address, Bytes, U256, TxHash};
 use eyre::Result;
+use tracing::{info, error};
+use alloy::primitives::{Address, Bytes, U256, TxHash};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
-use tracing::{info, error, debug, warn};
+use tracing::{debug, warn};
 use std::time::Duration;
 use tokio::task;
 use tokio::time::{sleep, Instant};
@@ -12,9 +13,10 @@ use tokio::sync::Mutex;
 use futures::future::join_all;
 use std::path::PathBuf;
 
-use crate::event_processor::ProcessedEvent;
+use sequencer::database::{Database, EventStatus, EventUpdate};
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 use sequencer::logger::{PipelineLogger, PipelineStep};
+use crate::ProcessedEvent;
 
 #[derive(Debug, Clone)]
 pub struct ProofReadyEvent {
@@ -29,29 +31,32 @@ pub struct ProofReadyEvent {
 }
 
 pub struct ProofGenerator {
-    event_receiver: Box<dyn Stream<Item = ProcessedEvent> + Unpin + Send>,
+    event_receiver: mpsc::Receiver<ProcessedEvent>,
     proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
     max_retries: u32,
     retry_delay: Duration,
     last_proof_time: Arc<Mutex<Instant>>,
     logger: PipelineLogger,
+    db: Database,
 }
 
 impl ProofGenerator {
     pub fn new(
-        event_receiver: impl Stream<Item = ProcessedEvent> + Unpin + Send + 'static,
+        event_receiver: mpsc::Receiver<ProcessedEvent>,
         proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
         logger: PipelineLogger,
+        db: Database,
     ) -> Self {
         Self {
-            event_receiver: Box::new(event_receiver),
+            event_receiver,
             proof_sender,
             max_retries,
             retry_delay,
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
             logger,
+            db,
         }
     }
 
@@ -64,7 +69,7 @@ impl ProofGenerator {
 
         loop {
             // Wait for the first event
-            if let Some(event) = self.event_receiver.next().await {
+            if let Some(event) = self.event_receiver.recv().await {
                 info!(
                     "Received event for processing: type={}", 
                     match &event {
@@ -81,7 +86,7 @@ impl ProofGenerator {
                 // Collect any additional events until deadline
                 while Instant::now() < deadline {
                     tokio::select! {
-                        Some(event) = self.event_receiver.next() => {
+                        Some(event) = self.event_receiver.recv() => {
                             info!("Additional event received during batch window");
                             batch.push(event);
                         }
@@ -130,6 +135,78 @@ impl ProofGenerator {
                 });
                 last_proof_time = Instant::now();
             }
+        }
+    }
+
+    async fn process_events(&self, events: Vec<ProcessedEvent>) -> Result<()> {
+        // Log proof request
+        for event in &events {
+            let tx_hash = match event {
+                ProcessedEvent::HostWithdraw { tx_hash, .. } => tx_hash,
+                ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
+                ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
+            };
+
+            info!("Updating event status to ProofRequested: {}", tx_hash);
+            let update = EventUpdate {
+                tx_hash: *tx_hash,
+                status: EventStatus::ProofRequested,
+                ..Default::default()
+            };
+            self.db.update_event(update).await?;
+        }
+
+        // Clone events before moving into generate_proof_inner
+        match self.generate_proof_inner(events.clone()).await {
+            Ok(proofs) => {
+                // Log proof received
+                for proof in &proofs {
+                    info!("Updating event status to ProofReceived: {}", proof.tx_hash);
+                    let update = EventUpdate {
+                        tx_hash: proof.tx_hash,
+                        status: EventStatus::ProofReceived,
+                        proof_data: Some(proof.journal.clone().to_vec()),
+                        ..Default::default()
+                    };
+                    self.db.update_event(update).await?;
+                }
+
+                // Send proofs to next stage
+                self.proof_sender.send(proofs).await?;
+            }
+            Err(e) => {
+                error!("Failed to generate proof: {:?}", e);
+                // Now we can still use events here
+                for event in &events {
+                    let tx_hash = match event {
+                        ProcessedEvent::HostWithdraw { tx_hash, .. } => tx_hash,
+                        ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
+                        ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
+                    };
+                    let update = EventUpdate {
+                        tx_hash: *tx_hash,
+                        status: EventStatus::Failed { error: e.to_string() },
+                        ..Default::default()
+                    };
+                    self.db.update_event(update).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn generate_proof_inner(&self, events: Vec<ProcessedEvent>) -> Result<Vec<ProofReadyEvent>> {
+        // Your actual proof generation logic here
+        // For now, return dummy data to make it compile
+        Ok(vec![])
+    }
+
+    fn get_tx_hash(event: &ProcessedEvent) -> TxHash {
+        match event {
+            ProcessedEvent::HostWithdraw { tx_hash, .. } => *tx_hash,
+            ProcessedEvent::HostBorrow { tx_hash, .. } => *tx_hash,
+            ProcessedEvent::ExtensionSupply { tx_hash, .. } => *tx_hash,
         }
     }
 }
