@@ -222,9 +222,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_retries: 3,
         retry_delay: Duration::from_secs(1),
         rpc_urls: vec![
-            (1, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
-            (10, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
-            (59144, RPC_URL_LINEA_SEPOLIA.to_string()),
+            (ETHEREUM_SEPOLIA_CHAIN_ID as u32, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
+            (OPTIMISM_SEPOLIA_CHAIN_ID as u32, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
+            (LINEA_SEPOLIA_CHAIN_ID as u32, RPC_URL_LINEA_SEPOLIA.to_string()),
         ],
     };
 
