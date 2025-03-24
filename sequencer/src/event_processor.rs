@@ -23,7 +23,6 @@ use crate::{
 use malda_rs::constants::{LINEA_SEPOLIA_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID, L1_BLOCK_ADDRESS_OPTIMISM, RPC_URL_OPTIMISM_SEPOLIA};
 
 use crate::constants::ETHEREUM_BLOCK_DELAY;
-use sequencer::logger::{PipelineLogger, PipelineStep};
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use crate::types::IL1Block;
 use crate::create_provider;
@@ -63,7 +62,6 @@ pub enum ProcessedEvent {
 pub struct EventProcessor {
     event_receiver: mpsc::Receiver<RawEvent>,
     processed_sender: mpsc::Sender<ProcessedEvent>,
-    logger: PipelineLogger,
     db: Database,
 }
 
@@ -71,7 +69,6 @@ impl EventProcessor {
     pub fn new(
         event_receiver: mpsc::Receiver<RawEvent>,
         processed_sender: mpsc::Sender<ProcessedEvent>,
-        logger: PipelineLogger,
         db: Database,
     ) -> Self {
         // Start the background task to update Ethereum block number
@@ -98,7 +95,6 @@ impl EventProcessor {
         Self {
             event_receiver,
             processed_sender,
-            logger,
             db,
         }
     }
@@ -210,27 +206,13 @@ impl EventProcessor {
         let processed = if chain_id == LINEA_SEPOLIA_CHAIN_ID {
             // Process host chain events
             let event = parse_withdraw_on_extension_chain_event(&log);
-            let result = ProcessedEvent::HostWithdraw {
+            ProcessedEvent::HostWithdraw {
                 tx_hash,
                 sender: event.sender,
                 dst_chain_id: event.dst_chain_id,
                 amount: event.amount,
                 market,
-            };
-
-            // Log the processed event
-            self.logger.log_step(
-                tx_hash,
-                PipelineStep::EventProcessed {
-                    chain_id: chain_id as u32,
-                    dst_chain_id: event.dst_chain_id,
-                    market,
-                    event_type: "HostWithdraw".to_string(),
-                    amount: event.amount,
-                }
-            ).await?;
-
-            result
+            }
         } else {
             // Process extension chain events
             let event = parse_supplied_event(&log);
@@ -241,7 +223,7 @@ impl EventProcessor {
                 return Err(eyre::eyre!("Invalid method selector: {}", event.linea_method_selector));
             }
 
-            let result = ProcessedEvent::ExtensionSupply {
+            ProcessedEvent::ExtensionSupply {
                 tx_hash,
                 from: event.from,
                 amount: event.amount,
@@ -249,21 +231,7 @@ impl EventProcessor {
                 dst_chain_id: event.dst_chain_id,
                 market,
                 method_selector: event.linea_method_selector,
-            };
-
-            // Log the processed event
-            self.logger.log_step(
-                tx_hash,
-                PipelineStep::EventProcessed {
-                    chain_id: chain_id as u32,
-                    dst_chain_id: event.dst_chain_id,
-                    market,
-                    event_type: "ExtensionSupply".to_string(),
-                    amount: event.amount,
-                }
-            ).await?;
-
-            result
+            }
         };
 
         // Log when event is processed
@@ -288,16 +256,14 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
     use std::path::PathBuf;
-    use sequencer::logger::PipelineLogger;
 
     #[tokio::test]
     async fn test_event_processor() -> Result<()> {
         let (_raw_tx, raw_rx) = mpsc::channel(100);
         let (processed_tx, _processed_rx) = mpsc::channel(100);
-        let logger = PipelineLogger::new(PathBuf::from("test_pipeline.log")).await?;
         let db = Database::new();
         
-        let _processor = EventProcessor::new(raw_rx, processed_tx, logger, db);
+        let _processor = EventProcessor::new(raw_rx, processed_tx, db);
         Ok(())
     }
 } 
