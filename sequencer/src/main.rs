@@ -13,7 +13,6 @@ use alloy::{
 use std::time::Duration;
 use eyre::Result;
 use tracing::{info, error, warn};
-use tracing_subscriber::{EnvFilter, fmt};
 use malda_rs::constants::*;
 
 pub mod events;
@@ -26,9 +25,9 @@ use crate::{
 };
 
 mod event_listener;
-use event_listener::{EventListener, EventConfig};
+use event_listener::{EventListener, EventConfig, RawEvent};
 use tokio::sync::mpsc;
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::wrappers::ReceiverStream;
 
 mod event_processor;
 use event_processor::EventProcessor;
@@ -50,6 +49,13 @@ use tokio::net::UnixListener;
 use tokio::io::AsyncReadExt;
 use std::fs;
 
+use dotenv::dotenv;
+use sequencer::database::{Database, EventStatus, EventUpdate};
+use alloy::primitives::TxHash;
+
+use std::env;
+use std::collections::HashMap;
+
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ProviderType = alloy::providers::fillers::FillProvider<
@@ -65,35 +71,60 @@ type ProviderType = alloy::providers::fillers::FillProvider<
     alloy::network::Ethereum,
 >;
 
+type RpcUrls = HashMap<u32, String>;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging with custom format
-    fmt()
-        .with_env_filter(EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into())
-            .add_directive("sequencer=debug".parse()?)
-        )
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_target(false)
-        .init();
+    // Set required environment variables if not already set
+    if env::var("BONSAI_API_KEY").is_err() {
+        env::set_var("BONSAI_API_KEY", "SrSzB6P4SFaWv7WAK12ph5K6aL6dXs4S1a0XMif5");
+    }
+    if env::var("BONSAI_API_URL").is_err() {
+        env::set_var("BONSAI_API_URL", "https://api.bonsai.xyz/");
+    }
 
-    info!("Starting sequencer...");
-    
-    // Create channels with proper capacities
-    let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-    let (processed_tx, processed_rx) = mpsc::channel(PROCESSED_CHANNEL_CAPACITY);
-    let (manual_tx, manual_rx) = mpsc::channel(32);
-    let (proof_tx, proof_rx) = mpsc::channel::<Vec<ProofReadyEvent>>(PROOF_CHANNEL_CAPACITY);
+    // Log environment setup
+    info!("BONSAI_API_URL set to: {}", env::var("BONSAI_API_URL").unwrap());
+    info!("BONSAI_API_KEY is set"); // Don't log the actual key
 
-    info!("Initialized channels");
+    // Load .env file
+    dotenv().ok();
 
-    // Merge manual and processed events
-    let processed_stream = ReceiverStream::new(processed_rx);
-    let manual_stream = ReceiverStream::new(manual_rx);
-    let merged_stream = processed_stream.merge(manual_stream);
+    // Initialize logger with path
+    let log_path = PathBuf::from("sequencer.log");
+    let logger = PipelineLogger::new(log_path).await?;
+
+    // First create the channels
+    let (event_sender, event_receiver) = mpsc::channel::<RawEvent>(100);
+    let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
+    let (proof_sender, proof_receiver) = mpsc::channel::<Vec<ProofReadyEvent>>(100);
+
+    // Initialize database
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sequencer".to_string());
+    let db = Database::new(&database_url).await?;
+
+    // Test database connection
+    info!("Testing database connection...");
+    let test_update = EventUpdate {
+        tx_hash: TxHash::from_slice(&[0; 32]),
+        status: EventStatus::Received,
+        ..Default::default()
+    };
+
+    match db.update_event(test_update).await {
+        Ok(_) => info!("Successfully wrote test event to database"),
+        Err(e) => error!("Failed to write test event: {:?}", e),
+    }
+
+    // Now create event processor with all required arguments
+    let processed_sender_clone = processed_sender.clone();
+    let mut event_processor = EventProcessor::new(
+        event_receiver,
+        processed_sender_clone,
+        logger.clone(),
+        db.clone()
+    );
 
     // Markets
     let markets = vec![
@@ -174,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 let listener = EventListener::new(
                     config,
-                    event_tx.clone(),
+                    event_sender.clone(),
                     logger.clone(),
                 );
                 let handle = tokio::spawn(async move {
@@ -192,52 +223,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("All event listeners started");
 
     // Create logger before spawning tasks
-    let event_logger = logger.clone();
-    let proof_logger = logger.clone();
+    let _event_logger = logger.clone();
+    let _proof_logger = logger.clone();
 
     // Spawn event processor
     let processor_handle = tokio::spawn(async move {
-        let mut processor = EventProcessor::new(event_rx, processed_tx, event_logger);
-        if let Err(e) = processor.start().await {
+        if let Err(e) = event_processor.start().await {
             error!("Event processor failed: {:?}", e);
         }
     });
     handles.push(processor_handle);
 
+    // Create proof generator with database
+    let mut proof_generator = ProofGenerator::new(
+        processed_receiver,
+        proof_sender,
+        MAX_PROOF_RETRIES,
+        PROOF_RETRY_DELAY,
+        logger.clone(),
+        db.clone(),
+    );
+
+    // Add the config before creating TransactionManager
+    let tx_config = TransactionConfig {
+        max_retries: 3,
+        retry_delay: Duration::from_secs(1),
+        rpc_urls: vec![
+            (1, "http://ethereum-rpc-url".to_string()),
+            (10, "http://optimism-rpc-url".to_string()),
+            (59144, "http://linea-rpc-url".to_string()),
+        ],
+    };
+
+    // Create transaction manager with database
+    let mut transaction_manager = TransactionManager::new(
+        proof_receiver,
+        tx_config,
+        logger.clone(),
+        db.clone(),
+    );
+
     // Spawn proof generator
     let proof_generator_handle = tokio::spawn(async move {
-        let mut generator = ProofGenerator::new(
-            merged_stream,
-            proof_tx,
-            MAX_PROOF_RETRIES,
-            PROOF_RETRY_DELAY,
-            proof_logger,
-        );
-        if let Err(e) = generator.start().await {
+        if let Err(e) = proof_generator.start().await {
             error!("Proof generator failed: {:?}", e);
         }
     });
     handles.push(proof_generator_handle);
 
-    // Create transaction manager config
-    let tx_config = TransactionConfig {
-        max_retries: MAX_TX_RETRIES,
-        retry_delay: TX_RETRY_DELAY,
-        rpc_urls: vec![
-            (ETHEREUM_SEPOLIA_CHAIN_ID as u32, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
-            (OPTIMISM_SEPOLIA_CHAIN_ID as u32, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
-            (LINEA_SEPOLIA_CHAIN_ID as u32, RPC_URL_LINEA_SEPOLIA.to_string()),
-        ],
-    };
-
     // Spawn transaction manager
     let tx_manager_handle = tokio::spawn(async move {
-        let mut manager = TransactionManager::new(
-            proof_rx,
-            tx_config,
-            logger.clone(),
-        );
-        if let Err(e) = manager.start().await {
+        if let Err(e) = transaction_manager.start().await {
             error!("Transaction manager failed: {:?}", e);
         }
     });
@@ -251,11 +287,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     
-    let manual_tx_clone = manual_tx.clone();
+    let processed_sender_clone = processed_sender.clone();
     tokio::spawn(async move {
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
-                let tx = manual_tx_clone.clone();
+                let tx = processed_sender_clone.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
                     if let Ok(_) = socket.read_to_end(&mut buf).await {
