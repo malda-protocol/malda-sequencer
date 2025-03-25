@@ -1,8 +1,8 @@
-use alloy::primitives::{Address, U256, TxHash, b256, address};
+use alloy::primitives::{address, b256, Address, TxHash, U256};
 use eyre::Result;
-use serde::{Serialize, Deserialize};
-use tokio::io::AsyncWriteExt;
 use malda_rs::constants::*;
+use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProcessedEvent {
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         amount: U256::from(4088287),
         src_chain_id: ETHEREUM_SEPOLIA_CHAIN_ID as u32, // Ethereum Sepolia
         dst_chain_id: LINEA_SEPOLIA_CHAIN_ID as u32,    // Linea Sepolia
-        market: USDC_MARKET_SEPOLIA,   // You'll need to replace this with the actual USDC market address
+        market: USDC_MARKET_SEPOLIA, // You'll need to replace this with the actual USDC market address
         method_selector: "08fee263".to_string(),
     };
 
@@ -54,11 +54,11 @@ async fn main() -> Result<()> {
 async fn inject_event(event: ProcessedEvent) -> Result<()> {
     let socket_path = "/tmp/sequencer.sock";
     let mut stream = tokio::net::UnixStream::connect(socket_path).await?;
-    
+
     // Serialize and send the event
     let json = serde_json::to_string(&event)?;
     stream.write_all(json.as_bytes()).await?;
     stream.flush().await?;
-    
+
     Ok(())
-} 
+}

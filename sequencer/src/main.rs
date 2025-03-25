@@ -1,31 +1,27 @@
 use alloy::{
-    providers::{
-        fillers::{
-            BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller,
-        },
-        ProviderBuilder, Identity, RootProvider,
-    },
-    transports::http::reqwest::Url,
     network::EthereumWallet,
+    providers::{
+        fillers::{BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller},
+        Identity, ProviderBuilder, RootProvider,
+    },
     signers::local::PrivateKeySigner,
+    transports::http::reqwest::Url,
 };
 
-use std::time::Duration;
 use eyre::Result;
-use tracing::{info, error, warn};
 use malda_rs::constants::*;
+use std::time::Duration;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{error, info, warn};
 
+pub mod constants;
 pub mod events;
 pub mod types;
-pub mod constants;
 
-use crate::{
-    events::*,
-    constants::*,
-};
+use crate::{constants::*, events::*};
 
 mod event_listener;
-use event_listener::{EventListener, EventConfig, RawEvent};
+use event_listener::{EventConfig, EventListener, RawEvent};
 use tokio::sync::mpsc;
 
 mod event_processor;
@@ -36,21 +32,21 @@ mod proof_generator;
 use proof_generator::{ProofGenerator, ProofReadyEvent};
 
 mod transaction_manager;
-use transaction_manager::{TransactionManager, TransactionConfig};
+use transaction_manager::{TransactionConfig, TransactionManager};
 
 mod batch_event_listener;
-use batch_event_listener::{BatchEventListener, BatchEventConfig};
+use batch_event_listener::{BatchEventConfig, BatchEventListener};
 
-use tokio::net::UnixListener;
-use tokio::io::AsyncReadExt;
 use std::fs;
+use tokio::io::AsyncReadExt;
+use tokio::net::UnixListener;
 
+use alloy::primitives::TxHash;
 use dotenv::dotenv;
 use sequencer::database::{Database, EventStatus, EventUpdate};
-use alloy::primitives::TxHash;
 
-use std::env;
 use std::collections::HashMap;
+use std::env;
 
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
@@ -86,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_file(true)
         .with_line_number(true)
         .init();
-    
+
     // Set up panic hook to log panics
     std::panic::set_hook(Box::new(|panic_info| {
         let location = if let Some(loc) = panic_info.location() {
@@ -94,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             "unknown location".to_string()
         };
-        
+
         let msg = match panic_info.payload().downcast_ref::<&'static str>() {
             Some(s) => *s,
             None => match panic_info.payload().downcast_ref::<String>() {
@@ -102,10 +98,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => "Box<Any>",
             },
         };
-        
+
         error!("PANIC: '{}' at {}", msg, location);
     }));
-    
+
     info!("Sequencer starting up...");
 
     // Set required environment variables if not already set
@@ -117,7 +113,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Log environment setup
-    info!("BONSAI_API_URL set to: {}", env::var("BONSAI_API_URL").unwrap());
+    info!(
+        "BONSAI_API_URL set to: {}",
+        env::var("BONSAI_API_URL").unwrap()
+    );
     info!("BONSAI_API_KEY is set"); // Don't log the actual key
 
     // Load .env file
@@ -131,7 +130,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize database
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sequencer".to_string());
-    info!("Using database URL: {}", database_url.replace("postgres://", "postgres://*****:*****@"));
+    info!(
+        "Using database URL: {}",
+        database_url.replace("postgres://", "postgres://*****:*****@")
+    );
     let db = Database::new(&database_url).await?;
 
     // Test database connection
@@ -151,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_processor = EventProcessor::new(
         event_receiver, // Clone the receiver
         processed_sender.clone(),
-        db.clone()
+        db.clone(),
     );
 
     // Markets
@@ -165,15 +167,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Chain configurations
     let chain_configs = vec![
-        (WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID, vec![HOST_BORROW_ON_EXTENSION_CHAIN_SIG, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG]),
-        (WS_URL_OPT_SEPOLIA, OPTIMISM_SEPOLIA_CHAIN_ID, vec![EXTENSION_SUPPLIED_SIG]),
-        (WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID, vec![EXTENSION_SUPPLIED_SIG]),
+        (
+            WS_URL_LINEA_SEPOLIA,
+            LINEA_SEPOLIA_CHAIN_ID,
+            vec![
+                HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
+                HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
+            ],
+        ),
+        (
+            WS_URL_OPT_SEPOLIA,
+            OPTIMISM_SEPOLIA_CHAIN_ID,
+            vec![EXTENSION_SUPPLIED_SIG],
+        ),
+        (
+            WS_URL_ETH_SEPOLIA,
+            ETHEREUM_SEPOLIA_CHAIN_ID,
+            vec![EXTENSION_SUPPLIED_SIG],
+        ),
     ];
-    info!("Configured chains: {:?}", chain_configs.iter().map(|(_, id, _)| id).collect::<Vec<_>>());
+    info!(
+        "Configured chains: {:?}",
+        chain_configs
+            .iter()
+            .map(|(_, id, _)| id)
+            .collect::<Vec<_>>()
+    );
 
     // After initializing channels and before starting the main pipeline components
     info!("Initializing batch event listeners...");
-    
+
     // Batch submitter configurations for each chain
     let batch_configs = vec![
         (WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID),
@@ -183,29 +206,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn batch event listeners
     let mut handles = vec![];
-    
+
     for (ws_url, chain_id) in batch_configs {
         info!(
-            "Starting batch event listener for chain={}, submitter={:?}", 
+            "Starting batch event listener for chain={}, submitter={:?}",
             chain_id, BATCH_SUBMITTER
         );
-        
+
         let config = BatchEventConfig {
             ws_url: ws_url.to_string(),
             batch_submitter: BATCH_SUBMITTER,
             chain_id,
         };
-        
-        let batch_listener = BatchEventListener::new(
-            config,
-            db.clone(),
-        );
+
+        let batch_listener = BatchEventListener::new(config, db.clone());
         let handle = tokio::spawn(async move {
             if let Err(e) = batch_listener.start().await {
                 error!("Batch event listener failed: {:?}", e);
             }
         });
-        
+
         handles.push(handle);
         tokio::time::sleep(LISTENER_SPAWN_DELAY).await;
     }
@@ -214,32 +234,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn event listeners
     let mut handles = vec![];
-    
+
     for market in &markets {
         for (ws_url, chain_id, events) in chain_configs.iter() {
             for event in events {
                 info!(
-                    "Starting listener for market={:?}, chain={}, event={}", 
+                    "Starting listener for market={:?}, chain={}, event={}",
                     market, chain_id, event
                 );
-                
+
                 let config = EventConfig {
                     ws_url: ws_url.to_string(),
                     market: *market,
                     event_signature: event.to_string(),
                     chain_id: *chain_id,
                 };
-                
-                let listener = EventListener::new(
-                    config,
-                    event_sender.clone(),
-                );
+
+                let listener = EventListener::new(config, event_sender.clone());
                 let handle = tokio::spawn(async move {
                     if let Err(e) = listener.start().await {
                         error!("Event listener failed: {:?}", e);
                     }
                 });
-                
+
                 handles.push(handle);
                 tokio::time::sleep(LISTENER_SPAWN_DELAY).await;
             }
@@ -249,8 +266,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("All event listeners started");
 
     // Create proof generator
-    let proof_generator = ProofGenerator::new(
-        processed_receiver,
+    let mut proof_generator = ProofGenerator::new(
+        ReceiverStream::new(processed_receiver),
         proof_sender,
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
@@ -262,18 +279,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_retries: 3,
         retry_delay: Duration::from_secs(1),
         rpc_urls: vec![
-            (ETHEREUM_SEPOLIA_CHAIN_ID as u32, RPC_URL_ETHEREUM_SEPOLIA.to_string()),
-            (OPTIMISM_SEPOLIA_CHAIN_ID as u32, RPC_URL_OPTIMISM_SEPOLIA.to_string()),
-            (LINEA_SEPOLIA_CHAIN_ID as u32, RPC_URL_LINEA_SEPOLIA.to_string()),
+            (
+                ETHEREUM_SEPOLIA_CHAIN_ID as u32,
+                RPC_URL_ETHEREUM_SEPOLIA.to_string(),
+            ),
+            (
+                OPTIMISM_SEPOLIA_CHAIN_ID as u32,
+                RPC_URL_OPTIMISM_SEPOLIA.to_string(),
+            ),
+            (
+                LINEA_SEPOLIA_CHAIN_ID as u32,
+                RPC_URL_LINEA_SEPOLIA.to_string(),
+            ),
         ],
     };
 
     // Create transaction manager
-    let mut transaction_manager = TransactionManager::new(
-        proof_receiver,
-        tx_config,
-        db.clone(),
-    );
+    let mut transaction_manager = TransactionManager::new(proof_receiver, tx_config, db.clone());
 
     // Spawn processors
     let processor_handle = tokio::spawn(async move {
@@ -299,7 +321,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Log configuration summary
     info!("----------------- SEQUENCER CONFIGURATION -----------------");
-    info!("Database: {}", database_url.replace("postgres://", "postgres://*****:*****@"));
+    info!(
+        "Database: {}",
+        database_url.replace("postgres://", "postgres://*****:*****@")
+    );
     info!("Markets: {}", markets.len());
     info!("Chains: {}", chain_configs.len());
     info!("Max proof retries: {}", MAX_PROOF_RETRIES);
@@ -313,7 +338,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Remove the socket file if it exists
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
-    
+
     let processed_sender_clone = processed_sender.clone();
     tokio::spawn(async move {
         loop {
@@ -344,10 +369,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn create_provider(rpc_url: Url, private_key: &str) -> Result<ProviderType, Box<dyn std::error::Error>> {
-    let signer: PrivateKeySigner = private_key
-        .parse()
-        .expect("should parse private key");
+async fn create_provider(
+    rpc_url: Url,
+    private_key: &str,
+) -> Result<ProviderType, Box<dyn std::error::Error>> {
+    let signer: PrivateKeySigner = private_key.parse().expect("should parse private key");
     let wallet = EthereumWallet::from(signer);
 
     let provider = ProviderBuilder::new()
@@ -357,4 +383,3 @@ async fn create_provider(rpc_url: Url, private_key: &str) -> Result<ProviderType
 
     Ok(provider)
 }
-

@@ -49,5 +49,5 @@ docker exec sequencer-db psql -U postgres -d sequencer -c "\dt events"
 # Start the sequencer (if needed)
 echo "Starting sequencer..."
 cd "$SEQUENCER_DIR"
-# nohup cargo run --release --bin sequencer > /dev/null 2>&1 & 
-RUST_LOG=info cargo run --release --bin sequencer
+nohup cargo run --release --bin sequencer > /dev/null 2>&1 & 
+# RUST_LOG=info cargo run --release --bin sequencer

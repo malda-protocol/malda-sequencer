@@ -1,7 +1,7 @@
-use sqlx::{Pool, Postgres, query};
+use alloy::primitives::{Address, Bytes, TxHash, U256};
 use eyre::Result;
-use alloy::primitives::{Address, TxHash, U256, Bytes};
 use serde::{Deserialize, Serialize};
+use sqlx::{query, Pool, Postgres};
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,14 +34,15 @@ impl EventStatus {
             EventStatus::TxProcessSuccess => "TxProcessSuccess",
             EventStatus::TxProcessFail => "TxProcessFail",
             EventStatus::Failed { .. } => "Failed",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
 // Add Default implementation for EventStatus
 impl Default for EventStatus {
     fn default() -> Self {
-        EventStatus::Received  // Default status is Received
+        EventStatus::Received // Default status is Received
     }
 }
 
@@ -72,21 +73,19 @@ pub struct Database {
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::PgPool::connect(database_url).await?;
-        
+
         // Run migrations
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
 
         info!("Database initialized successfully");
-        
+
         Ok(Self { pool })
     }
 
     pub async fn update_event(&self, update: EventUpdate) -> Result<()> {
         // Clone the values we need for logging before they're moved
         let batch_tx_hash = update.batch_tx_hash.clone();
-        
+
         query(
             r#"
             INSERT INTO events (
@@ -168,54 +167,53 @@ impl Database {
         // Use the cloned values for logging
         info!(
             "Updated event {} status to {:?}, batch_tx_hash: {:?}",
-            update.tx_hash,
-            update.status,
-            batch_tx_hash
+            update.tx_hash, update.status, batch_tx_hash
         );
         Ok(())
     }
 
     pub async fn get_event_status(&self, tx_hash: &TxHash) -> Result<Option<EventStatus>> {
         // Use query_as to handle the event_status enum type
-        let record = sqlx::query_as::<_, (String,)>(
-            "SELECT status::text FROM events WHERE tx_hash = $1"
-        )
-        .bind(tx_hash.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let record =
+            sqlx::query_as::<_, (String,)>("SELECT status::text FROM events WHERE tx_hash = $1")
+                .bind(tx_hash.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
 
         match record {
-            Some((status,)) => {
-                match status.as_str() {
-                    "Received" => Ok(Some(EventStatus::Received)),
-                    "Processed" => Ok(Some(EventStatus::Processed)),
-                    "IncludedInBatch" => Ok(Some(EventStatus::IncludedInBatch)),
-                    "ProofRequested" => Ok(Some(EventStatus::ProofRequested)),
-                    "ProofReceived" => Ok(Some(EventStatus::ProofReceived)),
-                    "BatchSubmitted" => Ok(Some(EventStatus::BatchSubmitted)),
-                    "BatchIncluded" => Ok(Some(EventStatus::BatchIncluded)),
-                    "BatchFailed" => {
-                        let error = sqlx::query_scalar::<_, String>("SELECT error FROM events WHERE tx_hash = $1")
-                            .bind(tx_hash.to_string())
-                            .fetch_optional(&self.pool)
-                            .await?
-                            .unwrap_or_else(|| "Unknown batch failure".to_string());
-                        Ok(Some(EventStatus::BatchFailed { error }))
-                    },
-                    "TxProcessSuccess" => Ok(Some(EventStatus::TxProcessSuccess)),
-                    "TxProcessFail" => Ok(Some(EventStatus::TxProcessFail)),
-                    "Failed" => {
-                        let error = sqlx::query_scalar::<_, String>("SELECT error FROM events WHERE tx_hash = $1")
-                            .bind(tx_hash.to_string())
-                            .fetch_optional(&self.pool)
-                            .await?
-                            .unwrap_or_else(|| "Unknown error".to_string());
-                        Ok(Some(EventStatus::Failed { error }))
-                    },
-                    _ => Err(eyre::eyre!("Unknown status: {}", status)),
+            Some((status,)) => match status.as_str() {
+                "Received" => Ok(Some(EventStatus::Received)),
+                "Processed" => Ok(Some(EventStatus::Processed)),
+                "IncludedInBatch" => Ok(Some(EventStatus::IncludedInBatch)),
+                "ProofRequested" => Ok(Some(EventStatus::ProofRequested)),
+                "ProofReceived" => Ok(Some(EventStatus::ProofReceived)),
+                "BatchSubmitted" => Ok(Some(EventStatus::BatchSubmitted)),
+                "BatchIncluded" => Ok(Some(EventStatus::BatchIncluded)),
+                "BatchFailed" => {
+                    let error = sqlx::query_scalar::<_, String>(
+                        "SELECT error FROM events WHERE tx_hash = $1",
+                    )
+                    .bind(tx_hash.to_string())
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .unwrap_or_else(|| "Unknown batch failure".to_string());
+                    Ok(Some(EventStatus::BatchFailed { error }))
                 }
+                "TxProcessSuccess" => Ok(Some(EventStatus::TxProcessSuccess)),
+                "TxProcessFail" => Ok(Some(EventStatus::TxProcessFail)),
+                "Failed" => {
+                    let error = sqlx::query_scalar::<_, String>(
+                        "SELECT error FROM events WHERE tx_hash = $1",
+                    )
+                    .bind(tx_hash.to_string())
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                    Ok(Some(EventStatus::Failed { error }))
+                }
+                _ => Err(eyre::eyre!("Unknown status: {}", status)),
             },
             None => Ok(None),
         }
     }
-} 
+}

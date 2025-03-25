@@ -1,26 +1,29 @@
 use alloy::{
-    primitives::{Address, U256, TxHash},
+    primitives::{Address, TxHash, U256},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
 use eyre::{Result, WrapErr};
-use futures_util::StreamExt;
-use tokio::sync::mpsc::{self, Sender};
-use tracing::{debug, error, info};
-use serde::{Serialize, Deserialize};
-use sequencer::events::{parse_withdraw_on_extension_chain_event, parse_supplied_event};
-use sequencer::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR, HOST_BORROW_ON_EXTENSION_CHAIN_SIG, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, EXTENSION_SUPPLIED_SIG};
-use sequencer::constants::*;
-use malda_rs::constants::*;
 use futures::future::join_all;
+use futures_util::StreamExt;
+use malda_rs::constants::*;
+use sequencer::constants::*;
+use sequencer::events::{parse_batch_process_success_event, BATCH_PROCESS_SUCCESS_SIG};
+use sequencer::events::{parse_supplied_event, parse_withdraw_on_extension_chain_event};
+use sequencer::events::{
+    EXTENSION_SUPPLIED_SIG, HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
+    HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR,
+};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing_subscriber;
-use sequencer::events::{BATCH_PROCESS_SUCCESS_SIG, parse_batch_process_success_event};
-use tokio::io::AsyncWriteExt;
 use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::Mutex;
+use tracing::{debug, error, info};
+use tracing_subscriber;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProcessedEvent {
@@ -90,7 +93,11 @@ async fn listen_for_events(
             Ok(logs) => {
                 info!(
                     "Found {} logs in chunk {} to {} for chain {} market {:?}",
-                    logs.len(), current_block, chunk_end, chain_id, market
+                    logs.len(),
+                    current_block,
+                    chunk_end,
+                    chain_id,
+                    market
                 );
 
                 for log in logs {
@@ -120,9 +127,10 @@ async fn listen_for_events(
                         }
                     } else {
                         let event = parse_supplied_event(&log);
-                        
-                        if event.linea_method_selector != MINT_EXTERNAL_SELECTOR && 
-                           event.linea_method_selector != REPAY_EXTERNAL_SELECTOR {
+
+                        if event.linea_method_selector != MINT_EXTERNAL_SELECTOR
+                            && event.linea_method_selector != REPAY_EXTERNAL_SELECTOR
+                        {
                             error!("Invalid method selector: {}", event.linea_method_selector);
                             continue;
                         }
@@ -176,7 +184,8 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    let events_map: Arc<Mutex<HashMap<TxHash, ProcessedEvent>>> = Arc::new(Mutex::new(HashMap::new()));
+    let events_map: Arc<Mutex<HashMap<TxHash, ProcessedEvent>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let removed_events: Arc<Mutex<HashSet<TxHash>>> = Arc::new(Mutex::new(HashSet::new()));
     let batch_size = 10000;
 
@@ -184,21 +193,40 @@ async fn main() -> Result<()> {
         // ("Linea", WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID, 9326672, 10697267),
         // ("Optimism", WS_URL_OPT_SEPOLIA, OPTIMISM_SEPOLIA_CHAIN_ID, 23810846, 25231118),
         // ("Ethereum", WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID, 7691371, 7925098
-
-        ("Linea", WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID, 10697267 - 10000, 10697267),
-        ("Optimism", WS_URL_OPT_SEPOLIA, OPTIMISM_SEPOLIA_CHAIN_ID, 25231118 - 10000, 25231118),
-        ("Ethereum", WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID, 7925098 - 10000, 7925098
-    ),
+        (
+            "Linea",
+            WS_URL_LINEA_SEPOLIA,
+            LINEA_SEPOLIA_CHAIN_ID,
+            10697267 - 10000,
+            10697267,
+        ),
+        (
+            "Optimism",
+            WS_URL_OPT_SEPOLIA,
+            OPTIMISM_SEPOLIA_CHAIN_ID,
+            25231118 - 10000,
+            25231118,
+        ),
+        (
+            "Ethereum",
+            WS_URL_ETH_SEPOLIA,
+            ETHEREUM_SEPOLIA_CHAIN_ID,
+            7925098 - 10000,
+            7925098,
+        ),
     ];
 
-    let mut current_blocks: Vec<_> = chain_configs.iter()
+    let mut current_blocks: Vec<_> = chain_configs
+        .iter()
         .map(|(_, _, _, start, _)| *start)
         .collect();
-    let end_blocks: Vec<_> = chain_configs.iter()
-        .map(|(_, _, _, _, end)| *end)
-        .collect();
+    let end_blocks: Vec<_> = chain_configs.iter().map(|(_, _, _, _, end)| *end).collect();
 
-    while current_blocks.iter().zip(&end_blocks).any(|(&current, &end)| current < end) {
+    while current_blocks
+        .iter()
+        .zip(&end_blocks)
+        .any(|(&current, &end)| current < end)
+    {
         let mut tasks = Vec::new();
 
         // Add tasks for all chains
@@ -214,9 +242,18 @@ async fn main() -> Result<()> {
             let configs = if chain_id == LINEA_SEPOLIA_CHAIN_ID {
                 vec![
                     (USDC_MOCK_MARKET_SEPOLIA, HOST_BORROW_ON_EXTENSION_CHAIN_SIG),
-                    (USDC_MOCK_MARKET_SEPOLIA, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG),
-                    (WSTETH_MOCK_MARKET_SEPOLIA, HOST_BORROW_ON_EXTENSION_CHAIN_SIG),
-                    (WSTETH_MOCK_MARKET_SEPOLIA, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG),
+                    (
+                        USDC_MOCK_MARKET_SEPOLIA,
+                        HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
+                    ),
+                    (
+                        WSTETH_MOCK_MARKET_SEPOLIA,
+                        HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
+                    ),
+                    (
+                        WSTETH_MOCK_MARKET_SEPOLIA,
+                        HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
+                    ),
                 ]
             } else {
                 vec![
@@ -242,9 +279,13 @@ async fn main() -> Result<()> {
                         removed_events,
                         current_block,
                         batch_end,
-                    ).await {
-                        error!("Event listener failed for {} chain {} market {:?}: {}", 
-                            chain_name, chain_id, market, e);
+                    )
+                    .await
+                    {
+                        error!(
+                            "Event listener failed for {} chain {} market {:?}: {}",
+                            chain_name, chain_id, market, e
+                        );
                     }
                 });
                 tasks.push(task);
@@ -266,8 +307,13 @@ async fn main() -> Result<()> {
                     removed_events,
                     current_block,
                     batch_end + 5000,
-                ).await {
-                    error!("Batch success event listener failed for {}: {}", chain_name, e);
+                )
+                .await
+                {
+                    error!(
+                        "Batch success event listener failed for {}: {}",
+                        chain_name, e
+                    );
                 }
             });
             tasks.push(task);
@@ -280,7 +326,7 @@ async fn main() -> Result<()> {
         let added_count = events_map.lock().await.len();
         let removed_count = removed_events.lock().await.len();
         let remaining_count = added_count - removed_count;
-        
+
         info!(
             "Batch complete. Added: {}, Removed: {}, Remaining: {}",
             added_count, removed_count, remaining_count
@@ -327,7 +373,7 @@ async fn main() -> Result<()> {
     //             (processed as f64 / total_events as f64) * 100.0
     //         );
     //     }
-        
+
     //     info!("Waiting 20 seconds before next batch...");
     //     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
     // }
@@ -339,11 +385,11 @@ async fn main() -> Result<()> {
 async fn inject_event(event: ProcessedEvent) -> Result<()> {
     let socket_path = "/tmp/sequencer.sock";
     let mut stream = tokio::net::UnixStream::connect(socket_path).await?;
-    
+
     // Serialize and send the event
     let json = serde_json::to_string(&event)?;
     stream.write_all(json.as_bytes()).await?;
     stream.flush().await?;
-    
+
     Ok(())
-} 
+}
