@@ -1,36 +1,27 @@
-use eyre::Result;
-use tracing::{info, error};
+use crate::ProofReadyEvent;
 use alloy::{
-    primitives::{TxHash, U256, FixedBytes},
-    transports::http::reqwest::Url,
-    providers::Provider,
     network::ReceiptResponse,
+    primitives::{FixedBytes, TxHash, U256},
+    providers::Provider,
+    transports::http::reqwest::Url,
 };
-use tokio::sync::mpsc;
-use tracing::{warn, debug};
-use std::time::Duration;
+use eyre::Result;
 use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
-use crate::ProofReadyEvent;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tracing::{debug, warn};
+use tracing::{error, info};
 
 type Bytes4 = FixedBytes<4>;
 
 use crate::{
+    constants::{BATCH_SUBMITTER, SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY, TX_TIMEOUT},
+    create_provider,
+    events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
+    types::{BatchProcessMsg, IBatchSubmitter},
     // proof_generator::ProofReadyEvent,
     ProviderType,
-    create_provider,
-    constants::{
-        TX_TIMEOUT,
-        SEQUENCER_ADDRESS,
-        SEQUENCER_PRIVATE_KEY,
-        BATCH_SUBMITTER,
-    },
-    types::{IBatchSubmitter, BatchProcessMsg},
-    events::{
-        MINT_EXTERNAL_SELECTOR_FB4,
-        REPAY_EXTERNAL_SELECTOR_FB4,
-        OUT_HERE_SELECTOR_FB4,
-    },
 };
 
 #[derive(Debug, Clone)]
@@ -69,7 +60,7 @@ impl TransactionManager {
 
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting transaction manager");
-        
+
         while let Some(proof_events) = self.event_receiver.recv().await {
             let mut current_chain_id = None;
             let mut chain_start_idx = 0;
@@ -85,7 +76,7 @@ impl TransactionManager {
                         let chain_events = proof_events[chain_start_idx..idx].to_vec();
                         let config = config.clone();
                         let db = db.clone();
-                        
+
                         chain_tasks.push(tokio::spawn(async move {
                             match Self::process_chain_batch(
                                 &db,
@@ -120,7 +111,7 @@ impl TransactionManager {
                 let chain_events = proof_events[chain_start_idx..].to_vec();
                 let config = config.clone();
                 let db = db.clone();
-                
+
                 chain_tasks.push(tokio::spawn(async move {
                     
                     match Self::process_chain_batch(
@@ -157,15 +148,20 @@ impl TransactionManager {
         Ok(())
     }
 
-    async fn get_provider_for_chain(chain_id: u32, config: &TransactionConfig) -> Result<ProviderType> {
-        let rpc_url = config.rpc_urls
+    async fn get_provider_for_chain(
+        chain_id: u32,
+        config: &TransactionConfig,
+    ) -> Result<ProviderType> {
+        let rpc_url = config
+            .rpc_urls
             .iter()
             .find(|(id, _)| *id == chain_id)
             .map(|(_, url)| url.clone())
             .ok_or_else(|| eyre::eyre!("No RPC URL configured for chain {}", chain_id))?;
 
         let url = Url::parse(&rpc_url)?;
-        create_provider(url, SEQUENCER_PRIVATE_KEY).await
+        create_provider(url, SEQUENCER_PRIVATE_KEY)
+            .await
             .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
     }
 
@@ -195,11 +191,14 @@ impl TransactionManager {
 
         // Mark all events as included in batch
         for event in events {
-            if let Err(e) = db.update_event(EventUpdate {
-                tx_hash: event.tx_hash,
-                status: EventStatus::IncludedInBatch,
-                ..Default::default()
-            }).await {
+            if let Err(e) = db
+                .update_event(EventUpdate {
+                    tx_hash: event.tx_hash,
+                    status: EventStatus::IncludedInBatch,
+                    ..Default::default()
+                })
+                .await
+            {
                 error!("Failed to update event to IncludedInBatch: {:?}", e);
             }
 
@@ -218,7 +217,7 @@ impl TransactionManager {
                             return Err(eyre::eyre!("Invalid method for Linea: {}", method));
                         }
                     }
-                },
+                }
                 // For all other chains, always use outHere
                 _ => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
             });
@@ -247,36 +246,34 @@ impl TransactionManager {
         );
 
         // Submit the batch
-        let action = batch_submitter
-            .batchProcess(msg)
-            .from(SEQUENCER_ADDRESS);
+        let action = batch_submitter.batchProcess(msg).from(SEQUENCER_ADDRESS);
 
         // Estimate gas with a buffer
-        let estimated_gas = action
-            .estimate_gas()
-            .await?;
+        let estimated_gas = action.estimate_gas().await?;
         let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
 
-        debug!("Estimated gas: {}, using gas limit: {}", estimated_gas, gas_limit);
+        debug!(
+            "Estimated gas: {}, using gas limit: {}",
+            estimated_gas, gas_limit
+        );
 
         // Update events with batch submission pending
         for event in events {
-            if let Err(e) = db.update_event(EventUpdate {
-                tx_hash: event.tx_hash,
-                status: EventStatus::BatchSubmitted,
-                ..Default::default()
-            }).await {
+            if let Err(e) = db
+                .update_event(EventUpdate {
+                    tx_hash: event.tx_hash,
+                    status: EventStatus::BatchSubmitted,
+                    ..Default::default()
+                })
+                .await
+            {
                 error!("Failed to update event to BatchSubmitted: {:?}", e);
             }
         }
 
         let gas_price = provider.get_gas_price().await? * 2;
 
-        let pending_tx = action
-            .gas(gas_limit)
-            .gas_price(gas_price)
-            .send()
-            .await?;
+        let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
 
         let tx_hash = pending_tx.tx_hash().clone();
 
@@ -284,11 +281,14 @@ impl TransactionManager {
 
         // Update all events with the batch tx hash
         for event in events {
-            if let Err(e) = db.update_event(EventUpdate {
-                tx_hash: event.tx_hash,
-                batch_tx_hash: Some(tx_hash.to_string()),
-                ..Default::default()
-            }).await {
+            if let Err(e) = db
+                .update_event(EventUpdate {
+                    tx_hash: event.tx_hash,
+                    batch_tx_hash: Some(tx_hash.to_string()),
+                    ..Default::default()
+                })
+                .await
+            {
                 error!("Failed to update event with batch tx hash: {:?}", e);
             }
         }
@@ -297,7 +297,7 @@ impl TransactionManager {
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
             Ok(hash) => {
                 info!("Batch transaction confirmed with hash {:?}", hash);
-                
+
                 let receipt = provider
                     .get_transaction_receipt(hash)
                     .await?
@@ -307,14 +307,16 @@ impl TransactionManager {
                 let status = if receipt.status() == true {
                     EventStatus::BatchIncluded
                 } else {
-                    EventStatus::BatchFailed { error: "Transaction reverted".to_string() }
+                    EventStatus::BatchFailed {
+                        error: "Transaction reverted".to_string(),
+                    }
                 };
 
                 // Update all events with transaction status
                 for event in events {
                     // Get current status before updating
                     let current_status = db.get_event_status(&event.tx_hash).await?;
-                    
+
                     // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use new status
                     let status = if let Some(current) = current_status {
                         match current {
@@ -325,11 +327,14 @@ impl TransactionManager {
                         status.clone()
                     };
 
-                    if let Err(e) = db.update_event(EventUpdate {
-                        tx_hash: event.tx_hash,
-                        status,
-                        ..Default::default()
-                    }).await {
+                    if let Err(e) = db
+                        .update_event(EventUpdate {
+                            tx_hash: event.tx_hash,
+                            status,
+                            ..Default::default()
+                        })
+                        .await
+                    {
                         error!("Failed to update event with transaction status: {:?}", e);
                     }
                 }
@@ -340,32 +345,39 @@ impl TransactionManager {
                     receipt.status(),
                     receipt.gas_used()
                 );
-            },
+            }
             Err(e) => {
                 // Transaction failed or timed out
                 error!("Transaction failed or timed out: {}", e);
-                
+
                 // Update all events with failure status
                 for event in events {
                     // Get current status before updating
                     let current_status = db.get_event_status(&event.tx_hash).await?;
-                    
+
                     // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use BatchFailed
                     let status = if let Some(current) = current_status {
                         match current {
                             EventStatus::TxProcessSuccess | EventStatus::TxProcessFail => current,
-                            _ => EventStatus::BatchFailed { error: format!("Transaction error: {}", e) },
+                            _ => EventStatus::BatchFailed {
+                                error: format!("Transaction error: {}", e),
+                            },
                         }
                     } else {
-                        EventStatus::BatchFailed { error: format!("Transaction error: {}", e) }
+                        EventStatus::BatchFailed {
+                            error: format!("Transaction error: {}", e),
+                        }
                     };
 
-                    if let Err(db_err) = db.update_event(EventUpdate {
-                        tx_hash: event.tx_hash,
-                        status,
-                        resubmitted: Some(1),
-                        ..Default::default()
-                    }).await {
+                    if let Err(db_err) = db
+                        .update_event(EventUpdate {
+                            tx_hash: event.tx_hash,
+                            status,
+                            resubmitted: Some(1),
+                            ..Default::default()
+                        })
+                        .await
+                    {
                         error!("Failed to update event with failure status: {:?}", db_err);
                     }
                 }
@@ -374,5 +386,4 @@ impl TransactionManager {
 
         Ok(tx_hash)
     }
-
 }

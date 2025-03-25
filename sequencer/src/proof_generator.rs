@@ -1,16 +1,20 @@
+use alloy::primitives::{Address, Bytes, TxHash, U256};
 use eyre::Result;
-use tracing::{info, error, debug, warn};
-use alloy::primitives::{Address, Bytes, U256, TxHash};
-use tokio::sync::mpsc;
-use std::time::Duration;
-use tokio::time::{sleep, Instant};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use futures::future::join_all;
-
 use sequencer::database::{Database, EventStatus, EventUpdate};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
+use tokio::task;
+use tokio::time::{sleep, Instant};
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
+use tracing::{debug, error, info, warn};
+
+use crate::event_processor::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
-use crate::ProcessedEvent;
 
 #[derive(Debug, Clone)]
 pub struct ProofReadyEvent {
@@ -25,7 +29,7 @@ pub struct ProofReadyEvent {
 }
 
 pub struct ProofGenerator {
-    event_receiver: mpsc::Receiver<ProcessedEvent>,
+    event_receiver: Box<dyn Stream<Item = ProcessedEvent> + Unpin + Send>,
     proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
     max_retries: u32,
     retry_delay: Duration,
@@ -35,14 +39,14 @@ pub struct ProofGenerator {
 
 impl ProofGenerator {
     pub fn new(
-        event_receiver: mpsc::Receiver<ProcessedEvent>,
+        event_receiver: impl Stream<Item = ProcessedEvent> + Unpin + Send + 'static,
         proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
         db: Database,
     ) -> Self {
         Self {
-            event_receiver,
+            event_receiver: Box::new(event_receiver),
             proof_sender,
             max_retries,
             retry_delay,
@@ -51,82 +55,81 @@ impl ProofGenerator {
         }
     }
 
-    pub async fn start(mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!("Starting proof generator, waiting for events...");
-        
+
         let mut batch = Vec::new();
         let batch_timeout = Duration::from_secs(crate::constants::BATCH_WINDOW);
         let mut last_proof_time = Instant::now();
 
-        loop {
-            if let Some(event) = self.event_receiver.recv().await {
-                info!(
-                    "Received event for processing: type={}", 
-                    match &event {
-                        ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
-                        ProcessedEvent::HostBorrow { .. } => "HostBorrow",
-                        ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
-                    }
-                );
-                batch.push(event);
-
-                // Set deadline for batch collection
-                let deadline = Instant::now() + batch_timeout;
-
-                // Collect any additional events until deadline
-                while Instant::now() < deadline {
-                    tokio::select! {
-                        Some(event) = self.event_receiver.recv() => {
-                            info!("Additional event received during batch window");
-                            batch.push(event);
-                        }
-                        _ = sleep(Duration::from_millis(100)) => {}
-                    }
+        while let Some(event) = self.event_receiver.next().await {
+            info!(
+                "Received event for processing: type={}",
+                match &event {
+                    ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
+                    ProcessedEvent::HostBorrow { .. } => "HostBorrow",
+                    ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
                 }
+            );
+            batch.push(event);
 
-                // Check if we need to wait for the proof delay
-                let time_since_last_proof = last_proof_time.elapsed();
-                let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
-                
-                if time_since_last_proof < proof_delay {
-                    let wait_time = proof_delay - time_since_last_proof;
-                    debug!("Waiting {:?} to respect proof delay", wait_time);
-                    sleep(wait_time).await;
-                }
+            // Set deadline for batch collection
+            let deadline = Instant::now() + batch_timeout;
 
-                // Process whatever we've collected
-                let events_to_process = std::mem::take(&mut batch);
-                let proof_sender = self.proof_sender.clone();
-                let max_retries = self.max_retries;
-                let retry_delay = self.retry_delay;
-                let db = self.db.clone();
-
-                tokio::spawn(async move {
-                    let proof_generator = ProofGeneratorWorker {
-                        max_retries,
-                        retry_delay,
-                        db,
-                    };
-
-                    match proof_generator.process_batch(events_to_process).await {
-                        Ok(proof_events) => {
-                            info!(
-                                "Successfully generated proofs for {} events",
-                                proof_events.len()
-                            );
-                            
-                            if let Err(e) = proof_sender.send(proof_events).await {
-                                error!("Failed to send proof ready events: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to generate proofs for batch: {}", e);
-                        }
+            // Collect any additional events until deadline
+            while Instant::now() < deadline {
+                tokio::select! {
+                    Some(event) = self.event_receiver.next() => {
+                        info!("Additional event received during batch window");
+                        batch.push(event);
                     }
-                });
-                last_proof_time = Instant::now();
+                    _ = sleep(Duration::from_millis(100)) => {}
+                }
             }
+
+            // Check if we need to wait for the proof delay
+            let time_since_last_proof = last_proof_time.elapsed();
+            let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
+
+            if time_since_last_proof < proof_delay {
+                let wait_time = proof_delay - time_since_last_proof;
+                debug!("Waiting {:?} to respect proof delay", wait_time);
+                sleep(wait_time).await;
+            }
+
+            // Process whatever we've collected
+            let events_to_process = std::mem::take(&mut batch);
+            let proof_sender = self.proof_sender.clone();
+            let max_retries = self.max_retries;
+            let retry_delay = self.retry_delay;
+            let db = self.db.clone();
+
+            tokio::spawn(async move {
+                let proof_generator = ProofGeneratorWorker {
+                    max_retries,
+                    retry_delay,
+                    db,
+                };
+
+                match proof_generator.process_batch(events_to_process).await {
+                    Ok(proof_events) => {
+                        info!(
+                            "Successfully generated proofs for {} events",
+                            proof_events.len()
+                        );
+
+                        if let Err(e) = proof_sender.send(proof_events).await {
+                            error!("Failed to send proof ready events: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to generate proofs for batch: {}", e);
+                    }
+                }
+            });
+            last_proof_time = Instant::now();
         }
+        Ok(())
     }
 }
 
@@ -145,7 +148,7 @@ impl ProofGeneratorWorker {
                 ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
                 ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
             };
-            
+
             let update = EventUpdate {
                 tx_hash: *tx_hash,
                 status: EventStatus::ProofRequested,
@@ -156,24 +159,31 @@ impl ProofGeneratorWorker {
                 error!("Failed to update event status to ProofRequested: {:?}", e);
             }
         }
-
         // Sort events by src_chain (Linea first) and dst_chain
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
             let (a_src, a_dst) = match a {
-                ProcessedEvent::HostWithdraw { dst_chain_id, .. } |
-                ProcessedEvent::HostBorrow { dst_chain_id, .. } => 
-                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id),
-                ProcessedEvent::ExtensionSupply { src_chain_id, dst_chain_id, .. } => 
-                    (*src_chain_id as u64, *dst_chain_id),
+                ProcessedEvent::HostWithdraw { dst_chain_id, .. }
+                | ProcessedEvent::HostBorrow { dst_chain_id, .. } => {
+                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id)
+                }
+                ProcessedEvent::ExtensionSupply {
+                    src_chain_id,
+                    dst_chain_id,
+                    ..
+                } => (*src_chain_id as u64, *dst_chain_id),
             };
-            
+
             let (b_src, b_dst) = match b {
-                ProcessedEvent::HostWithdraw { dst_chain_id, .. } |
-                ProcessedEvent::HostBorrow { dst_chain_id, .. } => 
-                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id),
-                ProcessedEvent::ExtensionSupply { src_chain_id, dst_chain_id, .. } => 
-                    (*src_chain_id as u64, *dst_chain_id),
+                ProcessedEvent::HostWithdraw { dst_chain_id, .. }
+                | ProcessedEvent::HostBorrow { dst_chain_id, .. } => {
+                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id)
+                }
+                ProcessedEvent::ExtensionSupply {
+                    src_chain_id,
+                    dst_chain_id,
+                    ..
+                } => (*src_chain_id as u64, *dst_chain_id),
             };
 
             // Sort by src_chain first (Linea first), then by dst_chain
@@ -199,19 +209,37 @@ impl ProofGeneratorWorker {
         // Process sorted events
         for event in sorted_events {
             let (src_chain, user, market, dst_chain, tx_hash, amount, method) = match event {
-                ProcessedEvent::HostWithdraw { tx_hash, sender, dst_chain_id, amount, market }
-                | ProcessedEvent::HostBorrow { tx_hash, sender, dst_chain_id, amount, market } => {
-                    (
-                        malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID,
-                        sender,
-                        market,
-                        dst_chain_id as u64,
-                        tx_hash,
-                        amount,
-                        "outHere".to_string()
-                    )
+                ProcessedEvent::HostWithdraw {
+                    tx_hash,
+                    sender,
+                    dst_chain_id,
+                    amount,
+                    market,
                 }
-                ProcessedEvent::ExtensionSupply { tx_hash, from, amount, src_chain_id, dst_chain_id, market, method_selector } => {
+                | ProcessedEvent::HostBorrow {
+                    tx_hash,
+                    sender,
+                    dst_chain_id,
+                    amount,
+                    market,
+                } => (
+                    malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID,
+                    sender,
+                    market,
+                    dst_chain_id as u64,
+                    tx_hash,
+                    amount,
+                    "outHere".to_string(),
+                ),
+                ProcessedEvent::ExtensionSupply {
+                    tx_hash,
+                    from,
+                    amount,
+                    src_chain_id,
+                    dst_chain_id,
+                    market,
+                    method_selector,
+                } => {
                     let method = if method_selector == crate::events::MINT_EXTERNAL_SELECTOR {
                         "mintExternal"
                     } else if method_selector == crate::events::REPAY_EXTERNAL_SELECTOR {
@@ -219,7 +247,7 @@ impl ProofGeneratorWorker {
                     } else {
                         return Err(eyre::eyre!("Invalid method selector: {}", method_selector));
                     };
-                    
+
                     (
                         src_chain_id as u64,
                         from,
@@ -227,13 +255,10 @@ impl ProofGeneratorWorker {
                         dst_chain_id as u64,
                         tx_hash,
                         amount,
-                        method.to_string()
+                        method.to_string(),
                     )
                 }
             };
-
-            // Store original event details for later use
-            event_details.push((tx_hash, market, amount, user, method.clone()));
 
             // If we encounter a new source chain, push the current batch and start a new one
             if current_src_chain != Some(src_chain) {
@@ -253,6 +278,7 @@ impl ProofGeneratorWorker {
             current_users.push(user);
             current_markets.push(market);
             current_dst_chains.push(dst_chain);
+            event_details.push((tx_hash, amount, market, dst_chain as u32, method));
         }
 
         // Push the last batch
@@ -271,12 +297,14 @@ impl ProofGeneratorWorker {
         );
 
         // Generate single proof for all events
-        let (journal, seal) = self.generate_proof_with_retry(
-            users.clone(),
-            markets.clone(),
-            dst_chain_ids.clone(),
-            src_chain_ids,
-        ).await?;
+        let (journal, seal) = self
+            .generate_proof_with_retry(
+                users.clone(),
+                markets.clone(),
+                dst_chain_ids.clone(),
+                src_chain_ids,
+            )
+            .await?;
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
@@ -300,18 +328,21 @@ impl ProofGeneratorWorker {
         }
 
         // Create proof events for each original event
-        Ok(event_details.into_iter().map(|(tx_hash, market, amount, receiver, method)| {
-            ProofReadyEvent {
-                tx_hash,
-                market,
-                journal: journal.clone(),
-                seal: seal.clone(),
-                amount: vec![amount],
-                receiver,
-                method,
-                dst_chain_id: dst_chain_ids[0][0] as u32,
-            }
-        }).collect())
+        Ok(event_details
+            .into_iter()
+            .map(
+                |(tx_hash, amount, market, dst_chain_id, method)| ProofReadyEvent {
+                    tx_hash,
+                    market,
+                    journal: journal.clone(),
+                    seal: seal.clone(),
+                    amount: vec![amount],
+                    receiver: Address::ZERO,
+                    method,
+                    dst_chain_id,
+                },
+            )
+            .collect())
     }
 
     async fn generate_proof_with_retry(
@@ -332,33 +363,35 @@ impl ProofGeneratorWorker {
                 users.clone(),
                 markets.clone(),
                 dst_chain_ids.clone(),
-                src_chain_ids.clone()
-            ).await {
+                src_chain_ids.clone(),
+            )
+            .await
+            {
                 Ok(proof_info) => {
-                    info!("Successfully generated proof data");
                     let receipt = proof_info.receipt;
                     let seal = match risc0_ethereum_contracts::encode_seal(&receipt) {
                         Ok(seal_data) => {
                             debug!("Successfully encoded seal");
                             Bytes::from(seal_data)
-                        },
+                        }
                         Err(e) => {
                             error!("Failed to encode seal: {}", e);
                             return Err(eyre::eyre!("Failed to encode seal: {}", e));
                         }
                     };
                     let journal = Bytes::from(receipt.journal.bytes);
-                    
+
                     info!(
-                        "Generated proof - journal size: {}, seal size: {}", 
-                        journal.len(), seal.len()
+                        "Generated proof - journal size: {}, seal size: {}",
+                        journal.len(),
+                        seal.len()
                     );
                     debug!(
                         "Proof details - journal: 0x{}, seal: 0x{}",
                         hex::encode(&journal),
                         hex::encode(&seal)
                     );
-                    
+
                     return Ok((journal, seal));
                 }
                 Err(e) if attempts < self.max_retries => {
@@ -370,8 +403,15 @@ impl ProofGeneratorWorker {
                     tokio::time::sleep(self.retry_delay).await;
                 }
                 Err(e) => {
-                    error!("Failed to generate proof after {} attempts: {}", attempts, e);
-                    return Err(eyre::eyre!("Failed to generate proof after {} attempts: {}", attempts, e));
+                    error!(
+                        "Failed to generate proof after {} attempts: {}",
+                        attempts, e
+                    );
+                    return Err(eyre::eyre!(
+                        "Failed to generate proof after {} attempts: {}",
+                        attempts,
+                        e
+                    ));
                 }
             }
         }

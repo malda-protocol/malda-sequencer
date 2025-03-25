@@ -39,5 +39,4 @@ alloy::sol! {
     interface IL1Block {
         function number() external view returns (uint64);
     }
-} 
-
+}

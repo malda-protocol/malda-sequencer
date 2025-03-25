@@ -4,17 +4,17 @@ use alloy::{
     rpc::types::Filter,
     transports::http::reqwest::Url,
 };
+use chrono::Utc;
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
-use tracing::{info, error, debug};
-use chrono::{Utc};
+use tracing::{debug, error, info};
 
 use crate::events::{
-    BATCH_PROCESS_FAILED_SIG, BATCH_PROCESS_SUCCESS_SIG,
-    parse_batch_process_failed_event, parse_batch_process_success_event,
+    parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG,
+    BATCH_PROCESS_SUCCESS_SIG,
 };
-use sequencer::database::{Database, EventUpdate, EventStatus};
+use sequencer::database::{Database, EventStatus, EventUpdate};
 
 #[derive(Debug)]
 pub struct BatchEventConfig {
@@ -30,10 +30,7 @@ pub struct BatchEventListener {
 
 impl BatchEventListener {
     pub fn new(config: BatchEventConfig, db: Database) -> Self {
-        Self { 
-            config,
-            db,
-        }
+        Self { config, db }
     }
 
     pub async fn start(&self) -> Result<()> {
@@ -41,10 +38,13 @@ impl BatchEventListener {
             "Starting batch event listener for submitter={:?} chain={}",
             self.config.batch_submitter, self.config.chain_id
         );
-        
-        let ws_url: Url = self.config.ws_url.parse()
+
+        let ws_url: Url = self
+            .config
+            .ws_url
+            .parse()
             .wrap_err_with(|| format!("Invalid WSS URL: {}", self.config.ws_url))?;
-        
+
         debug!("Connecting to WebSocket at {}", ws_url);
         let ws = WsConnect::new(ws_url);
         let provider = ProviderBuilder::new()
@@ -55,15 +55,15 @@ impl BatchEventListener {
         let success_filter = Filter::new()
             .event(BATCH_PROCESS_SUCCESS_SIG)
             .address(self.config.batch_submitter);
-            
+
         let failure_filter = Filter::new()
             .event(BATCH_PROCESS_FAILED_SIG)
             .address(self.config.batch_submitter);
-        
+
         debug!("Subscribing to batch events");
         let success_sub = provider.subscribe_logs(&success_filter).await?;
         let failure_sub = provider.subscribe_logs(&failure_filter).await?;
-        
+
         let mut success_stream = success_sub.into_stream();
         let mut failure_stream = failure_sub.into_stream();
 
@@ -82,12 +82,15 @@ impl BatchEventListener {
                     "Batch process success on chain {}: init_hash={:?}",
                     chain_id, event.init_hash
                 );
-                
-                if let Err(e) = db_success.update_event(EventUpdate {
-                    tx_hash: event.init_hash,
-                    status: EventStatus::TxProcessSuccess,
-                    ..Default::default()
-                }).await {
+
+                if let Err(e) = db_success
+                    .update_event(EventUpdate {
+                        tx_hash: event.init_hash,
+                        status: EventStatus::TxProcessSuccess,
+                        ..Default::default()
+                    })
+                    .await
+                {
                     error!("Failed to update database for success event: {:?}", e);
                 }
             }
@@ -102,12 +105,15 @@ impl BatchEventListener {
                     "Batch process failed on chain {}: init_hash={:?}, reason={:?}",
                     chain_id, event.init_hash, event.reason
                 );
-                
-                if let Err(e) = db_failure.update_event(EventUpdate {
-                    tx_hash: event.init_hash,
-                    status: EventStatus::TxProcessFail,
-                    ..Default::default()
-                }).await {
+
+                if let Err(e) = db_failure
+                    .update_event(EventUpdate {
+                        tx_hash: event.init_hash,
+                        status: EventStatus::TxProcessFail,
+                        ..Default::default()
+                    })
+                    .await
+                {
                     error!("Failed to update database for failure event: {:?}", e);
                 }
             }
@@ -121,7 +127,6 @@ impl BatchEventListener {
         error!("Both event streams ended unexpectedly");
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -141,4 +146,4 @@ mod tests {
         let _listener = BatchEventListener::new(config, db);
         Ok(())
     }
-} 
+}
