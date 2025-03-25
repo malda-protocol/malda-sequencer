@@ -125,8 +125,9 @@ impl EventProcessor {
         // Initial event receipt
         let update = EventUpdate {
             tx_hash,
-            event_type: Some(raw_event.market.to_string()),
+            event_type: Some(format!("{:?}", raw_event.log.topics())),
             src_chain_id: Some(raw_event.chain_id.try_into().unwrap()),
+            market: Some(raw_event.market),
             status: EventStatus::Received,
             ..Default::default()
         };
@@ -136,18 +137,25 @@ impl EventProcessor {
         }
 
         // Process the event
-        let processed = self.process_event(raw_event).await?;
+        let processed = self.process_event(&raw_event).await?;
 
         // Extract fields based on ProcessedEvent variant
-        let (dst_chain_id, msg_sender, amount) = match &processed {
+        let (dst_chain_id, msg_sender, amount, target_function) = match &processed {
             ProcessedEvent::HostWithdraw { dst_chain_id, sender, amount, .. } => {
-                (Some(*dst_chain_id), Some(*sender), Some(*amount))
+                (Some(*dst_chain_id), Some(*sender), Some(*amount), Some("outHere".to_string()))
             },
             ProcessedEvent::HostBorrow { dst_chain_id, sender, amount, .. } => {
-                (Some(*dst_chain_id), Some(*sender), Some(*amount))
+                (Some(*dst_chain_id), Some(*sender), Some(*amount), Some("outHere".to_string()))
             },
-            ProcessedEvent::ExtensionSupply { dst_chain_id, from, amount, .. } => {
-                (Some(*dst_chain_id), Some(*from), Some(*amount))
+            ProcessedEvent::ExtensionSupply { dst_chain_id, from, amount, method_selector, .. } => {
+                let function = if method_selector == &MINT_EXTERNAL_SELECTOR {
+                    "mintExternal"
+                } else if method_selector == &REPAY_EXTERNAL_SELECTOR {
+                    "repayExternal"
+                } else {
+                    method_selector
+                };
+                (Some(*dst_chain_id), Some(*from), Some(*amount), Some(function.to_string()))
             },
         };
 
@@ -157,6 +165,8 @@ impl EventProcessor {
             dst_chain_id: dst_chain_id.map(|id| id.try_into().unwrap()),
             msg_sender,
             amount,
+            target_function,
+            market: Some(raw_event.market),
             status: EventStatus::Processed,
             ..Default::default()
         };
@@ -168,25 +178,13 @@ impl EventProcessor {
         Ok(processed)
     }
 
-    async fn process_event(&self, raw_event: RawEvent) -> Result<ProcessedEvent> {
+    async fn process_event(&self, raw_event: &RawEvent) -> Result<ProcessedEvent> {
         // Log when event is received
-        info!("Attempting to write received event to database: {:?}", raw_event.log.transaction_hash);
+        info!("Processing event for market: {:?}, chain_id: {}", raw_event.market, raw_event.chain_id);
         
-        if let Some(tx_hash) = &raw_event.log.transaction_hash {
-            if let Err(e) = self.db.update_event(EventUpdate {
-                tx_hash: *tx_hash,
-                status: EventStatus::Received,
-                ..Default::default()
-            }).await {
-                error!("Failed to write received event to database: {:?}", e);
-            } else {
-                info!("Successfully wrote received event to database");
-            }
-        }
-
         let chain_id = raw_event.chain_id;
         let market = raw_event.market;
-        let log = raw_event.log;
+        let log = &raw_event.log;
         let tx_hash = log.transaction_hash.expect("Log should have tx hash");
         debug!("Processing event with tx_hash: {}", hex::encode(tx_hash.0));
 
@@ -205,7 +203,21 @@ impl EventProcessor {
 
         let processed = if chain_id == LINEA_SEPOLIA_CHAIN_ID {
             // Process host chain events
-            let event = parse_withdraw_on_extension_chain_event(&log);
+            let event = parse_withdraw_on_extension_chain_event(log);
+            
+            // Update database with more details from the event
+            if let Err(e) = self.db.update_event(EventUpdate {
+                tx_hash,
+                msg_sender: Some(event.sender),
+                dst_chain_id: Some(event.dst_chain_id),
+                amount: Some(event.amount),
+                target_function: Some("outHere".to_string()),
+                market: Some(market),
+                ..Default::default()
+            }).await {
+                error!("Failed to update event details: {:?}", e);
+            }
+            
             ProcessedEvent::HostWithdraw {
                 tx_hash,
                 sender: event.sender,
@@ -215,12 +227,32 @@ impl EventProcessor {
             }
         } else {
             // Process extension chain events
-            let event = parse_supplied_event(&log);
+            let event = parse_supplied_event(log);
             
             // Validate method selector before processing
             if event.linea_method_selector != MINT_EXTERNAL_SELECTOR && 
                event.linea_method_selector != REPAY_EXTERNAL_SELECTOR {
                 return Err(eyre::eyre!("Invalid method selector: {}", event.linea_method_selector));
+            }
+            
+            let function_name = if event.linea_method_selector == MINT_EXTERNAL_SELECTOR {
+                "mintExternal"
+            } else {
+                "repayExternal"
+            };
+            
+            // Update database with more details from the event
+            if let Err(e) = self.db.update_event(EventUpdate {
+                tx_hash,
+                msg_sender: Some(event.from),
+                src_chain_id: Some(event.src_chain_id),
+                dst_chain_id: Some(event.dst_chain_id),
+                amount: Some(event.amount),
+                target_function: Some(function_name.to_string()),
+                market: Some(market),
+                ..Default::default()
+            }).await {
+                error!("Failed to update event details: {:?}", e);
             }
 
             ProcessedEvent::ExtensionSupply {
@@ -235,17 +267,18 @@ impl EventProcessor {
         };
 
         // Log when event is processed
-        if let Some(tx_hash) = log.transaction_hash {
-            if let Err(e) = self.db.update_event(EventUpdate {
-                tx_hash: tx_hash,
-                status: EventStatus::Processed,
-                ..Default::default()
-            }).await {
-                error!("Failed to update processed status in database: {:?}", e);
-            } else {
-                info!("Successfully updated processed status in database");
-            }
-        }
+        let event_type = match &processed {
+            ProcessedEvent::HostBorrow { .. } => "HostBorrow",
+            ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
+            ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
+        };
+
+        self.db.update_event(EventUpdate {
+            tx_hash: tx_hash,
+            status: EventStatus::Processed,
+            event_type: Some(event_type.to_string()),
+            ..Default::default()
+        }).await?;
 
         Ok(processed)
     }
@@ -255,13 +288,13 @@ impl EventProcessor {
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
-    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_event_processor() -> Result<()> {
         let (_raw_tx, raw_rx) = mpsc::channel(100);
         let (processed_tx, _processed_rx) = mpsc::channel(100);
-        let db = Database::new();
+        let db_url = "postgres://postgres:postgres@localhost:5432/sequencer_test";
+        let db = Database::new(db_url).await?;
         
         let _processor = EventProcessor::new(raw_rx, processed_tx, db);
         Ok(())

@@ -9,6 +9,7 @@ CREATE TYPE event_status AS ENUM (
     'ProofReceived',
     'BatchSubmitted',
     'BatchIncluded',
+    'BatchFailed',
     'TxProcessSuccess',
     'TxProcessFail',
     'Failed'
@@ -16,7 +17,7 @@ CREATE TYPE event_status AS ENUM (
 
 CREATE TABLE events (
     tx_hash TEXT PRIMARY KEY,
-    status event_status NOT NULL
+    status event_status NOT NULL,
     event_type TEXT,
     src_chain_id INTEGER,
     dst_chain_id INTEGER,
@@ -36,7 +37,7 @@ CREATE TABLE events (
     batch_included_at TIMESTAMP WITH TIME ZONE,
     tx_finished_at TIMESTAMP WITH TIME ZONE,
     resubmitted INTEGER,
-    error TEXT,
+    error TEXT
 );
 
 CREATE INDEX idx_events_status ON events(status);

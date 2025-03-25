@@ -27,7 +27,6 @@ use crate::{
 mod event_listener;
 use event_listener::{EventListener, EventConfig, RawEvent};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
 mod event_processor;
 use event_processor::EventProcessor;
@@ -54,6 +53,7 @@ use std::env;
 use std::collections::HashMap;
 
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
+pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
 type ProviderType = alloy::providers::fillers::FillProvider<
     JoinFill<
@@ -72,6 +72,42 @@ type RpcUrls = HashMap<u32, String>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber for console output
+    // Log level can be controlled via RUST_LOG environment variable:
+    // - RUST_LOG=trace,info,debug,warn,error (from most to least verbose)
+    // - RUST_LOG=sequencer=debug (set specific level for the sequencer module)
+    // - RUST_LOG=sequencer=debug,transaction_manager=trace (different levels for different modules)
+    tracing_subscriber::fmt()
+        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .with_thread_names(true)
+        .with_target(false)
+        .with_ansi(true)
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+    
+    // Set up panic hook to log panics
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = if let Some(loc) = panic_info.location() {
+            format!("{}:{}", loc.file(), loc.line())
+        } else {
+            "unknown location".to_string()
+        };
+        
+        let msg = match panic_info.payload().downcast_ref::<&'static str>() {
+            Some(s) => *s,
+            None => match panic_info.payload().downcast_ref::<String>() {
+                Some(s) => &s[..],
+                None => "Box<Any>",
+            },
+        };
+        
+        error!("PANIC: '{}' at {}", msg, location);
+    }));
+    
+    info!("Sequencer starting up...");
+
     // Set required environment variables if not already set
     if env::var("BONSAI_API_KEY").is_err() {
         env::set_var("BONSAI_API_KEY", "SrSzB6P4SFaWv7WAK12ph5K6aL6dXs4S1a0XMif5");
@@ -95,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize database
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sequencer".to_string());
+    info!("Using database URL: {}", database_url.replace("postgres://", "postgres://*****:*****@"));
     let db = Database::new(&database_url).await?;
 
     // Test database connection
@@ -159,9 +196,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             chain_id,
         };
         
-        let listener = BatchEventListener::new(config);
+        let batch_listener = BatchEventListener::new(
+            config,
+            db.clone(),
+        );
         let handle = tokio::spawn(async move {
-            if let Err(e) = listener.start().await {
+            if let Err(e) = batch_listener.start().await {
                 error!("Batch event listener failed: {:?}", e);
             }
         });
@@ -175,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn event listeners
     let mut handles = vec![];
     
-    for market in markets {
+    for market in &markets {
         for (ws_url, chain_id, events) in chain_configs.iter() {
             for event in events {
                 info!(
@@ -185,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 let config = EventConfig {
                     ws_url: ws_url.to_string(),
-                    market,
+                    market: *market,
                     event_signature: event.to_string(),
                     chain_id: *chain_id,
                 };
@@ -257,10 +297,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     handles.push(tx_manager_handle);
 
+    // Log configuration summary
+    info!("----------------- SEQUENCER CONFIGURATION -----------------");
+    info!("Database: {}", database_url.replace("postgres://", "postgres://*****:*****@"));
+    info!("Markets: {}", markets.len());
+    info!("Chains: {}", chain_configs.len());
+    info!("Max proof retries: {}", MAX_PROOF_RETRIES);
+    info!("Transaction timeout: {:?}", TX_TIMEOUT);
+    info!("Socket path: {}", UNIX_SOCKET_PATH);
+    info!("----------------------------------------------------------");
     info!("All components initialized and running");
 
     // Set up Unix socket for manual event injection
-    let socket_path = "/tmp/sequencer.sock";
+    let socket_path = UNIX_SOCKET_PATH;
     // Remove the socket file if it exists
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;

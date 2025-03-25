@@ -4,20 +4,16 @@ use alloy::{
     primitives::{TxHash, U256, FixedBytes},
     transports::http::reqwest::Url,
     providers::Provider,
-    rpc::types::TransactionReceipt,
+    network::ReceiptResponse,
 };
 use tokio::sync::mpsc;
 use tracing::{warn, debug};
 use std::time::Duration;
 use futures::future::join_all;
-use hex;
-use eyre::WrapErr;
-use rand::Rng;
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use crate::ProofReadyEvent;
-use chrono;
 
-type Bytes4 = FixedBytes<4>; 
+type Bytes4 = FixedBytes<4>;
 
 use crate::{
     // proof_generator::ProofReadyEvent,
@@ -195,9 +191,18 @@ impl TransactionManager {
         let journal_data = events[0].journal.clone();
         let seal = events[0].seal.clone();
 
-        println!("Started Processing chain {} batch", chain_id);
+        info!("Started processing chain {} batch", chain_id);
 
+        // Mark all events as included in batch
         for event in events {
+            if let Err(e) = db.update_event(EventUpdate {
+                tx_hash: event.tx_hash,
+                status: EventStatus::IncludedInBatch,
+                ..Default::default()
+            }).await {
+                error!("Failed to update event to IncludedInBatch: {:?}", e);
+            }
+
             receivers.push(event.receiver);
             markets.push(event.market);
             amounts.extend(event.amount.clone());
@@ -214,13 +219,13 @@ impl TransactionManager {
         }
 
         let msg = BatchProcessMsg {
-            receivers,          // Now correctly an array
+            receivers,
             journalData: journal_data,
             seal,
             mTokens: markets,
             amounts,
             selectors,
-            initHashes: init_hashes,  // Added initHashes
+            initHashes: init_hashes,
             startIndex: U256::from(start_idx as u64),
         };
 
@@ -244,44 +249,44 @@ impl TransactionManager {
             .estimate_gas()
             .await?;
         let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
-        
+
         debug!("Estimated gas: {}, using gas limit: {}", estimated_gas, gas_limit);
+
+        // Update events with batch submission pending
+        for event in events {
+            if let Err(e) = db.update_event(EventUpdate {
+                tx_hash: event.tx_hash,
+                status: EventStatus::BatchSubmitted,
+                ..Default::default()
+            }).await {
+                error!("Failed to update event to BatchSubmitted: {:?}", e);
+            }
+        }
+
+        let gas_price = provider.get_gas_price().await? * 2;
 
         let pending_tx = action
             .gas(gas_limit)
+            .gas_price(gas_price)
             .send()
             .await?;
-        let tx_hash = pending_tx.tx_hash();
 
-        info!("Batch transaction sent with hash {}", tx_hash);
+        let tx_hash = pending_tx.tx_hash().clone();
 
-        // Update database when batch transaction is initialized
-        let init_time = chrono::Utc::now();
-        let init_update_futures: Vec<_> = events.iter().map(|event| {
-            let db = db.clone();
-            let tx_hash = tx_hash;
-            println!("Trying to update DB for processing chain {} batch", chain_id);
-            async move {
-                if let Err(e) = db.update_event(EventUpdate {
-                    tx_hash: event.tx_hash,
-                    batch_tx_hash: Some(format!("0x{}", hex::encode(tx_hash.0))),
-                    status: EventStatus::BatchSubmitStarted,
-                    event_type: Some(event.method.clone()),
-                    dst_chain_id: Some(event.dst_chain_id),
-                    msg_sender: Some(event.receiver),
-                    amount: Some(event.amount[0]),
-                    ..Default::default()
-                }).await {
-                    error!("Failed to update batch initiation in database for event {}: {:?}", event.tx_hash, e);
-                } else {
-                    info!("Updated event {} status to BatchInitiated at {}", event.tx_hash, init_time);
-                    println!("Updated DB for chain {} batch", chain_id);
-                }
+        info!("Submitted batch transaction: {:?}", tx_hash);
+
+        // Update all events with the batch tx hash
+        for event in events {
+            if let Err(e) = db.update_event(EventUpdate {
+                tx_hash: event.tx_hash,
+                batch_tx_hash: Some(tx_hash.to_string()),
+                ..Default::default()
+            }).await {
+                error!("Failed to update event with batch tx hash: {:?}", e);
             }
-        }).collect();
+        }
 
-        join_all(init_update_futures).await;
-
+        // Wait for transaction confirmation
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
             Ok(hash) => {
                 info!("Batch transaction confirmed with hash {:?}", hash);
@@ -291,40 +296,50 @@ impl TransactionManager {
                     .await?
                     .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
-                if receipt.status() {
-                    // Update database when batch transaction is confirmed
-                    let confirm_time = chrono::Utc::now();
-                    let confirm_update_futures: Vec<_> = events.iter().map(|event| {
-                        let db = db.clone();
-                        async move {
-                            if let Err(e) = db.update_event(EventUpdate {
-                                tx_hash: event.tx_hash,
-                                batch_tx_hash: Some(format!("0x{}", hex::encode(hash.0))),
-                                status: EventStatus::BatchSubmitted,
-                                event_type: Some(event.method.clone()),
-                                dst_chain_id: Some(event.dst_chain_id),
-                                msg_sender: Some(event.receiver),
-                                amount: Some(event.amount[0]),
-                                ..Default::default()
-                            }).await {
-                                error!("Failed to update batch confirmation in database for event {}: {:?}", event.tx_hash, e);
-                            } else {
-                                info!("Updated event {} status to BatchConfirmed at {}", event.tx_hash, confirm_time);
-                            }
-                        }
-                    }).collect();
-
-                    join_all(confirm_update_futures).await;
-                    Ok(hash)
+                // Check transaction status
+                let status = if receipt.status() == true {
+                    EventStatus::BatchIncluded
                 } else {
-                    Err(eyre::eyre!("Transaction failed"))
+                    EventStatus::BatchFailed { error: "Transaction reverted".to_string() }
+                };
+
+                // Update all events with transaction status
+                for event in events {
+                    if let Err(e) = db.update_event(EventUpdate {
+                        tx_hash: event.tx_hash,
+                        status: status.clone(),
+                        ..Default::default()
+                    }).await {
+                        error!("Failed to update event with transaction status: {:?}", e);
+                    }
                 }
+
+                info!(
+                    "Batch transaction mined: hash={:?}, status={}, gas_used={}",
+                    receipt.transaction_hash,
+                    receipt.status(),
+                    receipt.gas_used()
+                );
             },
             Err(e) => {
-                error!("Batch transaction failed: {}", e);
-                Err(e.into())
+                // Transaction failed or timed out
+                error!("Transaction failed or timed out: {}", e);
+                
+                // Update all events with failure status
+                for event in events {
+                    if let Err(db_err) = db.update_event(EventUpdate {
+                        tx_hash: event.tx_hash,
+                        status: EventStatus::BatchFailed { error: format!("Transaction error: {}", e) },
+                        resubmitted: Some(1),
+                        ..Default::default()
+                    }).await {
+                        error!("Failed to update event with failure status: {:?}", db_err);
+                    }
+                }
             }
         }
+
+        Ok(tx_hash)
     }
 
 }

@@ -8,11 +8,13 @@ use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tracing::{info, error, debug};
+use chrono::{Utc};
 
 use crate::events::{
     BATCH_PROCESS_FAILED_SIG, BATCH_PROCESS_SUCCESS_SIG,
     parse_batch_process_failed_event, parse_batch_process_success_event,
 };
+use sequencer::database::{Database, EventUpdate, EventStatus};
 
 #[derive(Debug)]
 pub struct BatchEventConfig {
@@ -23,12 +25,14 @@ pub struct BatchEventConfig {
 
 pub struct BatchEventListener {
     config: BatchEventConfig,
+    db: Database,
 }
 
 impl BatchEventListener {
-    pub fn new(config: BatchEventConfig) -> Self {
+    pub fn new(config: BatchEventConfig, db: Database) -> Self {
         Self { 
             config,
+            db,
         }
     }
 
@@ -65,29 +69,59 @@ impl BatchEventListener {
 
         info!("Successfully subscribed to batch events");
 
-        loop {
-            tokio::select! {
-                Some(log) = success_stream.next() => {
-                    let event = parse_batch_process_success_event(&log);
-                    info!(
-                        "Batch process success on chain {}: init_hash={:?}",
-                        self.config.chain_id, event.init_hash
-                    );
-                }
-                Some(log) = failure_stream.next() => {
-                    let event = parse_batch_process_failed_event(&log);
-                    error!(
-                        "Batch process failed on chain {}: init_hash={:?}, reason={:?}",
-                        self.config.chain_id, event.init_hash, event.reason
-                    );
-                }
-                else => break,
-            }
-        }
+        // Clone db for both tasks
+        let db_success = self.db.clone();
+        let db_failure = self.db.clone();
+        let chain_id = self.config.chain_id;
 
-        error!("Batch event streams ended unexpectedly");
+        // Spawn success event handler
+        let success_handle = tokio::spawn(async move {
+            while let Some(log) = success_stream.next().await {
+                let event = parse_batch_process_success_event(&log);
+                info!(
+                    "Batch process success on chain {}: init_hash={:?}",
+                    chain_id, event.init_hash
+                );
+                
+                if let Err(e) = db_success.update_event(EventUpdate {
+                    tx_hash: event.init_hash,
+                    status: EventStatus::TxProcessSuccess,
+                    ..Default::default()
+                }).await {
+                    error!("Failed to update database for success event: {:?}", e);
+                }
+            }
+            error!("Success event stream ended");
+        });
+
+        // Spawn failure event handler
+        let failure_handle = tokio::spawn(async move {
+            while let Some(log) = failure_stream.next().await {
+                let event = parse_batch_process_failed_event(&log);
+                error!(
+                    "Batch process failed on chain {}: init_hash={:?}, reason={:?}",
+                    chain_id, event.init_hash, event.reason
+                );
+                
+                if let Err(e) = db_failure.update_event(EventUpdate {
+                    tx_hash: event.init_hash,
+                    status: EventStatus::TxProcessFail,
+                    ..Default::default()
+                }).await {
+                    error!("Failed to update database for failure event: {:?}", e);
+                }
+            }
+            error!("Failure event stream ended");
+        });
+
+        // Wait for both tasks to complete (they should run indefinitely)
+        tokio::try_join!(success_handle, failure_handle)
+            .map_err(|e| eyre::eyre!("Event listener task failed: {}", e))?;
+
+        error!("Both event streams ended unexpectedly");
         Ok(())
     }
+
 }
 
 #[cfg(test)]
@@ -103,7 +137,8 @@ mod tests {
             chain_id: TEST_CHAIN_ID,
         };
 
-        let _listener = BatchEventListener::new(config);
+        let db = Database::new("postgresql://localhost:5432/test").await?;
+        let _listener = BatchEventListener::new(config, db);
         Ok(())
     }
 } 
