@@ -206,14 +206,21 @@ impl TransactionManager {
             receivers.push(event.receiver);
             markets.push(event.market);
             amounts.extend(event.amount.clone());
-            selectors.push(match event.method.as_str() {
-                "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
-                "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),
-                "repayExternal" => Bytes4::from_slice(REPAY_EXTERNAL_SELECTOR_FB4),
-                method => {
-                    error!("Invalid transaction method: {}", method);
-                    return Err(eyre::eyre!("Invalid method: {}", method));
-                }
+            selectors.push(match event.dst_chain_id {
+                // For Linea chain, use the method-specific selector
+                chain_id if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 => {
+                    match event.method.as_str() {
+                        "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
+                        "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),
+                        "repayExternal" => Bytes4::from_slice(REPAY_EXTERNAL_SELECTOR_FB4),
+                        method => {
+                            error!("Invalid transaction method for Linea: {}", method);
+                            return Err(eyre::eyre!("Invalid method for Linea: {}", method));
+                        }
+                    }
+                },
+                // For all other chains, always use outHere
+                _ => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
             });
             init_hashes.push(event.tx_hash.into());
         }
@@ -305,9 +312,22 @@ impl TransactionManager {
 
                 // Update all events with transaction status
                 for event in events {
+                    // Get current status before updating
+                    let current_status = db.get_event_status(&event.tx_hash).await?;
+                    
+                    // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use new status
+                    let status = if let Some(current) = current_status {
+                        match current {
+                            EventStatus::TxProcessSuccess | EventStatus::TxProcessFail => current,
+                            _ => status.clone(),
+                        }
+                    } else {
+                        status.clone()
+                    };
+
                     if let Err(e) = db.update_event(EventUpdate {
                         tx_hash: event.tx_hash,
-                        status: status.clone(),
+                        status,
                         ..Default::default()
                     }).await {
                         error!("Failed to update event with transaction status: {:?}", e);
@@ -327,9 +347,22 @@ impl TransactionManager {
                 
                 // Update all events with failure status
                 for event in events {
+                    // Get current status before updating
+                    let current_status = db.get_event_status(&event.tx_hash).await?;
+                    
+                    // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use BatchFailed
+                    let status = if let Some(current) = current_status {
+                        match current {
+                            EventStatus::TxProcessSuccess | EventStatus::TxProcessFail => current,
+                            _ => EventStatus::BatchFailed { error: format!("Transaction error: {}", e) },
+                        }
+                    } else {
+                        EventStatus::BatchFailed { error: format!("Transaction error: {}", e) }
+                    };
+
                     if let Err(db_err) = db.update_event(EventUpdate {
                         tx_hash: event.tx_hash,
-                        status: EventStatus::BatchFailed { error: format!("Transaction error: {}", e) },
+                        status,
                         resubmitted: Some(1),
                         ..Default::default()
                     }).await {

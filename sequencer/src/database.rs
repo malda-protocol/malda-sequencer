@@ -176,9 +176,9 @@ impl Database {
     }
 
     pub async fn get_event_status(&self, tx_hash: &TxHash) -> Result<Option<EventStatus>> {
-        // Use query_as instead of query! macro
+        // Use query_as to handle the event_status enum type
         let record = sqlx::query_as::<_, (String,)>(
-            "SELECT status FROM events WHERE tx_hash = $1"
+            "SELECT status::text FROM events WHERE tx_hash = $1"
         )
         .bind(tx_hash.to_string())
         .fetch_optional(&self.pool)
