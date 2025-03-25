@@ -13,7 +13,7 @@ use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
-use crate::event_processor::ProcessedEvent;
+use crate::event_listener::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 
 #[derive(Debug, Clone)]
@@ -198,7 +198,7 @@ impl ProofGeneratorWorker {
         let mut markets: Vec<Vec<Address>> = Vec::new();
         let mut dst_chain_ids: Vec<Vec<u64>> = Vec::new();
         let mut src_chain_ids: Vec<u64> = Vec::new();
-        let mut event_details = Vec::new();
+        let mut event_details: Vec<(alloy::primitives::FixedBytes<32>, alloy::primitives::Uint<256, 4>, Address, u32, String)> = Vec::new();
 
         // Group events by source chain
         let mut current_src_chain: Option<u64> = None;

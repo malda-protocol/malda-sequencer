@@ -9,17 +9,21 @@ SEQUENCER_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
+# Set Bonsai API environment variables
+export BONSAI_API_KEY="SrSzB6P4SFaWv7WAK12ph5K6aL6dXs4S1a0XMif5"
+export BONSAI_API_URL="https://api.bonsai.xyz/"
+
 # Stop and remove existing container
 docker stop sequencer-db || true
 docker rm sequencer-db || true
 
 # Start PostgreSQL container
-docker run -d \
+nohup docker run -d \
   --name sequencer-db \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=sequencer \
   -p 5432:5432 \
-  postgres:14
+  postgres:14 > /dev/null 2>&1 &
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."

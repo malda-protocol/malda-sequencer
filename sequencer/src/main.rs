@@ -21,12 +21,8 @@ pub mod types;
 use crate::{constants::*, events::*};
 
 mod event_listener;
-use event_listener::{EventConfig, EventListener, RawEvent};
+use event_listener::{EventConfig, EventListener, RawEvent, ProcessedEvent};
 use tokio::sync::mpsc;
-
-mod event_processor;
-use event_processor::EventProcessor;
-use event_processor::ProcessedEvent;
 
 mod proof_generator;
 use proof_generator::{ProofGenerator, ProofReadyEvent};
@@ -70,60 +66,22 @@ type RpcUrls = HashMap<u32, String>;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing subscriber for console output
     // Log level can be controlled via RUST_LOG environment variable:
-    // - RUST_LOG=trace,info,debug,warn,error (from most to least verbose)
-    // - RUST_LOG=sequencer=debug (set specific level for the sequencer module)
-    // - RUST_LOG=sequencer=debug,transaction_manager=trace (different levels for different modules)
+    // - RUST_LOG=debug for debug logs
+    // - RUST_LOG=info for info logs
+    // - RUST_LOG=warn for warning logs
+    // - RUST_LOG=error for error logs
     tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .with_thread_names(true)
-        .with_target(false)
-        .with_ansi(true)
+        .with_env_filter("info")
         .with_file(true)
         .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
         .init();
 
-    // Set up panic hook to log panics
-    std::panic::set_hook(Box::new(|panic_info| {
-        let location = if let Some(loc) = panic_info.location() {
-            format!("{}:{}", loc.file(), loc.line())
-        } else {
-            "unknown location".to_string()
-        };
+    // Load environment variables
+    dotenv::dotenv().ok();
 
-        let msg = match panic_info.payload().downcast_ref::<&'static str>() {
-            Some(s) => *s,
-            None => match panic_info.payload().downcast_ref::<String>() {
-                Some(s) => &s[..],
-                None => "Box<Any>",
-            },
-        };
-
-        error!("PANIC: '{}' at {}", msg, location);
-    }));
-
-    info!("Sequencer starting up...");
-
-    // Set required environment variables if not already set
-    if env::var("BONSAI_API_KEY").is_err() {
-        env::set_var("BONSAI_API_KEY", "SrSzB6P4SFaWv7WAK12ph5K6aL6dXs4S1a0XMif5");
-    }
-    if env::var("BONSAI_API_URL").is_err() {
-        env::set_var("BONSAI_API_URL", "https://api.bonsai.xyz/");
-    }
-
-    // Log environment setup
-    info!(
-        "BONSAI_API_URL set to: {}",
-        env::var("BONSAI_API_URL").unwrap()
-    );
-    info!("BONSAI_API_KEY is set"); // Don't log the actual key
-
-    // Load .env file
-    dotenv().ok();
-
-    // Create channels
-    let (event_sender, event_receiver) = mpsc::channel::<RawEvent>(100);
+    // Initialize channels
     let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
     let (proof_sender, proof_receiver) = mpsc::channel::<Vec<ProofReadyEvent>>(100);
 
@@ -148,13 +106,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(_) => info!("Successfully wrote test event to database"),
         Err(e) => error!("Failed to write test event: {:?}", e),
     }
-
-    // Create event processor
-    let mut event_processor = EventProcessor::new(
-        event_receiver, // Clone the receiver
-        processed_sender.clone(),
-        db.clone(),
-    );
 
     // Markets
     let markets = vec![
@@ -250,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     chain_id: *chain_id,
                 };
 
-                let listener = EventListener::new(config, event_sender.clone());
+                let listener = EventListener::new(config, processed_sender.clone(), db.clone());
                 let handle = tokio::spawn(async move {
                     if let Err(e) = listener.start().await {
                         error!("Event listener failed: {:?}", e);
@@ -298,13 +249,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut transaction_manager = TransactionManager::new(proof_receiver, tx_config, db.clone());
 
     // Spawn processors
-    let processor_handle = tokio::spawn(async move {
-        if let Err(e) = event_processor.start().await {
-            error!("Event processor failed: {:?}", e);
-        }
-    });
-    handles.push(processor_handle);
-
     let proof_generator_handle = tokio::spawn(async move {
         if let Err(e) = proof_generator.start().await {
             error!("Proof generator failed: {:?}", e);
