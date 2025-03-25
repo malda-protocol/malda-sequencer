@@ -16,6 +16,22 @@ pub enum EventStatus {
     Failed { error: String },
 }
 
+impl EventStatus {
+    // Convert to database string representation
+    fn to_db_string(&self) -> String {
+        match self {
+            EventStatus::Received => "Received",
+            EventStatus::Processed => "Processed",
+            EventStatus::IncludedInBatch => "IncludedInBatch",
+            EventStatus::ProofRequested => "ProofRequested",
+            EventStatus::ProofReceived => "ProofReceived",
+            EventStatus::BatchSubmitStarted => "BatchSubmitStarted",
+            EventStatus::BatchSubmitted => "BatchSubmitted",
+            EventStatus::Failed { .. } => "Failed",
+        }.to_string()
+    }
+}
+
 // Add Default implementation for EventStatus
 impl Default for EventStatus {
     fn default() -> Self {
@@ -48,39 +64,9 @@ impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::PgPool::connect(database_url).await?;
         
-        // Use the imported query function
-        query(
-            r#"
-            CREATE TABLE IF NOT EXISTS events (
-                tx_hash TEXT PRIMARY KEY,
-                event_type TEXT,
-                src_chain_id INTEGER,
-                dst_chain_id INTEGER,
-                msg_sender TEXT,
-                amount TEXT,
-                status JSONB NOT NULL,
-                received_at TIMESTAMP WITH TIME ZONE,
-                processed_at TIMESTAMP WITH TIME ZONE,
-                included_in_batch_at TIMESTAMP WITH TIME ZONE,
-                proof_requested_at TIMESTAMP WITH TIME ZONE,
-                proof_received_at TIMESTAMP WITH TIME ZONE,
-                batch_submit_started_at TIMESTAMP WITH TIME ZONE,
-                batch_submitted_at TIMESTAMP WITH TIME ZONE,
-                batch_id TEXT,
-                proof_data BYTEA,
-                proof_index INTEGER,
-                batch_tx_hash TEXT,
-                error TEXT,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            )"#
-        )
-        .execute(&pool)
-        .await?;
-
-        // Verify table was created
-        sqlx::query("SELECT 1 FROM events LIMIT 1")
-            .execute(&pool)
+        // Run migrations
+        sqlx::migrate!("./migrations")
+            .run(&pool)
             .await?;
 
         info!("Database initialized successfully");
@@ -139,7 +125,7 @@ impl Database {
         .bind(update.dst_chain_id.map(|id| id as i32))
         .bind(update.msg_sender.map(|addr| addr.to_string()))
         .bind(update.amount.map(|amt| amt.to_string()))
-        .bind(status_json)
+        .bind(update.status.to_db_string())
         // Timestamp flags based on status
         .bind(matches!(update.status, EventStatus::Received))
         .bind(matches!(update.status, EventStatus::Processed))
