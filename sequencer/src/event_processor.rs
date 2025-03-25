@@ -162,7 +162,7 @@ impl EventProcessor {
         // Update with processed information
         let update = EventUpdate {
             tx_hash,
-            dst_chain_id: dst_chain_id.map(|id| id.try_into().unwrap()),
+            dst_chain_id: dst_chain_id,
             msg_sender,
             amount,
             target_function,
