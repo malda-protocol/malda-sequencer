@@ -5,7 +5,10 @@ use alloy::{
 use serde::{Deserialize, Serialize};
 use hex;
 
-type Bytes4 = FixedBytes<4>;  
+// Mark as used since it might be used elsewhere through imports
+#[allow(dead_code)]
+type Bytes4 = FixedBytes<4>;
+
 type Bytes32 = FixedBytes<32>;  
 
 #[derive(Debug, Serialize, Deserialize)]

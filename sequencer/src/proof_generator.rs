@@ -2,10 +2,7 @@ use eyre::Result;
 use tracing::{info, error, debug, warn};
 use alloy::primitives::{Address, Bytes, U256, TxHash};
 use tokio::sync::mpsc;
-use tokio_stream::Stream;
-use tokio_stream::StreamExt;
 use std::time::Duration;
-use tokio::task;
 use tokio::time::{sleep, Instant};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -235,6 +232,9 @@ impl ProofGeneratorWorker {
                 }
             };
 
+            // Store original event details for later use
+            event_details.push((tx_hash, market, amount, user, method.clone()));
+
             // If we encounter a new source chain, push the current batch and start a new one
             if current_src_chain != Some(src_chain) {
                 if !current_users.is_empty() {
@@ -253,7 +253,6 @@ impl ProofGeneratorWorker {
             current_users.push(user);
             current_markets.push(market);
             current_dst_chains.push(dst_chain);
-            event_details.push((tx_hash, amount, market, dst_chain as u32, method));
         }
 
         // Push the last batch
@@ -283,31 +282,34 @@ impl ProofGeneratorWorker {
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
         // Update database status for each event
-        for (tx_hash, _, _, _, _) in &event_details {
+        for (tx_hash, _market, _amount, _receiver, method) in &event_details {
             let update = EventUpdate {
                 tx_hash: *tx_hash,
+                journal: Some(journal.clone()),
+                seal: Some(seal.clone()),
+                target_function: Some(method.clone()),
                 status: EventStatus::ProofReceived,
-                proof_data: Some(journal.to_vec()),
-                error: None,
                 ..Default::default()
             };
 
             if let Err(e) = self.db.update_event(update).await {
-                error!("Failed to update event status to ProofReceived: {:?}", e);
+                error!("Failed to update event with proof data: {:?}", e);
+            } else {
+                info!("Updated proof data for tx_hash: {}", hex::encode(tx_hash.0));
             }
         }
 
         // Create proof events for each original event
-        Ok(event_details.into_iter().map(|(tx_hash, amount, market, dst_chain_id, method)| {
+        Ok(event_details.into_iter().map(|(tx_hash, market, amount, receiver, method)| {
             ProofReadyEvent {
                 tx_hash,
                 market,
                 journal: journal.clone(),
                 seal: seal.clone(),
                 amount: vec![amount],
-                receiver: Address::ZERO,
+                receiver,
                 method,
-                dst_chain_id,
+                dst_chain_id: dst_chain_ids[0][0] as u32,
             }
         }).collect())
     }
