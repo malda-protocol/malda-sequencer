@@ -1,4 +1,3 @@
-use crate::ProofReadyEvent;
 use alloy::{
     network::ReceiptResponse,
     primitives::{FixedBytes, TxHash, U256},
@@ -9,7 +8,7 @@ use eyre::Result;
 use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tracing::{debug, warn};
 use tracing::{error, info};
 use chrono::{DateTime, Utc};
@@ -21,7 +20,6 @@ use crate::{
     create_provider,
     events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
-    // proof_generator::ProofReadyEvent,
     ProviderType,
 };
 
@@ -30,10 +28,10 @@ pub struct TransactionConfig {
     pub max_retries: u32,
     pub retry_delay: Duration,
     pub rpc_urls: Vec<(u32, String)>, // (chain_id, url)
+    pub poll_interval: Duration,
 }
 
 pub struct TransactionManager {
-    event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
     config: TransactionConfig,
     db: Database,
 }
@@ -47,13 +45,8 @@ impl std::fmt::Debug for TransactionManager {
 }
 
 impl TransactionManager {
-    pub fn new(
-        event_receiver: mpsc::Receiver<Vec<ProofReadyEvent>>,
-        config: TransactionConfig,
-        db: Database,
-    ) -> Self {
+    pub fn new(config: TransactionConfig, db: Database) -> Self {
         Self {
-            event_receiver,
             config,
             db,
         }
@@ -62,90 +55,108 @@ impl TransactionManager {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting transaction manager");
 
-        while let Some(proof_events) = self.event_receiver.recv().await {
-            let mut current_chain_id = None;
-            let mut chain_start_idx = 0;
-            let mut chain_tasks = Vec::new();
-            let config = self.config.clone();
-            let db = self.db.clone();
-
-            // Process all events including the last batch
-            for (idx, event) in proof_events.iter().enumerate() {
-                if current_chain_id != Some(event.dst_chain_id) {
-                    // Process previous chain's batch (if any)
-                    if let Some(chain_id) = current_chain_id {
-                        let chain_events = proof_events[chain_start_idx..idx].to_vec();
-                        let config = config.clone();
-                        let db = db.clone();
-
-                        chain_tasks.push(tokio::spawn(async move {
-                            match Self::process_chain_batch(
-                                &db,
-                                &chain_events,
-                                chain_start_idx,
-                                idx,
-                                chain_id,
-                                &config,
-                            ).await {
-                                Ok(tx_hash) => {
-                                    info!(
-                                        "Batch transaction submitted successfully for chain {}: {:?} (indices {}-{})",
-                                        chain_id, tx_hash, chain_start_idx, idx
-                                    );
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "Failed to process batch for chain {}: {}",
-                                        chain_id, e
-                                    );
-                                }
-                            }
-                        }));
+        loop {
+            // Get all events with ProofReceived status from the database
+            match self.db.get_proven_events().await {
+                Ok(events) => {
+                    if !events.is_empty() {
+                        info!("Found {} proven events to process", events.len());
+                        self.process_events(events).await?;
                     }
-                    current_chain_id = Some(event.dst_chain_id);
-                    chain_start_idx = idx;
+                }
+                Err(e) => {
+                    error!("Failed to get proven events from database: {}", e);
                 }
             }
 
-            // Process the final chain's batch
-            if let Some(chain_id) = current_chain_id {
-                let chain_events = proof_events[chain_start_idx..].to_vec();
-                let config = config.clone();
-                let db = db.clone();
+            // Wait before next poll
+            sleep(self.config.poll_interval).await;
+        }
+    }
 
-                chain_tasks.push(tokio::spawn(async move {
-                    
-                    match Self::process_chain_batch(
-                        &db,
-                        &chain_events,
-                        chain_start_idx,
-                        proof_events.len(),
-                        chain_id,
-                        &config,
-                    ).await {
-                        Ok(tx_hash) => {
-                            info!(
-                                "Batch transaction submitted successfully for chain {}: {:?} (indices {}-{})",
-                                chain_id, tx_hash, chain_start_idx, proof_events.len()
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to process batch for chain {}: {}",
-                                chain_id, e
-                            );
-                        }
-                    }
-                }));
-            }
+    async fn process_events(&self, events: Vec<EventUpdate>) -> Result<()> {
+        let mut current_chain_id = None;
+        let mut chain_start_idx = 0;
+        let mut chain_tasks = Vec::new();
+        let config = self.config.clone();
+        let db = self.db.clone();
 
-            // Wait for all chain transactions to complete
-            if !chain_tasks.is_empty() {
-                join_all(chain_tasks).await;
+        // Process all events including the last batch
+        for (idx, event) in events.iter().enumerate() {
+            let dst_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
+            
+            if current_chain_id != Some(dst_chain_id) {
+                // Process previous chain's batch (if any)
+                if let Some(chain_id) = current_chain_id {
+                    let chain_events = events[chain_start_idx..idx].to_vec();
+                    let config = config.clone();
+                    let db = db.clone();
+
+                    chain_tasks.push(tokio::spawn(async move {
+                        match Self::process_chain_batch(
+                            &db,
+                            &chain_events,
+                            chain_start_idx,
+                            idx,
+                            chain_id,
+                            &config,
+                        ).await {
+                            Ok(tx_hash) => {
+                                info!(
+                                    "Batch transaction submitted successfully for chain {}: {:?} (indices {}-{})",
+                                    chain_id, tx_hash, chain_start_idx, idx
+                                );
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to process batch for chain {}: {}",
+                                    chain_id, e
+                                );
+                            }
+                        }
+                    }));
+                }
+                current_chain_id = Some(dst_chain_id);
+                chain_start_idx = idx;
             }
         }
 
-        warn!("Transaction manager channel closed");
+        // Process the final chain's batch
+        if let Some(chain_id) = current_chain_id {
+            let chain_events = events[chain_start_idx..].to_vec();
+            let config = config.clone();
+            let db = db.clone();
+
+            chain_tasks.push(tokio::spawn(async move {
+                match Self::process_chain_batch(
+                    &db,
+                    &chain_events,
+                    chain_start_idx,
+                    events.len(),
+                    chain_id,
+                    &config,
+                ).await {
+                    Ok(tx_hash) => {
+                        info!(
+                            "Batch transaction submitted successfully for chain {}: {:?} (indices {}-{})",
+                            chain_id, tx_hash, chain_start_idx, events.len()
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to process batch for chain {}: {}",
+                            chain_id, e
+                        );
+                    }
+                }
+            }));
+        }
+
+        // Wait for all chain transactions to complete
+        if !chain_tasks.is_empty() {
+            join_all(chain_tasks).await;
+        }
+
         Ok(())
     }
 
@@ -168,7 +179,7 @@ impl TransactionManager {
 
     async fn process_chain_batch(
         db: &Database,
-        events: &[ProofReadyEvent],
+        events: &[EventUpdate],
         start_idx: usize,
         _end_idx: usize,
         chain_id: u32,
@@ -185,20 +196,20 @@ impl TransactionManager {
         let mut init_hashes = Vec::new();
 
         // Use the first event's journal and seal for the entire batch
-        let journal_data = events[0].journal.clone();
-        let seal = events[0].seal.clone();
+        let journal_data = events[0].journal.clone().unwrap_or_default();
+        let seal = events[0].seal.clone().unwrap_or_default();
 
         info!("Started processing chain {} batch", chain_id);
 
         // Collect data for the batch
         for event in events {
-            receivers.push(event.receiver);
-            markets.push(event.market);
-            amounts.extend(event.amount.clone());
-            selectors.push(match event.dst_chain_id {
+            receivers.push(event.msg_sender.unwrap_or_default());
+            markets.push(event.market.unwrap_or_default());
+            amounts.push(event.amount.unwrap_or_default());
+            selectors.push(match chain_id {
                 // For Linea chain, use the method-specific selector
                 chain_id if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 => {
-                    match event.method.as_str() {
+                    match event.target_function.as_deref().unwrap_or("outHere") {
                         "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
                         "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),
                         "repayExternal" => Bytes4::from_slice(REPAY_EXTERNAL_SELECTOR_FB4),
@@ -249,40 +260,20 @@ impl TransactionManager {
 
         // Update events with batch submission pending
         for event in events {
-            if let Err(e) = db
-                .update_event(EventUpdate {
-                    tx_hash: event.tx_hash,
-                    status: EventStatus::BatchSubmitted,
-                    batch_submitted_at: Some(Utc::now()),
-                    ..Default::default()
-                })
-                .await
-            {
-                error!("Failed to update event to BatchSubmitted: {:?}", e);
+            let mut update = event.clone();
+            update.status = EventStatus::BatchSubmitted;
+            update.batch_submitted_at = Some(Utc::now());
+
+            if let Err(e) = db.update_event(update).await {
+                error!("Failed to update event status to BatchSubmitted: {:?}", e);
             }
         }
 
-        let gas_price = provider.get_gas_price().await? * 2;
-
-        let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
-
+        // Send the transaction and get pending transaction
+        let pending_tx = action.gas(gas_limit).send().await?;
         let tx_hash = pending_tx.tx_hash().clone();
 
         info!("Submitted batch transaction: {:?}", tx_hash);
-
-        // Update all events with the batch tx hash
-        for event in events {
-            if let Err(e) = db
-                .update_event(EventUpdate {
-                    tx_hash: event.tx_hash,
-                    batch_tx_hash: Some(tx_hash.to_string()),
-                    ..Default::default()
-                })
-                .await
-            {
-                error!("Failed to update event with batch tx hash: {:?}", e);
-            }
-        }
 
         // Wait for transaction confirmation
         match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
@@ -295,38 +286,29 @@ impl TransactionManager {
                     .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
                 // Check transaction status
-                let status = if receipt.status() == true {
-                    EventStatus::BatchIncluded
+                if receipt.status() == true {
+                    info!(
+                        "Batch transaction mined successfully: hash={:?}, gas_used={}",
+                        receipt.transaction_hash,
+                        receipt.gas_used()
+                    );
                 } else {
-                    EventStatus::BatchFailed {
-                        error: "Transaction reverted".to_string(),
-                    }
-                };
+                    // Transaction reverted
+                    error!("Transaction reverted with hash {:?}", hash);
 
-                // Only update database for failed transactions
-                if matches!(status, EventStatus::BatchFailed { .. }) {
+                    // Update all events with failure status
                     for event in events {
-                        if let Err(e) = db
-                            .update_event(EventUpdate {
-                                tx_hash: event.tx_hash,
-                                status: status.clone(),
-                                batch_included_at: Some(Utc::now()),
-                                tx_finished_at: Some(Utc::now()),
-                                ..Default::default()
-                            })
-                            .await
-                        {
-                            error!("Failed to update event with transaction status: {:?}", e);
+                        let mut update = event.clone();
+                        update.status = EventStatus::BatchFailed {
+                            error: "Transaction reverted".to_string(),
+                        };
+                        update.batch_tx_hash = Some(tx_hash.to_string());
+
+                        if let Err(e) = db.update_event(update).await {
+                            error!("Failed to update event with failure status: {:?}", e);
                         }
                     }
                 }
-
-                info!(
-                    "Batch transaction mined: hash={:?}, status={}, gas_used={}",
-                    receipt.transaction_hash,
-                    receipt.status(),
-                    receipt.gas_used()
-                );
             }
             Err(e) => {
                 // Transaction failed or timed out
@@ -334,33 +316,13 @@ impl TransactionManager {
 
                 // Update all events with failure status
                 for event in events {
-                    // Get current status before updating
-                    let current_status = db.get_event_status(&event.tx_hash).await?;
-
-                    // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use BatchFailed
-                    let status = if let Some(current) = current_status {
-                        match current {
-                            EventStatus::TxProcessSuccess | EventStatus::TxProcessFail => current,
-                            _ => EventStatus::BatchFailed {
-                                error: format!("Transaction error: {}", e),
-                            },
-                        }
-                    } else {
-                        EventStatus::BatchFailed {
-                            error: format!("Transaction error: {}", e),
-                        }
+                    let mut update = event.clone();
+                    update.status = EventStatus::BatchFailed {
+                        error: format!("Transaction error: {}", e),
                     };
+                    update.batch_tx_hash = Some(tx_hash.to_string());
 
-                    if let Err(db_err) = db
-                        .update_event(EventUpdate {
-                            tx_hash: event.tx_hash,
-                            status,
-                            resubmitted: Some(1),
-                            tx_finished_at: Some(Utc::now()),
-                            ..Default::default()
-                        })
-                        .await
-                    {
+                    if let Err(db_err) = db.update_event(update).await {
                         error!("Failed to update event with failure status: {:?}", db_err);
                     }
                 }

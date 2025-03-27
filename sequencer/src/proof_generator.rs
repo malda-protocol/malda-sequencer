@@ -3,7 +3,6 @@ use eyre::Result;
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
 use tracing::{debug, error, info, warn};
@@ -11,20 +10,7 @@ use chrono::Utc;
 
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 
-#[derive(Debug, Clone)]
-pub struct ProofReadyEvent {
-    pub tx_hash: TxHash,
-    pub market: Address,
-    pub journal: Bytes,
-    pub seal: Bytes,
-    pub amount: Vec<U256>,
-    pub receiver: Address,
-    pub method: String,
-    pub dst_chain_id: u32,
-}
-
 pub struct ProofGenerator {
-    proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
     max_retries: u32,
     retry_delay: Duration,
     last_proof_time: Arc<Mutex<Instant>>,
@@ -34,14 +20,12 @@ pub struct ProofGenerator {
 
 impl ProofGenerator {
     pub fn new(
-        proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
         db: Database,
         batch_size: usize,
     ) -> Self {
         Self {
-            proof_sender,
             max_retries,
             retry_delay,
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
@@ -88,7 +72,6 @@ impl ProofGenerator {
             info!("Found {} new events to process", new_events.len());
 
             // Process all events in one batch
-            let proof_sender = self.proof_sender.clone();
             let max_retries = self.max_retries;
             let retry_delay = self.retry_delay;
             let db = self.db.clone();
@@ -100,20 +83,8 @@ impl ProofGenerator {
                     db,
                 };
 
-                match proof_generator.process_batch(new_events).await {
-                    Ok(proof_events) => {
-                        info!(
-                            "Successfully generated proofs for {} events",
-                            proof_events.len()
-                        );
-
-                        if let Err(e) = proof_sender.send(proof_events).await {
-                            error!("Failed to send proof ready events: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to generate proofs for batch: {}", e);
-                    }
+                if let Err(e) = proof_generator.process_batch(new_events).await {
+                    error!("Failed to generate proofs for batch: {}", e);
                 }
             });
 
@@ -130,7 +101,7 @@ struct ProofGeneratorWorker {
 }
 
 impl ProofGeneratorWorker {
-    async fn process_batch(&self, events: Vec<EventUpdate>) -> Result<Vec<ProofReadyEvent>> {
+    async fn process_batch(&self, events: Vec<EventUpdate>) -> Result<()> {
         // Sort events by src_chain (Linea first) and dst_chain
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
@@ -163,33 +134,19 @@ impl ProofGeneratorWorker {
         let mut markets: Vec<Vec<Address>> = Vec::new();
         let mut dst_chain_ids: Vec<Vec<u64>> = Vec::new();
         let mut src_chain_ids: Vec<u64> = Vec::new();
-        let mut event_details: Vec<(TxHash, U256, Address, u32, String, usize)> = Vec::new();
 
         // Group events by source chain
         let mut current_src_chain: Option<u64> = None;
         let mut current_users: Vec<Address> = Vec::new();
         let mut current_markets: Vec<Address> = Vec::new();
         let mut current_dst_chains: Vec<u64> = Vec::new();
-        let mut current_event_indices: Vec<usize> = Vec::new();
 
         // Process sorted events
-        for (idx, event) in sorted_events.iter().enumerate() {
+        for event in sorted_events.iter() {
             let src_chain = event.src_chain_id.unwrap_or(0) as u64;
             let dst_chain = event.dst_chain_id.unwrap_or(0) as u64;
             let user = event.msg_sender.unwrap_or_default();
             let market = event.market.unwrap_or_default();
-            let amount = event.amount.unwrap_or_default();
-            let method = event.target_function.clone().unwrap_or_default();
-
-            // Store original event details for later use
-            event_details.push((
-                event.tx_hash,
-                amount,
-                user,
-                dst_chain as u32,
-                method,
-                idx,
-            ));
 
             // If we encounter a new source chain, push the current batch and start a new one
             if current_src_chain != Some(src_chain) {
@@ -202,7 +159,6 @@ impl ProofGeneratorWorker {
                 current_users = Vec::new();
                 current_markets = Vec::new();
                 current_dst_chains = Vec::new();
-                current_event_indices = Vec::new();
                 current_src_chain = Some(src_chain);
             }
 
@@ -210,7 +166,6 @@ impl ProofGeneratorWorker {
             current_users.push(user);
             current_markets.push(market);
             current_dst_chains.push(dst_chain);
-            current_event_indices.push(idx);
         }
 
         // Push the last batch
@@ -240,9 +195,8 @@ impl ProofGeneratorWorker {
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
         // Update database with proof data for each event
-        for (tx_hash, amount, receiver, dst_chain_id, method, original_idx) in event_details.iter() {
-            // Update database with proof data
-            let mut update = sorted_events[*original_idx].clone();
+        for event in sorted_events.iter() {
+            let mut update = event.clone();
             update.status = EventStatus::ProofReceived;
             update.journal = Some(journal.clone());
             update.seal = Some(seal.clone());
@@ -250,25 +204,10 @@ impl ProofGeneratorWorker {
 
             if let Err(e) = self.db.update_event(update).await {
                 error!("Failed to update event with proof data: {:?}", e);
-            } else {
-                info!("Updated proof data for tx_hash: {}", hex::encode(tx_hash.0));
             }
         }
 
-        // Create proof events for each original event
-        Ok(event_details.into_iter().map(|(tx_hash, amount, receiver, dst_chain_id, method, original_idx)| {
-            let market = sorted_events[original_idx].market.unwrap_or_default();
-            ProofReadyEvent {
-                tx_hash,
-                market,  // Use the market from the original event
-                journal: journal.clone(),
-                seal: seal.clone(),
-                amount: vec![amount],
-                receiver,
-                method,
-                dst_chain_id,
-            }
-        }).collect())
+        Ok(())
     }
 
     async fn generate_proof_with_retry(
