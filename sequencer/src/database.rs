@@ -2,6 +2,7 @@ use alloy::primitives::{Address, Bytes, TxHash, U256};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, Pool, Postgres};
+use chrono::{DateTime, Utc};
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +50,7 @@ impl Default for EventStatus {
 #[derive(Debug, Clone, Default)]
 pub struct EventUpdate {
     pub tx_hash: TxHash,
+    pub status: EventStatus,
     pub event_type: Option<String>,
     pub src_chain_id: Option<u32>,
     pub dst_chain_id: Option<u32>,
@@ -60,7 +62,13 @@ pub struct EventUpdate {
     pub journal: Option<Bytes>,
     pub seal: Option<Bytes>,
     pub batch_tx_hash: Option<String>,
-    pub status: EventStatus,
+    pub received_at: Option<DateTime<Utc>>,
+    pub processed_at: Option<DateTime<Utc>>,
+    pub proof_requested_at: Option<DateTime<Utc>>,
+    pub proof_received_at: Option<DateTime<Utc>>,
+    pub batch_submitted_at: Option<DateTime<Utc>>,
+    pub batch_included_at: Option<DateTime<Utc>>,
+    pub tx_finished_at: Option<DateTime<Utc>>,
     pub resubmitted: Option<i32>,
     pub error: Option<String>,
 }
@@ -99,13 +107,7 @@ impl Database {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::event_status, $14, $15,
-                CASE WHEN $16::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $17::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $18::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $19::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $20::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $21::bool THEN NOW() ELSE NULL END,
-                CASE WHEN $22::bool THEN NOW() ELSE NULL END
+                $16, $17, $18, $19, $20, $21, $22
             )
             ON CONFLICT (tx_hash) 
             DO UPDATE SET
@@ -123,13 +125,13 @@ impl Database {
                 batch_tx_hash = COALESCE($12, events.batch_tx_hash),
                 resubmitted = COALESCE($14, events.resubmitted),
                 error = COALESCE($15, events.error),
-                received_at = CASE WHEN $16::bool THEN NOW() ELSE events.received_at END,
-                processed_at = CASE WHEN $17::bool THEN NOW() ELSE events.processed_at END,
-                proof_requested_at = CASE WHEN $18::bool THEN NOW() ELSE events.proof_requested_at END,
-                proof_received_at = CASE WHEN $19::bool THEN NOW() ELSE events.proof_received_at END,
-                batch_submitted_at = CASE WHEN $20::bool THEN NOW() ELSE events.batch_submitted_at END,
-                batch_included_at = CASE WHEN $21::bool THEN NOW() ELSE events.batch_included_at END,
-                tx_finished_at = CASE WHEN $22::bool THEN NOW() ELSE events.tx_finished_at END
+                received_at = COALESCE($16, events.received_at),
+                processed_at = COALESCE($17, events.processed_at),
+                proof_requested_at = COALESCE($18, events.proof_requested_at),
+                proof_received_at = COALESCE($19, events.proof_received_at),
+                batch_submitted_at = COALESCE($20, events.batch_submitted_at),
+                batch_included_at = COALESCE($21, events.batch_included_at),
+                tx_finished_at = COALESCE($22, events.tx_finished_at)
             "#,
         )
         .bind(update.tx_hash.to_string())
@@ -151,16 +153,13 @@ impl Database {
             EventStatus::BatchFailed { ref error } => Some(error),
             _ => update.error.as_ref(),
         })
-        // Timestamp flags based on status
-        .bind(matches!(update.status, EventStatus::Received))
-        .bind(matches!(update.status, EventStatus::Processed))
-        .bind(matches!(update.status, EventStatus::ProofRequested))
-        .bind(matches!(update.status, EventStatus::ProofReceived))
-        .bind(matches!(update.status, EventStatus::BatchSubmitted))
-        .bind(matches!(update.status, EventStatus::BatchIncluded))
-        .bind(matches!(update.status, EventStatus::TxProcessSuccess) || 
-              matches!(update.status, EventStatus::TxProcessFail) || 
-              matches!(update.status, EventStatus::BatchFailed { .. }))
+        .bind(update.received_at)
+        .bind(update.processed_at)
+        .bind(update.proof_requested_at)
+        .bind(update.proof_received_at)
+        .bind(update.batch_submitted_at)
+        .bind(update.batch_included_at)
+        .bind(update.tx_finished_at)
         .execute(&self.pool)
         .await?;
 

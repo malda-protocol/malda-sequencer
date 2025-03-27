@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::task;
 use tokio::time::interval;
 use tokio::time::sleep;
+use chrono::{DateTime, Utc};
 
 use crate::{
     events::{parse_supplied_event, parse_withdraw_on_extension_chain_event},
@@ -191,6 +192,7 @@ impl EventListener {
             src_chain_id: Some(raw_event.chain_id.try_into().unwrap()),
             market: Some(raw_event.market),
             status: EventStatus::Received,
+            received_at: Some(Utc::now()),
             ..Default::default()
         };
 
@@ -257,6 +259,7 @@ impl EventListener {
             target_function,
             market: Some(raw_event.market),
             status: EventStatus::Processed,
+            processed_at: Some(Utc::now()),
             ..Default::default()
         };
 
@@ -307,6 +310,7 @@ impl EventListener {
                     amount: Some(event.amount),
                     target_function: Some("outHere".to_string()),
                     market: Some(market),
+                    processed_at: Some(Utc::now()),
                     ..Default::default()
                 })
                 .await
@@ -352,6 +356,7 @@ impl EventListener {
                     amount: Some(event.amount),
                     target_function: Some(function_name.to_string()),
                     market: Some(market),
+                    processed_at: Some(Utc::now()),
                     ..Default::default()
                 })
                 .await
@@ -382,6 +387,7 @@ impl EventListener {
                 tx_hash: tx_hash,
                 status: EventStatus::Processed,
                 event_type: Some(event_type.to_string()),
+                processed_at: Some(Utc::now()),
                 ..Default::default()
             })
             .await?;

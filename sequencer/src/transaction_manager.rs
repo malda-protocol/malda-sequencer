@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 use tracing::{error, info};
+use chrono::{DateTime, Utc};
 
 type Bytes4 = FixedBytes<4>;
 
@@ -195,6 +196,7 @@ impl TransactionManager {
                 .update_event(EventUpdate {
                     tx_hash: event.tx_hash,
                     status: EventStatus::IncludedInBatch,
+                    batch_submitted_at: Some(Utc::now()),
                     ..Default::default()
                 })
                 .await
@@ -263,6 +265,7 @@ impl TransactionManager {
                 .update_event(EventUpdate {
                     tx_hash: event.tx_hash,
                     status: EventStatus::BatchSubmitted,
+                    batch_submitted_at: Some(Utc::now()),
                     ..Default::default()
                 })
                 .await
@@ -331,6 +334,8 @@ impl TransactionManager {
                         .update_event(EventUpdate {
                             tx_hash: event.tx_hash,
                             status,
+                            batch_included_at: Some(Utc::now()),
+                            tx_finished_at: Some(Utc::now()),
                             ..Default::default()
                         })
                         .await
@@ -374,6 +379,7 @@ impl TransactionManager {
                             tx_hash: event.tx_hash,
                             status,
                             resubmitted: Some(1),
+                            tx_finished_at: Some(Utc::now()),
                             ..Default::default()
                         })
                         .await

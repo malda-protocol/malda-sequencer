@@ -12,6 +12,7 @@ use tokio::time::{sleep, Instant};
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
+use chrono::{DateTime, Utc};
 
 use crate::event_listener::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
@@ -152,6 +153,7 @@ impl ProofGeneratorWorker {
             let update = EventUpdate {
                 tx_hash: *tx_hash,
                 status: EventStatus::ProofRequested,
+                proof_requested_at: Some(Utc::now()),
                 ..Default::default()
             };
 
@@ -317,6 +319,7 @@ impl ProofGeneratorWorker {
                 seal: Some(seal.clone()),
                 target_function: Some(method.clone()),
                 status: EventStatus::ProofReceived,
+                proof_received_at: Some(Utc::now()),
                 ..Default::default()
             };
 
