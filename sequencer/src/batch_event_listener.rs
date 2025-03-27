@@ -4,7 +4,7 @@ use alloy::{
     rpc::types::Filter,
     transports::http::reqwest::Url,
 };
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -78,20 +78,18 @@ impl BatchEventListener {
         let success_handle = tokio::spawn(async move {
             while let Some(log) = success_stream.next().await {
                 let event = parse_batch_process_success_event(&log);
+
                 info!(
-                    "Batch process success on chain {}: init_hash={:?}",
+                    "Batch process success on chain {}: init_hash={:?}, waiting for timestamp",
                     chain_id, event.init_hash
                 );
 
+
                 if let Err(e) = db_success
-                    .update_event(EventUpdate {
-                        tx_hash: event.init_hash,
-                        status: EventStatus::TxProcessSuccess,
-                        ..Default::default()
-                    })
+                    .migrate_to_finished_events(event.init_hash, EventStatus::TxProcessSuccess)
                     .await
                 {
-                    error!("Failed to update database for success event: {:?}", e);
+                    error!("Failed to migrate success event to finished_events: {:?}", e);
                 }
             }
             error!("Success event stream ended");
@@ -101,20 +99,22 @@ impl BatchEventListener {
         let failure_handle = tokio::spawn(async move {
             while let Some(log) = failure_stream.next().await {
                 let event = parse_batch_process_failed_event(&log);
+
                 error!(
-                    "Batch process failed on chain {}: init_hash={:?}, reason={:?}",
+                    "Batch process failed on chain {}: init_hash={:?}, reason={:?}, waiting for timestamp",
                     chain_id, event.init_hash, event.reason
                 );
 
                 if let Err(e) = db_failure
-                    .update_event(EventUpdate {
-                        tx_hash: event.init_hash,
-                        status: EventStatus::TxProcessFail,
-                        ..Default::default()
-                    })
+                    .migrate_to_finished_events(
+                        event.init_hash,
+                        EventStatus::Failed {
+                            error: hex::encode(&event.reason),
+                        },
+                    )
                     .await
                 {
-                    error!("Failed to update database for failure event: {:?}", e);
+                    error!("Failed to migrate failure event to finished_events: {:?}", e);
                 }
             }
             error!("Failure event stream ended");

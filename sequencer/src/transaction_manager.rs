@@ -190,20 +190,8 @@ impl TransactionManager {
 
         info!("Started processing chain {} batch", chain_id);
 
-        // Mark all events as included in batch
+        // Collect data for the batch
         for event in events {
-            if let Err(e) = db
-                .update_event(EventUpdate {
-                    tx_hash: event.tx_hash,
-                    status: EventStatus::IncludedInBatch,
-                    batch_submitted_at: Some(Utc::now()),
-                    ..Default::default()
-                })
-                .await
-            {
-                error!("Failed to update event to IncludedInBatch: {:?}", e);
-            }
-
             receivers.push(event.receiver);
             markets.push(event.market);
             amounts.extend(event.amount.clone());
@@ -315,32 +303,21 @@ impl TransactionManager {
                     }
                 };
 
-                // Update all events with transaction status
-                for event in events {
-                    // Get current status before updating
-                    let current_status = db.get_event_status(&event.tx_hash).await?;
-
-                    // Use current status if it's TxProcessSuccess or TxProcessFail, otherwise use new status
-                    let status = if let Some(current) = current_status {
-                        match current {
-                            EventStatus::TxProcessSuccess | EventStatus::TxProcessFail => current,
-                            _ => status.clone(),
+                // Only update database for failed transactions
+                if matches!(status, EventStatus::BatchFailed { .. }) {
+                    for event in events {
+                        if let Err(e) = db
+                            .update_event(EventUpdate {
+                                tx_hash: event.tx_hash,
+                                status: status.clone(),
+                                batch_included_at: Some(Utc::now()),
+                                tx_finished_at: Some(Utc::now()),
+                                ..Default::default()
+                            })
+                            .await
+                        {
+                            error!("Failed to update event with transaction status: {:?}", e);
                         }
-                    } else {
-                        status.clone()
-                    };
-
-                    if let Err(e) = db
-                        .update_event(EventUpdate {
-                            tx_hash: event.tx_hash,
-                            status,
-                            batch_included_at: Some(Utc::now()),
-                            tx_finished_at: Some(Utc::now()),
-                            ..Default::default()
-                        })
-                        .await
-                    {
-                        error!("Failed to update event with transaction status: {:?}", e);
                     }
                 }
 
