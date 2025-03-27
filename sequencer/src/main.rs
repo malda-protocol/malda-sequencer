@@ -25,7 +25,7 @@ use event_listener::{EventConfig, EventListener, RawEvent, ProcessedEvent};
 use tokio::sync::mpsc;
 
 mod proof_generator;
-use proof_generator::{ProofGenerator, ProofReadyEvent};
+use proof_generator::{ProofGenerator};
 
 mod transaction_manager;
 use transaction_manager::{TransactionConfig, TransactionManager};
@@ -83,8 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize channels
     let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
-    let (proof_sender, proof_receiver) = mpsc::channel::<Vec<ProofReadyEvent>>(100);
-
+    
     // Initialize database
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sequencer".to_string());
@@ -218,7 +217,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create proof generator
     let mut proof_generator = ProofGenerator::new(
-        proof_sender,
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
         db.clone(),
@@ -243,10 +241,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 RPC_URL_LINEA_SEPOLIA.to_string(),
             ),
         ],
+        poll_interval: Duration::from_secs(5), // Check for new events every 5 seconds
     };
 
     // Create transaction manager
-    let mut transaction_manager = TransactionManager::new(proof_receiver, tx_config, db.clone());
+    let mut transaction_manager = TransactionManager::new(tx_config, db.clone());
 
     // Spawn processors
     let proof_generator_handle = tokio::spawn(async move {
