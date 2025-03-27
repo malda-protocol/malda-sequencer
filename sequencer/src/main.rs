@@ -218,11 +218,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create proof generator
     let mut proof_generator = ProofGenerator::new(
-        ReceiverStream::new(processed_receiver),
         proof_sender,
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
         db.clone(),
+        BATCH_SIZE,
     );
 
     // Add the config before creating TransactionManager

@@ -6,6 +6,9 @@ pub const EVENT_CHANNEL_CAPACITY: usize = 1000;
 pub const PROCESSED_CHANNEL_CAPACITY: usize = 1000;
 pub const PROOF_CHANNEL_CAPACITY: usize = 1000;
 
+// Batch configurations
+pub const BATCH_SIZE: usize = 10; // Number of events to process in each batch
+
 // Retry configurations
 pub const MAX_PROOF_RETRIES: u32 = 3;
 pub const PROOF_RETRY_DELAY: Duration = Duration::from_secs(1);

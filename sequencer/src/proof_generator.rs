@@ -1,20 +1,14 @@
 use alloy::primitives::{Address, Bytes, TxHash, U256};
 use eyre::Result;
-use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use tokio::task;
 use tokio::time::{sleep, Instant};
-use tokio_stream::Stream;
-use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
-use crate::event_listener::ProcessedEvent;
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 
 #[derive(Debug, Clone)]
@@ -30,76 +24,70 @@ pub struct ProofReadyEvent {
 }
 
 pub struct ProofGenerator {
-    event_receiver: Box<dyn Stream<Item = ProcessedEvent> + Unpin + Send>,
     proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
     max_retries: u32,
     retry_delay: Duration,
     last_proof_time: Arc<Mutex<Instant>>,
     db: Database,
+    batch_size: usize,
 }
 
 impl ProofGenerator {
     pub fn new(
-        event_receiver: impl Stream<Item = ProcessedEvent> + Unpin + Send + 'static,
         proof_sender: mpsc::Sender<Vec<ProofReadyEvent>>,
         max_retries: u32,
         retry_delay: Duration,
         db: Database,
+        batch_size: usize,
     ) -> Self {
         Self {
-            event_receiver: Box::new(event_receiver),
             proof_sender,
             max_retries,
             retry_delay,
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
             db,
+            batch_size,
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        info!("Starting proof generator, waiting for events...");
+        info!("Starting proof generator, reading processed events from database...");
 
-        let mut batch = Vec::new();
-        let batch_timeout = Duration::from_secs(crate::constants::BATCH_WINDOW);
-        let mut last_proof_time = Instant::now();
+        let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
+        let mut processed_tx_hashes = std::collections::HashSet::new();
 
-        while let Some(event) = self.event_receiver.next().await {
-            info!(
-                "Received event for processing: type={}",
-                match &event {
-                    ProcessedEvent::HostWithdraw { .. } => "HostWithdraw",
-                    ProcessedEvent::HostBorrow { .. } => "HostBorrow",
-                    ProcessedEvent::ExtensionSupply { .. } => "ExtensionSupply",
-                }
-            );
-            batch.push(event);
+        loop {
+            // Get processed events from database
+            let processed_events = self.db.get_processed_events().await?;
+            
+            if processed_events.is_empty() {
+                info!("No processed events found, waiting for next check...");
+                sleep(proof_delay).await;
+                continue;
+            }
 
-            // Set deadline for batch collection
-            let deadline = Instant::now() + batch_timeout;
-
-            // Collect any additional events until deadline
-            while Instant::now() < deadline {
-                tokio::select! {
-                    Some(event) = self.event_receiver.next() => {
-                        info!("Additional event received during batch window");
-                        batch.push(event);
+            // Filter out events that have already been processed
+            let new_events: Vec<EventUpdate> = processed_events
+                .into_iter()
+                .filter(|event| {
+                    if processed_tx_hashes.contains(&event.tx_hash) {
+                        false
+                    } else {
+                        processed_tx_hashes.insert(event.tx_hash);
+                        true
                     }
-                    _ = sleep(Duration::from_millis(100)) => {}
-                }
+                })
+                .collect();
+
+            if new_events.is_empty() {
+                info!("No new events to process, waiting for next check...");
+                sleep(proof_delay).await;
+                continue;
             }
 
-            // Check if we need to wait for the proof delay
-            let time_since_last_proof = last_proof_time.elapsed();
-            let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
+            info!("Found {} new events to process", new_events.len());
 
-            if time_since_last_proof < proof_delay {
-                let wait_time = proof_delay - time_since_last_proof;
-                debug!("Waiting {:?} to respect proof delay", wait_time);
-                sleep(wait_time).await;
-            }
-
-            // Process whatever we've collected
-            let events_to_process = std::mem::take(&mut batch);
+            // Process all events in one batch
             let proof_sender = self.proof_sender.clone();
             let max_retries = self.max_retries;
             let retry_delay = self.retry_delay;
@@ -112,7 +100,7 @@ impl ProofGenerator {
                     db,
                 };
 
-                match proof_generator.process_batch(events_to_process).await {
+                match proof_generator.process_batch(new_events).await {
                     Ok(proof_events) => {
                         info!(
                             "Successfully generated proofs for {} events",
@@ -128,9 +116,10 @@ impl ProofGenerator {
                     }
                 }
             });
-            last_proof_time = Instant::now();
+
+            // Wait for the proof delay before checking for new events
+            sleep(proof_delay).await;
         }
-        Ok(())
     }
 }
 
@@ -141,52 +130,14 @@ struct ProofGeneratorWorker {
 }
 
 impl ProofGeneratorWorker {
-    async fn process_batch(&self, events: Vec<ProcessedEvent>) -> Result<Vec<ProofReadyEvent>> {
-        // Update status to ProofRequested for all events
-        for event in &events {
-            let tx_hash = match event {
-                ProcessedEvent::HostWithdraw { tx_hash, .. } => tx_hash,
-                ProcessedEvent::HostBorrow { tx_hash, .. } => tx_hash,
-                ProcessedEvent::ExtensionSupply { tx_hash, .. } => tx_hash,
-            };
-
-            let update = EventUpdate {
-                tx_hash: *tx_hash,
-                status: EventStatus::ProofRequested,
-                proof_requested_at: Some(Utc::now()),
-                ..Default::default()
-            };
-
-            if let Err(e) = self.db.update_event(update).await {
-                error!("Failed to update event status to ProofRequested: {:?}", e);
-            }
-        }
+    async fn process_batch(&self, events: Vec<EventUpdate>) -> Result<Vec<ProofReadyEvent>> {
         // Sort events by src_chain (Linea first) and dst_chain
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
-            let (a_src, a_dst) = match a {
-                ProcessedEvent::HostWithdraw { dst_chain_id, .. }
-                | ProcessedEvent::HostBorrow { dst_chain_id, .. } => {
-                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id)
-                }
-                ProcessedEvent::ExtensionSupply {
-                    src_chain_id,
-                    dst_chain_id,
-                    ..
-                } => (*src_chain_id as u64, *dst_chain_id),
-            };
-
-            let (b_src, b_dst) = match b {
-                ProcessedEvent::HostWithdraw { dst_chain_id, .. }
-                | ProcessedEvent::HostBorrow { dst_chain_id, .. } => {
-                    (malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID, *dst_chain_id)
-                }
-                ProcessedEvent::ExtensionSupply {
-                    src_chain_id,
-                    dst_chain_id,
-                    ..
-                } => (*src_chain_id as u64, *dst_chain_id),
-            };
+            let a_src = a.src_chain_id.unwrap_or(malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32) as u64;
+            let b_src = b.src_chain_id.unwrap_or(malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32) as u64;
+            let a_dst = a.dst_chain_id.unwrap_or(0) as u64;
+            let b_dst = b.dst_chain_id.unwrap_or(0) as u64;
 
             // Sort by src_chain first (Linea first), then by dst_chain
             match a_src.cmp(&b_src) {
@@ -195,72 +146,50 @@ impl ProofGeneratorWorker {
             }
         });
 
+        // Update status to ProofRequested for all events with their journal indices
+        for (idx, event) in sorted_events.iter().enumerate() {
+            let mut update = event.clone();
+            update.status = EventStatus::ProofRequested;
+            update.proof_requested_at = Some(Utc::now());
+            update.journal_index = Some(idx as i32);
+
+            if let Err(e) = self.db.update_event(update).await {
+                error!("Failed to update event status to ProofRequested: {:?}", e);
+            }
+        }
+
         // Initialize vectors for proof generation
         let mut users: Vec<Vec<Address>> = Vec::new();
         let mut markets: Vec<Vec<Address>> = Vec::new();
         let mut dst_chain_ids: Vec<Vec<u64>> = Vec::new();
         let mut src_chain_ids: Vec<u64> = Vec::new();
-        let mut event_details: Vec<(alloy::primitives::FixedBytes<32>, alloy::primitives::Uint<256, 4>, Address, u32, String)> = Vec::new();
+        let mut event_details: Vec<(TxHash, U256, Address, u32, String, usize)> = Vec::new();
 
         // Group events by source chain
         let mut current_src_chain: Option<u64> = None;
         let mut current_users: Vec<Address> = Vec::new();
         let mut current_markets: Vec<Address> = Vec::new();
         let mut current_dst_chains: Vec<u64> = Vec::new();
+        let mut current_event_indices: Vec<usize> = Vec::new();
 
         // Process sorted events
-        for event in sorted_events {
-            let (src_chain, user, market, dst_chain, tx_hash, amount, method) = match event {
-                ProcessedEvent::HostWithdraw {
-                    tx_hash,
-                    sender,
-                    dst_chain_id,
-                    amount,
-                    market,
-                }
-                | ProcessedEvent::HostBorrow {
-                    tx_hash,
-                    sender,
-                    dst_chain_id,
-                    amount,
-                    market,
-                } => (
-                    malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID,
-                    sender,
-                    market,
-                    dst_chain_id as u64,
-                    tx_hash,
-                    amount,
-                    "outHere".to_string(),
-                ),
-                ProcessedEvent::ExtensionSupply {
-                    tx_hash,
-                    from,
-                    amount,
-                    src_chain_id,
-                    dst_chain_id,
-                    market,
-                    method_selector,
-                } => {
-                    let method = if method_selector == crate::events::MINT_EXTERNAL_SELECTOR {
-                        "mintExternal"
-                    } else if method_selector == crate::events::REPAY_EXTERNAL_SELECTOR {
-                        "repayExternal"
-                    } else {
-                        return Err(eyre::eyre!("Invalid method selector: {}", method_selector));
-                    };
+        for (idx, event) in sorted_events.iter().enumerate() {
+            let src_chain = event.src_chain_id.unwrap_or(0) as u64;
+            let dst_chain = event.dst_chain_id.unwrap_or(0) as u64;
+            let user = event.msg_sender.unwrap_or_default();
+            let market = event.market.unwrap_or_default();
+            let amount = event.amount.unwrap_or_default();
+            let method = event.target_function.clone().unwrap_or_default();
 
-                    (
-                        src_chain_id as u64,
-                        from,
-                        market,
-                        dst_chain_id as u64,
-                        tx_hash,
-                        amount,
-                        method.to_string(),
-                    )
-                }
-            };
+            // Store original event details for later use
+            event_details.push((
+                event.tx_hash,
+                amount,
+                user,
+                dst_chain as u32,
+                method,
+                idx,
+            ));
 
             // If we encounter a new source chain, push the current batch and start a new one
             if current_src_chain != Some(src_chain) {
@@ -273,6 +202,7 @@ impl ProofGeneratorWorker {
                 current_users = Vec::new();
                 current_markets = Vec::new();
                 current_dst_chains = Vec::new();
+                current_event_indices = Vec::new();
                 current_src_chain = Some(src_chain);
             }
 
@@ -280,7 +210,7 @@ impl ProofGeneratorWorker {
             current_users.push(user);
             current_markets.push(market);
             current_dst_chains.push(dst_chain);
-            event_details.push((tx_hash, amount, market, dst_chain as u32, method));
+            current_event_indices.push(idx);
         }
 
         // Push the last batch
@@ -299,29 +229,24 @@ impl ProofGeneratorWorker {
         );
 
         // Generate single proof for all events
-        let (journal, seal) = self
-            .generate_proof_with_retry(
-                users.clone(),
-                markets.clone(),
-                dst_chain_ids.clone(),
-                src_chain_ids,
-            )
-            .await?;
+        let (journal, seal) = self.generate_proof_with_retry(
+            users.clone(),
+            markets.clone(),
+            dst_chain_ids.clone(),
+            src_chain_ids,
+        ).await?;
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
-        // Update database status for each event
-        for (tx_hash, _market, _amount, _receiver, method) in &event_details {
-            let update = EventUpdate {
-                tx_hash: *tx_hash,
-                journal: Some(journal.clone()),
-                seal: Some(seal.clone()),
-                target_function: Some(method.clone()),
-                status: EventStatus::ProofReceived,
-                proof_received_at: Some(Utc::now()),
-                ..Default::default()
-            };
+        // Update database with proof data for each event
+        for (tx_hash, amount, receiver, dst_chain_id, method, original_idx) in event_details.iter() {
+            // Update database with proof data
+            let mut update = sorted_events[*original_idx].clone();
+            update.status = EventStatus::ProofReceived;
+            update.journal = Some(journal.clone());
+            update.seal = Some(seal.clone());
+            update.proof_received_at = Some(Utc::now());
 
             if let Err(e) = self.db.update_event(update).await {
                 error!("Failed to update event with proof data: {:?}", e);
@@ -331,21 +256,19 @@ impl ProofGeneratorWorker {
         }
 
         // Create proof events for each original event
-        Ok(event_details
-            .into_iter()
-            .map(
-                |(tx_hash, amount, market, dst_chain_id, method)| ProofReadyEvent {
-                    tx_hash,
-                    market,
-                    journal: journal.clone(),
-                    seal: seal.clone(),
-                    amount: vec![amount],
-                    receiver: Address::ZERO,
-                    method,
-                    dst_chain_id,
-                },
-            )
-            .collect())
+        Ok(event_details.into_iter().map(|(tx_hash, amount, receiver, dst_chain_id, method, original_idx)| {
+            let market = sorted_events[original_idx].market.unwrap_or_default();
+            ProofReadyEvent {
+                tx_hash,
+                market,  // Use the market from the original event
+                journal: journal.clone(),
+                seal: seal.clone(),
+                amount: vec![amount],
+                receiver,
+                method,
+                dst_chain_id,
+            }
+        }).collect())
     }
 
     async fn generate_proof_with_retry(
