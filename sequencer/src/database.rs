@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::info;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
@@ -75,7 +76,7 @@ pub struct EventUpdate {
 
 #[derive(Clone)]
 pub struct Database {
-    pool: Pool<Postgres>,
+    pub pool: Pool<Postgres>,
 }
 
 impl Database {
@@ -283,5 +284,144 @@ impl Database {
             },
             None => Ok(None),
         }
+    }
+
+    pub async fn get_event(&self, tx_hash: &TxHash) -> Result<Option<EventUpdate>> {
+        let record = query(
+            r#"
+            SELECT 
+                status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
+                amount, target_function, market, journal_index, journal,
+                seal, batch_tx_hash, received_at, processed_at,
+                proof_requested_at, proof_received_at, batch_submitted_at,
+                batch_included_at, tx_finished_at, resubmitted, error
+            FROM events 
+            WHERE tx_hash = $1
+            "#
+        )
+        .bind(tx_hash.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match record {
+            Some(row) => {
+                let status_str: String = row.try_get("status")?;
+                let status = match status_str.as_str() {
+                    "Received" => EventStatus::Received,
+                    "Processed" => EventStatus::Processed,
+                    "IncludedInBatch" => EventStatus::IncludedInBatch,
+                    "ProofRequested" => EventStatus::ProofRequested,
+                    "ProofReceived" => EventStatus::ProofReceived,
+                    "BatchSubmitted" => EventStatus::BatchSubmitted,
+                    "BatchIncluded" => EventStatus::BatchIncluded,
+                    "BatchFailed" => EventStatus::BatchFailed {
+                        error: row.try_get("error")?,
+                    },
+                    "TxProcessSuccess" => EventStatus::TxProcessSuccess,
+                    "TxProcessFail" => EventStatus::TxProcessFail,
+                    "Failed" => EventStatus::Failed {
+                        error: row.try_get("error")?,
+                    },
+                    _ => return Err(eyre::eyre!("Unknown status: {}", status_str)),
+                };
+
+                Ok(Some(EventUpdate {
+                    tx_hash: *tx_hash,
+                    status,
+                    event_type: row.try_get("event_type")?,
+                    src_chain_id: row.try_get::<Option<i32>, _>("src_chain_id")?.map(|id| id as u32),
+                    dst_chain_id: row.try_get::<Option<i32>, _>("dst_chain_id")?.map(|id| id as u32),
+                    msg_sender: row.try_get::<Option<String>, _>("msg_sender")?.map(|addr| addr.parse().unwrap()),
+                    amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
+                    target_function: row.try_get("target_function")?,
+                    market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                    journal_index: row.try_get("journal_index")?,
+                    journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
+                    seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
+                    batch_tx_hash: row.try_get("batch_tx_hash")?,
+                    received_at: row.try_get("received_at")?,
+                    processed_at: row.try_get("processed_at")?,
+                    proof_requested_at: row.try_get("proof_requested_at")?,
+                    proof_received_at: row.try_get("proof_received_at")?,
+                    batch_submitted_at: row.try_get("batch_submitted_at")?,
+                    batch_included_at: row.try_get("batch_included_at")?,
+                    tx_finished_at: row.try_get("tx_finished_at")?,
+                    resubmitted: row.try_get("resubmitted")?,
+                    error: row.try_get("error")?,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_processed_events(&self) -> Result<Vec<EventUpdate>> {
+        let records = query(
+            r#"
+            SELECT 
+                tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
+                amount, target_function, market, journal_index, journal,
+                seal, batch_tx_hash, received_at, processed_at,
+                proof_requested_at, proof_received_at, batch_submitted_at,
+                batch_included_at, tx_finished_at, resubmitted, error
+            FROM events 
+            WHERE status = 'Processed'::event_status
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut events = Vec::new();
+
+        for row in records {
+            let tx_hash_str: String = row.try_get("tx_hash")?;
+            let tx_hash = TxHash::from_str(&tx_hash_str)?;
+            
+            let status_str: String = row.try_get("status")?;
+            let status = match status_str.as_str() {
+                "Received" => EventStatus::Received,
+                "Processed" => EventStatus::Processed,
+                "IncludedInBatch" => EventStatus::IncludedInBatch,
+                "ProofRequested" => EventStatus::ProofRequested,
+                "ProofReceived" => EventStatus::ProofReceived,
+                "BatchSubmitted" => EventStatus::BatchSubmitted,
+                "BatchIncluded" => EventStatus::BatchIncluded,
+                "BatchFailed" => EventStatus::BatchFailed {
+                    error: row.try_get("error")?,
+                },
+                "TxProcessSuccess" => EventStatus::TxProcessSuccess,
+                "TxProcessFail" => EventStatus::TxProcessFail,
+                "Failed" => EventStatus::Failed {
+                    error: row.try_get("error")?,
+                },
+                _ => return Err(eyre::eyre!("Unknown status: {}", status_str)),
+            };
+
+            events.push(EventUpdate {
+                tx_hash,
+                status,
+                event_type: row.try_get("event_type")?,
+                src_chain_id: row.try_get::<Option<i32>, _>("src_chain_id")?.map(|id| id as u32),
+                dst_chain_id: row.try_get::<Option<i32>, _>("dst_chain_id")?.map(|id| id as u32),
+                msg_sender: row.try_get::<Option<String>, _>("msg_sender")?.map(|addr| addr.parse().unwrap()),
+                amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
+                target_function: row.try_get("target_function")?,
+                market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                journal_index: row.try_get("journal_index")?,
+                journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
+                seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
+                batch_tx_hash: row.try_get("batch_tx_hash")?,
+                received_at: row.try_get("received_at")?,
+                processed_at: row.try_get("processed_at")?,
+                proof_requested_at: row.try_get("proof_requested_at")?,
+                proof_received_at: row.try_get("proof_received_at")?,
+                batch_submitted_at: row.try_get("batch_submitted_at")?,
+                batch_included_at: row.try_get("batch_included_at")?,
+                tx_finished_at: row.try_get("tx_finished_at")?,
+                resubmitted: row.try_get("resubmitted")?,
+                error: row.try_get("error")?,
+            });
+        }
+
+        Ok(events)
     }
 }
