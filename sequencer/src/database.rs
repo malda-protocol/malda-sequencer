@@ -1,7 +1,7 @@
 use alloy::primitives::{Address, Bytes, TxHash, U256};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, Pool, Postgres};
+use sqlx::{query, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::info;
 
@@ -88,6 +88,75 @@ impl Database {
         info!("Database initialized successfully");
 
         Ok(Self { pool })
+    }
+
+    pub async fn migrate_to_finished_events(&self, tx_hash: TxHash, status: EventStatus) -> Result<()> {
+        // First, get all data from the events table
+        let record = query(
+            r#"
+            SELECT 
+                event_type, src_chain_id, dst_chain_id, msg_sender, amount,
+                target_function, market, batch_tx_hash, received_at, processed_at,
+                proof_requested_at, proof_received_at, batch_submitted_at,
+                batch_included_at, resubmitted, error
+            FROM events 
+            WHERE tx_hash = $1
+            "#
+        )
+        .bind(tx_hash.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Insert into finished_events
+        query(
+            r#"
+            INSERT INTO finished_events (
+                tx_hash, status, event_type, src_chain_id, dst_chain_id,
+                msg_sender, amount, target_function, market, batch_tx_hash,
+                received_at, processed_at, proof_requested_at, proof_received_at,
+                batch_submitted_at, batch_included_at, tx_finished_at,
+                resubmitted, error
+            )
+            VALUES (
+                $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )
+            "#
+        )
+        .bind(tx_hash.to_string())
+        .bind(status.to_db_string())
+        .bind(record.try_get::<Option<String>, _>("event_type")?)
+        .bind(record.try_get::<Option<i32>, _>("src_chain_id")?)
+        .bind(record.try_get::<Option<i32>, _>("dst_chain_id")?)
+        .bind(record.try_get::<Option<String>, _>("msg_sender")?)
+        .bind(record.try_get::<Option<String>, _>("amount")?)
+        .bind(record.try_get::<Option<String>, _>("target_function")?)
+        .bind(record.try_get::<Option<String>, _>("market")?)
+        .bind(record.try_get::<Option<String>, _>("batch_tx_hash")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("received_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("processed_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_requested_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_received_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_submitted_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_included_at")?)
+        .bind(Utc::now())
+        .bind(record.try_get::<Option<i32>, _>("resubmitted")?)
+        .bind(record.try_get::<Option<String>, _>("error")?)
+        .execute(&self.pool)
+        .await?;
+
+        // Delete from events
+        query("DELETE FROM events WHERE tx_hash = $1")
+            .bind(tx_hash.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        info!(
+            "Successfully migrated event {} to finished_events with status {:?}",
+            tx_hash, status
+        );
+
+        Ok(())
     }
 
     pub async fn update_event(&self, update: EventUpdate) -> Result<()> {
