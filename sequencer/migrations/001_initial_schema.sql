@@ -1,6 +1,8 @@
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS finished_events;
 
+DROP TYPE IF EXISTS event_status;
+
 -- Create enum type for status
 CREATE TYPE event_status AS ENUM (
     'Received',
