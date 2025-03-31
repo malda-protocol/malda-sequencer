@@ -8,7 +8,7 @@ use sqlx::query;
 async fn main() -> Result<()> {
     // Get database URL from environment or use default
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://postgres:postgres@localhost:5432/sequencer".to_string()
+        "postgres://doadmin:************************@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require".to_string()
     });
 
     // Initialize database connection
