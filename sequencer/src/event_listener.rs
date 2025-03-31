@@ -128,6 +128,39 @@ impl EventListener {
             self.config.market, self.config.chain_id, self.config.event_signature
         );
 
+        let mut retry_count = 0;
+        let max_retries = 5;
+        let mut retry_delay = Duration::from_secs(1);
+
+        loop {
+            match self.run_event_listener().await {
+                Ok(_) => {
+                    warn!("Event listener stopped, attempting to reconnect...");
+                    if retry_count >= max_retries {
+                        error!("Max retries reached, giving up on reconnection");
+                        return Ok(());
+                    }
+                    retry_count += 1;
+                    retry_delay *= 2; // Exponential backoff
+                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    sleep(retry_delay).await;
+                }
+                Err(e) => {
+                    error!("Event listener error: {:?}", e);
+                    if retry_count >= max_retries {
+                        error!("Max retries reached, giving up on reconnection");
+                        return Err(e);
+                    }
+                    retry_count += 1;
+                    retry_delay *= 2; // Exponential backoff
+                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    sleep(retry_delay).await;
+                }
+            }
+        }
+    }
+
+    async fn run_event_listener(&self) -> Result<()> {
         let ws_url: Url = self
             .config
             .ws_url

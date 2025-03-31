@@ -1,0 +1,287 @@
+warning: unused imports: `ReceiptKind` and `VerifierContext`
+  --> malda_rs/src/viewcalls.rs:27:88
+   |
+27 |     default_executor, default_prover, ExecutorEnv, ProveInfo, SessionInfo, ProverOpts, VerifierContext, ReceiptKind
+   |                                                                                        ^^^^^^^^^^^^^^^  ^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `eyre::anyhow`
+  --> malda_rs/src/viewcalls.rs:40:5
+   |
+40 | use eyre::anyhow;
+   |     ^^^^^^^^^^^^
+
+warning: unused import: `eyre::WrapErr`
+  --> malda_rs/src/viewcalls.rs:41:5
+   |
+41 | use eyre::WrapErr;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `eyre::bail`
+  --> malda_rs/src/viewcalls.rs:42:5
+   |
+42 | use eyre::bail;
+   |     ^^^^^^^^^^
+
+warning: unused import: `eyre::ContextCompat`
+  --> malda_rs/src/viewcalls.rs:43:5
+   |
+43 | use eyre::ContextCompat;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `compute_image_id` and `serde::to_vec`
+  --> malda_rs/src/viewcalls.rs:46:18
+   |
+46 | use risc0_zkvm::{compute_image_id, serde::to_vec, Receipt, SessionStats};
+   |                  ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused variable: `receipt_url`
+  --> malda_rs/src/viewcalls.rs:98:17
+   |
+98 |             let receipt_url = res
+   |                 ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_receipt_url`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `opts`
+  --> malda_rs/src/viewcalls.rs:49:36
+   |
+49 | fn run_bonsai(input_data: Vec<u8>, opts: ProverOpts) -> Result<ProveInfo, anyhow::Error> {
+   |                                    ^^^^ help: if this is intentional, prefix it with an underscore: `_opts`
+
+warning: `malda_rs` (lib) generated 8 warnings (run `cargo fix --lib -p malda_rs` to apply 6 suggestions)
+warning: unused import: `tokio_stream::wrappers::ReceiverStream`
+  --> sequencer/src/main.rs:14:5
+   |
+14 | use tokio_stream::wrappers::ReceiverStream;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `DateTime`
+  --> sequencer/src/event_listener.rs:20:14
+   |
+20 | use chrono::{DateTime, Utc};
+   |              ^^^^^^^^
+
+warning: unused import: `RawEvent`
+  --> sequencer/src/main.rs:24:50
+   |
+24 | use event_listener::{EventConfig, EventListener, RawEvent, ProcessedEvent};
+   |                                                  ^^^^^^^^
+
+warning: unused imports: `TxHash` and `U256`
+ --> sequencer/src/proof_generator.rs:1:41
+  |
+1 | use alloy::primitives::{Address, Bytes, TxHash, U256};
+  |                                         ^^^^^^  ^^^^
+
+warning: unused import: `warn`
+  --> sequencer/src/transaction_manager.rs:12:22
+   |
+12 | use tracing::{debug, warn};
+   |                      ^^^^
+
+warning: unused import: `DateTime`
+  --> sequencer/src/transaction_manager.rs:14:14
+   |
+14 | use chrono::{DateTime, Utc};
+   |              ^^^^^^^^
+
+warning: unused imports: `DateTime`, `Duration`, and `Utc`
+ --> sequencer/src/batch_event_listener.rs:7:14
+  |
+7 | use chrono::{DateTime, Duration, Utc};
+  |              ^^^^^^^^  ^^^^^^^^  ^^^
+
+warning: unused import: `tokio::sync::mpsc`
+  --> sequencer/src/batch_event_listener.rs:10:5
+   |
+10 | use tokio::sync::mpsc;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `EventUpdate`
+  --> sequencer/src/batch_event_listener.rs:17:50
+   |
+17 | use sequencer::database::{Database, EventStatus, EventUpdate};
+   |                                                  ^^^^^^^^^^^
+
+warning: unused import: `dotenv::dotenv`
+  --> sequencer/src/main.rs:41:5
+   |
+41 | use dotenv::dotenv;
+   |     ^^^^^^^^^^^^^^
+
+warning: unused import: `std::env`
+  --> sequencer/src/main.rs:45:5
+   |
+45 | use std::env;
+   |     ^^^^^^^^
+
+warning: unused variable: `processed_receiver`
+  --> sequencer/src/main.rs:85:28
+   |
+85 |     let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
+   |                            ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_processed_receiver`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: type alias `RpcUrls` is never used
+  --> sequencer/src/main.rs:63:6
+   |
+63 | type RpcUrls = HashMap<u32, String>;
+   |      ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: fields `last_proof_time` and `batch_size` are never read
+  --> sequencer/src/proof_generator.rs:16:5
+   |
+13 | pub struct ProofGenerator {
+   |            -------------- fields in this struct
+...
+16 |     last_proof_time: Arc<Mutex<Instant>>,
+   |     ^^^^^^^^^^^^^^^
+17 |     db: Database,
+18 |     batch_size: usize,
+   |     ^^^^^^^^^^
+
+warning: fields `max_retries` and `retry_delay` are never read
+  --> sequencer/src/transaction_manager.rs:28:9
+   |
+27 | pub struct TransactionConfig {
+   |            ----------------- fields in this struct
+28 |     pub max_retries: u32,
+   |         ^^^^^^^^^^^
+29 |     pub retry_delay: Duration,
+   |         ^^^^^^^^^^^
+   |
+   = note: `TransactionConfig` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `sequencer` (bin "sequencer") generated 15 warnings (run `cargo fix --bin "sequencer"` to apply 11 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.73s
+     Running `/home/ubuntu/malda-zkcoprocessor/target/release/sequencer`
+[2m2025-03-31T10:20:39.059360Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m90:[0m Using database URL: postgres://*****:*****@doadmin:AVNS_G5U-F8YEsMY2G4odL39@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+[2m2025-03-31T10:20:39.122243Z[0m [32m INFO[0m ThreadId(01) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sqlx-postgres-0.7.4/src/connection/stream.rs[0m[2m:[0m[2m163:[0m table "events" does not exist, skipping
+[2m2025-03-31T10:20:39.122302Z[0m [32m INFO[0m ThreadId(01) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sqlx-postgres-0.7.4/src/connection/stream.rs[0m[2m:[0m[2m163:[0m table "finished_events" does not exist, skipping
+[2m2025-03-31T10:20:39.126572Z[0m [32m INFO[0m ThreadId(01) [2m/home/ubuntu/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sqlx-postgres-0.7.4/src/connection/stream.rs[0m[2m:[0m[2m163:[0m type "event_status" does not exist, skipping
+[2m2025-03-31T10:20:39.145575Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/database.rs[0m[2m:[0m[2m89:[0m Database initialized successfully
+[2m2025-03-31T10:20:39.145623Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m97:[0m Testing database connection...
+[2m2025-03-31T10:20:39.185085Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x0000000000000000000000000000000000000000000000000000000000000000 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:20:39.185128Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m105:[0m Successfully wrote test event to database
+[2m2025-03-31T10:20:39.185136Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m116:[0m Configured markets: [0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, 0xf7e8c0e5b418081112fc045aaced424961fe8b99, 0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, 0x9a3e5153e7642913d007c0685938010011a865c7]
+[2m2025-03-31T10:20:39.185150Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m139:[0m Configured chains: [59141, 11155420, 11155111]
+[2m2025-03-31T10:20:39.185155Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m148:[0m Initializing batch event listeners...
+[2m2025-03-31T10:20:39.185159Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting batch event listener for chain=59141, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-03-31T10:20:39.185275Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m37:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=59141
+[2m2025-03-31T10:20:39.285954Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting batch event listener for chain=11155420, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-03-31T10:20:39.286051Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m37:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=11155420
+[2m2025-03-31T10:20:39.387402Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m161:[0m Starting batch event listener for chain=11155111, submitter=0xb4282799022073790c8ae500ac6c91c622021079
+[2m2025-03-31T10:20:39.387532Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m37:[0m Starting batch event listener for submitter=0xb4282799022073790c8ae500ac6c91c622021079 chain=11155111
+[2m2025-03-31T10:20:39.487857Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m183:[0m All batch event listeners started
+[2m2025-03-31T10:20:39.487905Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.487986Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.589741Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.589858Z[0m [32m INFO[0m ThreadId(12) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.691369Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:39.691498Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:39.703993Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-03-31T10:20:39.792142Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:39.792293Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x8ef9d2057fed09fd18cbf393d789c6507cd3e875 chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:39.881825Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-03-31T10:20:39.893060Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.893167Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.943578Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/batch_event_listener.rs[0m[2m:[0m[2m70:[0m Successfully subscribed to batch events
+[2m2025-03-31T10:20:39.947610Z[0m [32m INFO[0m ThreadId(12) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:39.994002Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:39.998991Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.045663Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.095401Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.095621Z[0m [32m INFO[0m ThreadId(12) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.178551Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.196665Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.196776Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0xf7e8c0e5b418081112fc045aaced424961fe8b99 chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.268758Z[0m [32m INFO[0m ThreadId(12) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.297875Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.298027Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.327251Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.399484Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.399611Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.455425Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.500630Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.500831Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.601390Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.601506Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.623201Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.640583Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.702462Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x9a3e5153e7642913d007c0685938010011a865c7, chain=59141, event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.702578Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x9a3e5153e7642913d007c0685938010011a865c7 chain=59141 event=mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.731424Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.802994Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x9a3e5153e7642913d007c0685938010011a865c7, chain=59141, event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.803109Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x9a3e5153e7642913d007c0685938010011a865c7 chain=59141 event=mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)
+[2m2025-03-31T10:20:40.858176Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:40.904276Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x9a3e5153e7642913d007c0685938010011a865c7, chain=11155420, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.904375Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x9a3e5153e7642913d007c0685938010011a865c7 chain=11155420 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:40.976824Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:41.004953Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m191:[0m Starting listener for market=0x9a3e5153e7642913d007c0685938010011a865c7, chain=11155111, event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:41.005081Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m126:[0m Starting event listener for market=0x9a3e5153e7642913d007c0685938010011a865c7 chain=11155111 event=mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)
+[2m2025-03-31T10:20:41.067100Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:41.106144Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m216:[0m All event listeners started
+[2m2025-03-31T10:20:41.106201Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m266:[0m ----------------- SEQUENCER CONFIGURATION -----------------
+[2m2025-03-31T10:20:41.106210Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m267:[0m Database: postgres://*****:*****@doadmin:AVNS_G5U-F8YEsMY2G4odL39@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+[2m2025-03-31T10:20:41.106215Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m271:[0m Markets: 4
+[2m2025-03-31T10:20:41.106219Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m272:[0m Chains: 3
+[2m2025-03-31T10:20:41.106218Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m38:[0m Starting proof generator, reading processed events from database...
+[2m2025-03-31T10:20:41.106223Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m273:[0m Max proof retries: 3
+[2m2025-03-31T10:20:41.106231Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/transaction_manager.rs[0m[2m:[0m[2m56:[0m Starting transaction manager
+[2m2025-03-31T10:20:41.106235Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m274:[0m Transaction timeout: 30s
+[2m2025-03-31T10:20:41.106258Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m275:[0m Socket path: /tmp/sequencer.sock
+[2m2025-03-31T10:20:41.106263Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m276:[0m ----------------------------------------------------------
+[2m2025-03-31T10:20:41.106266Z[0m [32m INFO[0m ThreadId(01) [2msequencer/src/main.rs[0m[2m:[0m[2m277:[0m All components initialized and running
+[2m2025-03-31T10:20:41.114364Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m48:[0m No processed events found, waiting for next check...
+[2m2025-03-31T10:20:41.172038Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:41.250282Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:41.317406Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:41.485496Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m185:[0m Successfully subscribed to events
+[2m2025-03-31T10:20:45.563534Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x1b60145e7eab8b0ef52c55874aacf676f3a7c1130d4def27a6118bb470f95be5 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:20:45.563583Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x9a3e5153e7642913d007c0685938010011a865c7, chain_id: 59141
+[2m2025-03-31T10:20:45.567676Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x1b60145e7eab8b0ef52c55874aacf676f3a7c1130d4def27a6118bb470f95be5 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:20:45.572427Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x1b60145e7eab8b0ef52c55874aacf676f3a7c1130d4def27a6118bb470f95be5 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:20:45.576197Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x1b60145e7eab8b0ef52c55874aacf676f3a7c1130d4def27a6118bb470f95be5 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:20:46.993308Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xdb71123a81ff9f87e7567020bfb513aadcdad415005fc0cbd6c09d987dd2a4a7 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:20:46.993350Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain_id: 11155420
+[2m2025-03-31T10:20:46.997116Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xdb71123a81ff9f87e7567020bfb513aadcdad415005fc0cbd6c09d987dd2a4a7 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:20:47.000991Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xdb71123a81ff9f87e7567020bfb513aadcdad415005fc0cbd6c09d987dd2a4a7 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:20:47.004861Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xdb71123a81ff9f87e7567020bfb513aadcdad415005fc0cbd6c09d987dd2a4a7 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:20:56.121454Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m72:[0m Found 2 new events to process
+[2m2025-03-31T10:20:56.125655Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x1b60145e7eab8b0ef52c55874aacf676f3a7c1130d4def27a6118bb470f95be5 status to ProofRequested, batch_tx_hash: None
+[2m2025-03-31T10:20:56.129583Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xdb71123a81ff9f87e7567020bfb513aadcdad415005fc0cbd6c09d987dd2a4a7 status to ProofRequested, batch_tx_hash: None
+[2m2025-03-31T10:20:56.272103Z[0m [32m INFO[0m ThreadId(28) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 25806957 (0x7e284533eb4215156ffd03eacf15651c63e555b99016d6be29c6c6c891921ea5)    
+[2m2025-03-31T10:20:56.272152Z[0m [32m INFO[0m ThreadId(28) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'aggregate3((address,bool,bytes)[])' on 0xcA11bde05977b3631167028862bE2a173976CA11    
+[2m2025-03-31T10:20:56.514133Z[0m [32m INFO[0m ThreadId(17) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 11260810 (0xb962c14e17cfa9cd0c79a707732fcd2ff266c103811bb0937ee99d4a08d67586)    
+[2m2025-03-31T10:20:56.844761Z[0m [32m INFO[0m ThreadId(19) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/host/builder.rs[0m[2m:[0m[2m199:[0m Environment initialized with block 11260810 (0xb962c14e17cfa9cd0c79a707732fcd2ff266c103811bb0937ee99d4a08d67586)    
+[2m2025-03-31T10:20:56.844813Z[0m [32m INFO[0m ThreadId(19) [2m/home/ubuntu/.cargo/git/checkouts/risc0-ethereum-998b5f97ae0f99d6/3c1fd2a/steel/src/contract.rs[0m[2m:[0m[2m212:[0m Executing preflight calling 'aggregate3((address,bool,bytes)[])' on 0xcA11bde05977b3631167028862bE2a173976CA11    
+Env creation time: 3.967402323s
+Client creation time: 11.350037ms
+Image ID: 0000000000000000000000000000000000000000000000000000000000000000
+Input upload time: 1.248516129s
+Bonsai proving SessionID: 0fa44f22-bb88-49ed-8855-10212f128b77
+[2m2025-03-31T10:21:11.128866Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/proof_generator.rs[0m[2m:[0m[2m48:[0m No processed events found, waiting for next check...
+[2m2025-03-31T10:21:13.037813Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x50f7b79bbb4969c131031d1ecd411e8b4ea6cd0ab0e419fcc6fcbc8be2540c40 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:13.037864Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain_id: 11155420
+[2m2025-03-31T10:21:13.045207Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x50f7b79bbb4969c131031d1ecd411e8b4ea6cd0ab0e419fcc6fcbc8be2540c40 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:13.048731Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x50f7b79bbb4969c131031d1ecd411e8b4ea6cd0ab0e419fcc6fcbc8be2540c40 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:21:13.052427Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x50f7b79bbb4969c131031d1ecd411e8b4ea6cd0ab0e419fcc6fcbc8be2540c40 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:21:14.581948Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x923a4aa30ba1453c9919af92a00650ca3dee5189dff899e25e20040b341d34b4 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:14.581994Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x9a3e5153e7642913d007c0685938010011a865c7, chain_id: 11155111
+[2m2025-03-31T10:21:18.780138Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xb1c410c727cf264e7eb321d36d73e8033de30f8717bb0d905d6f9892c1af79ed status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:18.780183Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain_id: 11155420
+[2m2025-03-31T10:21:18.784277Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xb1c410c727cf264e7eb321d36d73e8033de30f8717bb0d905d6f9892c1af79ed status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:18.788188Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xb1c410c727cf264e7eb321d36d73e8033de30f8717bb0d905d6f9892c1af79ed status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:21:18.791941Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0xb1c410c727cf264e7eb321d36d73e8033de30f8717bb0d905d6f9892c1af79ed status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:21:19.566208Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x2d4e79edfa4d7d440117273a34ece53d56dafba513846d67ad454dad487c3d44 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:19.566249Z[0m [32m INFO[0m ThreadId(03) [2msequencer/src/event_listener.rs[0m[2m:[0m[2m308:[0m Processing event for market: 0x4631d3e5803332448e0d9cbb9bf501a4c50b95ed, chain_id: 59141
+[2m2025-03-31T10:21:19.570072Z[0m [32m INFO[0m ThreadId(10) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x2d4e79edfa4d7d440117273a34ece53d56dafba513846d67ad454dad487c3d44 status to Received, batch_tx_hash: None
+[2m2025-03-31T10:21:19.573998Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x2d4e79edfa4d7d440117273a34ece53d56dafba513846d67ad454dad487c3d44 status to Processed, batch_tx_hash: None
+[2m2025-03-31T10:21:19.578189Z[0m [32m INFO[0m ThreadId(11) [2msequencer/src/database.rs[0m[2m:[0m[2m237:[0m Updated event 0x2d4e79edfa4d7d440117273a34ece53d56dafba513846d67ad454dad487c3d44 status to Processed, batch_tx_hash: None
