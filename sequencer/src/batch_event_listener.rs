@@ -16,7 +16,7 @@ use crate::events::{
 };
 use sequencer::database::{Database, EventStatus, EventUpdate};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BatchEventConfig {
     pub ws_url: String,
     pub batch_submitter: Address,

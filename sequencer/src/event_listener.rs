@@ -39,7 +39,7 @@ lazy_static! {
     pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventConfig {
     pub ws_url: String,
     pub market: Address,
@@ -198,9 +198,10 @@ impl EventListener {
 
             match self.process_raw_event(raw_event).await {
                 Ok(processed) => {
-                    if let Err(e) = self.processed_sender.send(processed).await {
-                        error!("Failed to send processed event: {:?}", e);
-                    }
+                    // if let Err(e) = self.processed_sender.send(processed).await {
+                    //     error!("Failed to send processed event: {:?}", e);
+                    // }
+                    info!("Processed Raw Event");
                 }
                 Err(e) => {
                     error!("Failed to process event: {:?}", e);
