@@ -42,6 +42,11 @@ if [ -f "$SEQUENCER_DIR/logs/sequencer.pid" ]; then
     fi
 fi
 
+# Run migrations using sqlx from the sequencer directory
+echo "Running database migrations..."
+cd "$SEQUENCER_DIR"
+sqlx migrate run --database-url "${DATABASE_URL}"
+
 # Start the sequencer in the background with verbose logging
 echo "Starting sequencer..."
 cd "$SEQUENCER_DIR"
