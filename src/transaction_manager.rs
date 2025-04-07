@@ -12,6 +12,9 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 use tracing::{error, info};
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 type Bytes4 = FixedBytes<4>;
 
@@ -34,6 +37,7 @@ pub struct TransactionConfig {
 pub struct TransactionManager {
     config: TransactionConfig,
     db: Database,
+    last_confirmed_tx: Arc<Mutex<HashMap<u32, TxHash>>>,
 }
 
 impl std::fmt::Debug for TransactionManager {
@@ -49,6 +53,7 @@ impl TransactionManager {
         Self {
             config,
             db,
+            last_confirmed_tx: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -186,6 +191,25 @@ impl TransactionManager {
         config: &TransactionConfig,
     ) -> Result<TxHash> {
         let provider = Self::get_provider_for_chain(chain_id, config).await?;
+        
+        // Check for pending transactions
+        let nonce = provider.get_nonce(SEQUENCER_ADDRESS).await?;
+        let pending_tx = provider.get_transaction_count(SEQUENCER_ADDRESS, None).await?;
+        
+        if pending_tx > nonce {
+            // There are pending transactions, wait for them to be confirmed
+            info!("Waiting for pending transactions to be confirmed for chain {}", chain_id);
+            
+            // Wait for pending transactions to be confirmed
+            loop {
+                let current_nonce = provider.get_nonce(SEQUENCER_ADDRESS).await?;
+                if current_nonce == pending_tx {
+                    break;
+                }
+                sleep(Duration::from_secs(2)).await;
+            }
+        }
+
         let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
@@ -246,89 +270,79 @@ impl TransactionManager {
             events.len()
         );
 
-        // Submit the batch
-        let action = batch_submitter.batchProcess(msg).from(SEQUENCER_ADDRESS);
+        // Modified transaction submission logic
+        let mut retry_count = 0;
+        let max_retries = config.max_retries;
+        let mut current_gas_multiplier = 1.1;
 
-        // Estimate gas with a buffer
-        let estimated_gas = action.estimate_gas().await?;
-        let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
+        loop {
+            let pending_tx = batch_submitter
+                .batchProcess(msg.clone())
+                .gas_multiplier(current_gas_multiplier)
+                .priority_fee_multiplier(1.2)
+                .send()
+                .await?;
 
-        debug!(
-            "Estimated gas: {}, using gas limit: {}",
-            estimated_gas, gas_limit
-        );
+            let tx_hash = pending_tx.tx_hash();
 
-        // Update events with batch submission pending
-        for event in events {
-            let mut update = event.clone();
-            update.status = EventStatus::BatchSubmitted;
-            update.batch_submitted_at = Some(Utc::now());
+            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                Ok(hash) => {
+                    let receipt = provider
+                        .get_transaction_receipt(hash)
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
-            if let Err(e) = db.update_event(update).await {
-                error!("Failed to update event status to BatchSubmitted: {:?}", e);
-            }
-        }
-
-        // Send the transaction and get pending transaction
-        let pending_tx = action.gas(gas_limit).send().await?;
-        let tx_hash = pending_tx.tx_hash().clone();
-
-        info!("Submitted batch transaction: {:?}", tx_hash);
-
-        // Wait for transaction confirmation
-        match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-            Ok(hash) => {
-                info!("Batch transaction confirmed with hash {:?}", hash);
-
-                let receipt = provider
-                    .get_transaction_receipt(hash)
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
-
-                // Check transaction status
-                if receipt.status() == true {
-                    info!(
-                        "Batch transaction mined successfully: hash={:?}, gas_used={}",
-                        receipt.transaction_hash,
-                        receipt.gas_used()
-                    );
-                } else {
-                    // Transaction reverted
-                    error!("Transaction reverted with hash {:?}", hash);
-
-                    // Update all events with failure status
-                    for event in events {
-                        let mut update = event.clone();
-                        update.status = EventStatus::BatchFailed {
-                            error: "Transaction reverted".to_string(),
-                        };
-                        update.batch_tx_hash = Some(tx_hash.to_string());
-
-                        if let Err(e) = db.update_event(update).await {
-                            error!("Failed to update event with failure status: {:?}", e);
+                    if receipt.status() == true {
+                        // Transaction successful
+                        info!(
+                            "Batch transaction confirmed: hash={:?}, gas_used={}",
+                            receipt.transaction_hash,
+                            receipt.gas_used()
+                        );
+                        return Ok(tx_hash);
+                    } else {
+                        // Transaction reverted
+                        if retry_count >= max_retries {
+                            error!("Max retries reached for transaction");
+                            // Update events with failure status
+                            for event in events {
+                                let mut update = event.clone();
+                                update.status = EventStatus::BatchFailed {
+                                    error: "Transaction reverted after max retries".to_string(),
+                                };
+                                update.batch_tx_hash = Some(tx_hash.to_string());
+                                if let Err(e) = db.update_event(update).await {
+                                    error!("Failed to update event with failure status: {:?}", e);
+                                }
+                            }
+                            return Err(eyre::eyre!("Transaction reverted after max retries"));
                         }
+                        retry_count += 1;
+                        current_gas_multiplier *= 1.2; // Increase gas price for retry
+                        continue;
                     }
                 }
-            }
-            Err(e) => {
-                // Transaction failed or timed out
-                error!("Transaction failed or timed out: {}", e);
-
-                // Update all events with failure status
-                for event in events {
-                    let mut update = event.clone();
-                    update.status = EventStatus::BatchFailed {
-                        error: format!("Transaction error: {}", e),
-                    };
-                    update.batch_tx_hash = Some(tx_hash.to_string());
-
-                    if let Err(db_err) = db.update_event(update).await {
-                        error!("Failed to update event with failure status: {:?}", db_err);
+                Err(e) => {
+                    if retry_count >= max_retries {
+                        error!("Max retries reached for transaction");
+                        // Update events with failure status
+                        for event in events {
+                            let mut update = event.clone();
+                            update.status = EventStatus::BatchFailed {
+                                error: format!("Transaction failed after max retries: {}", e),
+                            };
+                            update.batch_tx_hash = Some(tx_hash.to_string());
+                            if let Err(db_err) = db.update_event(update).await {
+                                error!("Failed to update event with failure status: {:?}", db_err);
+                            }
+                        }
+                        return Err(eyre::eyre!("Transaction failed after max retries: {}", e));
                     }
+                    retry_count += 1;
+                    current_gas_multiplier *= 1.2; // Increase gas price for retry
+                    continue;
                 }
             }
         }
-
-        Ok(tx_hash)
     }
 }

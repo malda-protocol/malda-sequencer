@@ -4727,9 +4727,6 @@ name = "once_cell"
 version = "1.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
-dependencies = [
- "parking_lot_core",
-]
 
 [[package]]
 name = "opaque-debug"
@@ -6403,7 +6400,6 @@ dependencies = [
  "risc0-ethereum-contracts",
  "serde",
  "serde_json",
- "sqldatetime",
  "sqlx",
  "tokio",
  "tokio-stream",
@@ -6733,18 +6729,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sqldatetime"
-version = "0.1.38"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b675881d36a359aea01d928db2724bb06f941a44223b3a9d907c6aec21fa5e6b"
-dependencies = [
- "libc",
- "once_cell",
- "serde",
- "stack-buf",
-]
-
-[[package]]
 name = "sqlformat"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7024,12 +7008,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "stack-buf"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7386b49cb287f6fafbfd3bd604914bccb99fb8d53483f40e1ecfda5d45f3370"
 
 [[package]]
 name = "static_assertions"
