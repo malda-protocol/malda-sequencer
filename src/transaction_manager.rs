@@ -1,5 +1,4 @@
 use alloy::{
-    network::ReceiptResponse,
     primitives::{FixedBytes, TxHash, U256},
     providers::Provider,
     transports::http::reqwest::Url,
@@ -9,7 +8,6 @@ use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, warn};
 use tracing::{error, info};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -192,17 +190,14 @@ impl TransactionManager {
     ) -> Result<TxHash> {
         let provider = Self::get_provider_for_chain(chain_id, config).await?;
         
-        // Check for pending transactions
-        let nonce = provider.get_nonce(SEQUENCER_ADDRESS).await?;
-        let pending_tx = provider.get_transaction_count(SEQUENCER_ADDRESS, None).await?;
+        let nonce = provider.get_transaction_count(SEQUENCER_ADDRESS).await?;
+        let pending_tx = provider.get_transaction_count(SEQUENCER_ADDRESS).await?;
         
         if pending_tx > nonce {
-            // There are pending transactions, wait for them to be confirmed
             info!("Waiting for pending transactions to be confirmed for chain {}", chain_id);
             
-            // Wait for pending transactions to be confirmed
             loop {
-                let current_nonce = provider.get_nonce(SEQUENCER_ADDRESS).await?;
+                let current_nonce = provider.get_transaction_count(SEQUENCER_ADDRESS).await?;
                 if current_nonce == pending_tx {
                     break;
                 }
@@ -270,76 +265,53 @@ impl TransactionManager {
             events.len()
         );
 
-        // Modified transaction submission logic
         let mut retry_count = 0;
         let max_retries = config.max_retries;
-        let mut current_gas_multiplier = 1.1;
+        let mut current_priority_fee = 1_000_000_000u128; // 1 gwei
 
         loop {
-            let pending_tx = batch_submitter
+            let gas_price = provider.get_gas_price().await?;
+            // Explicitly handle the types for the gas price calculation
+            let gas_price_increase = gas_price / 5u128;
+            let increased_gas_price = gas_price + gas_price_increase; // Add 20%
+
+            let tx = batch_submitter
                 .batchProcess(msg.clone())
-                .gas_multiplier(current_gas_multiplier)
-                .priority_fee_multiplier(1.2)
+                .gas_price(increased_gas_price)
+                .max_priority_fee_per_gas(current_priority_fee)
                 .send()
                 .await?;
 
-            let tx_hash = pending_tx.tx_hash();
+            let tx_hash = *tx.tx_hash(); // Dereference the hash
 
-            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                Ok(hash) => {
-                    let receipt = provider
-                        .get_transaction_receipt(hash)
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
-
-                    if receipt.status() == true {
-                        // Transaction successful
+            match provider.get_transaction_receipt(tx_hash).await? {
+                Some(receipt) => {
+                    if receipt.status() {
                         info!(
                             "Batch transaction confirmed: hash={:?}, gas_used={}",
                             receipt.transaction_hash,
-                            receipt.gas_used()
+                            receipt.gas_used
                         );
                         return Ok(tx_hash);
-                    } else {
-                        // Transaction reverted
-                        if retry_count >= max_retries {
-                            error!("Max retries reached for transaction");
-                            // Update events with failure status
-                            for event in events {
-                                let mut update = event.clone();
-                                update.status = EventStatus::BatchFailed {
-                                    error: "Transaction reverted after max retries".to_string(),
-                                };
-                                update.batch_tx_hash = Some(tx_hash.to_string());
-                                if let Err(e) = db.update_event(update).await {
-                                    error!("Failed to update event with failure status: {:?}", e);
-                                }
-                            }
-                            return Err(eyre::eyre!("Transaction reverted after max retries"));
-                        }
-                        retry_count += 1;
-                        current_gas_multiplier *= 1.2; // Increase gas price for retry
-                        continue;
                     }
                 }
-                Err(e) => {
+                None => {
                     if retry_count >= max_retries {
                         error!("Max retries reached for transaction");
-                        // Update events with failure status
                         for event in events {
                             let mut update = event.clone();
                             update.status = EventStatus::BatchFailed {
-                                error: format!("Transaction failed after max retries: {}", e),
+                                error: "Transaction failed after max retries".to_string(),
                             };
                             update.batch_tx_hash = Some(tx_hash.to_string());
                             if let Err(db_err) = db.update_event(update).await {
                                 error!("Failed to update event with failure status: {:?}", db_err);
                             }
                         }
-                        return Err(eyre::eyre!("Transaction failed after max retries: {}", e));
+                        return Err(eyre::eyre!("Transaction failed after max retries"));
                     }
                     retry_count += 1;
-                    current_gas_multiplier *= 1.2; // Increase gas price for retry
+                    current_priority_fee = current_priority_fee + (current_priority_fee / 5); // Increase by 20%
                     continue;
                 }
             }
