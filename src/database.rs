@@ -5,6 +5,7 @@ use sqlx::{query, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::info;
 use std::str::FromStr;
+use std::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
@@ -81,7 +82,10 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = sqlx::PgPool::connect(database_url).await?;
+        let pool = sqlx::PgPool::connect_with(
+            sqlx::postgres::PgConnectOptions::from_str(database_url)?
+                .ssl_mode(sqlx::postgres::PgSslMode::Require)
+        ).await?;
 
         // Run migrations
         sqlx::migrate!("./migrations").run(&pool).await?;

@@ -27,6 +27,7 @@ alloy::sol! {
         bytes seal;
         address[] mTokens;
         uint256[] amounts;
+        uint256[] minAmountsOut;
         bytes4[] selectors;
         bytes32[] initHashes;
         uint256 startIndex;

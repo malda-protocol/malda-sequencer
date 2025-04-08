@@ -108,8 +108,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Markets
     let markets = vec![
-        WETH_MARKET_SEPOLIA,
-        USDC_MARKET_SEPOLIA,
         USDC_MOCK_MARKET_SEPOLIA,
         WSTETH_MOCK_MARKET_SEPOLIA,
     ];
@@ -265,15 +263,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rpc_urls: vec![
             (
                 ETHEREUM_SEPOLIA_CHAIN_ID as u32,
-                RPC_URL_ETHEREUM_SEPOLIA.to_string(),
+                rpc_url_ethereum_sepolia().to_string(),
             ),
             (
                 OPTIMISM_SEPOLIA_CHAIN_ID as u32,
-                RPC_URL_OPTIMISM_SEPOLIA.to_string(),
+                rpc_url_optimism_sepolia().to_string(),
             ),
             (
                 LINEA_SEPOLIA_CHAIN_ID as u32,
-                RPC_URL_LINEA_SEPOLIA.to_string(),
+                rpc_url_linea_sepolia().to_string(),
             ),
         ],
         poll_interval: Duration::from_secs(5), // Check for new events every 5 seconds

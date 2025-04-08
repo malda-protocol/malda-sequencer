@@ -10,7 +10,7 @@ echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
 # Set database URL
-export DATABASE_URL="postgres://doadmin:AVNS_G5U-F8YEsMY2G4odL39@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+export DATABASE_URL="postgres://doadmin:AVNS_3E4eXK40PwwJm9cEwCL@sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
 
 # Check if database is accessible
 echo "Checking database connection..."
@@ -37,9 +37,9 @@ fi
 
 # Drop tables and migrations
 echo "Dropping database tables and migrations..."
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS events CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS finished_events CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TYPE IF EXISTS event_status CASCADE;"
+PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
+PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS events CASCADE;"
+PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS finished_events CASCADE;"
+PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TYPE IF EXISTS event_status CASCADE;"
 
 echo "Database cleanup completed successfully!" 

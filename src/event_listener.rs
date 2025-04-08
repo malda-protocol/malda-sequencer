@@ -25,8 +25,8 @@ use crate::{
 
 // Import the chain ID constant from malda_rs
 use malda_rs::constants::{
-    ETHEREUM_SEPOLIA_CHAIN_ID, L1_BLOCK_ADDRESS_OPTIMISM, LINEA_SEPOLIA_CHAIN_ID,
-    RPC_URL_OPTIMISM_SEPOLIA,
+    ETHEREUM_SEPOLIA_CHAIN_ID, L1_BLOCK_ADDRESS_OPSTACK, LINEA_SEPOLIA_CHAIN_ID,
+    rpc_url_optimism_sepolia,
 };
 
 use crate::constants::ETHEREUM_BLOCK_DELAY;
@@ -93,13 +93,13 @@ impl EventListener {
         task::spawn(async {
             let mut interval = interval(Duration::from_secs(6));
             let provider = create_provider(
-                Url::parse(RPC_URL_OPTIMISM_SEPOLIA).unwrap(),
+                Url::parse(rpc_url_optimism_sepolia()).unwrap(),
                 "0xbd0974bec39a17e36ba2a6b4d238ff944bacb481cbed5efcae784d7bf4a2ff80",
             )
             .await
             .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
             .unwrap();
-            let l1_block_contract = IL1Block::new(L1_BLOCK_ADDRESS_OPTIMISM, provider);
+            let l1_block_contract = IL1Block::new(L1_BLOCK_ADDRESS_OPSTACK, provider);
 
             loop {
                 interval.tick().await;
