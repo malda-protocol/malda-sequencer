@@ -57,7 +57,7 @@ impl TransactionManager {
 
         loop {
             // Get all events with ProofReceived status from the database
-            match self.db.get_proven_events().await {
+            match self.db.get_proven_events(self.config.poll_interval.as_secs() as i64).await {
                 Ok(events) => {
                     if !events.is_empty() {
                         info!("Found {} proven events to process", events.len());
