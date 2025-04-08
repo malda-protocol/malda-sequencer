@@ -29,8 +29,8 @@ pub use malda_rs::constants::{
     LINEA_SEPOLIA_CHAIN_ID,
     OPTIMISM_SEPOLIA_CHAIN_ID,
     // Markets (non-chain specific)
-    USDC_MARKET_SEPOLIA,
-    WETH_MARKET_SEPOLIA,
+    USDC_MOCK_MARKET_SEPOLIA,
+    WSTETH_MOCK_MARKET_SEPOLIA,
 };
 
 // WebSocket URLs
@@ -53,7 +53,7 @@ pub const ETHEREUM_BLOCK_DELAY: u64 = 12;
 // Add this with other constants
 pub const PROOF_REQUEST_DELAY: u64 = 15;
 
-pub const BATCH_SUBMITTER: Address = address!("b4282799022073790c8Ae500Ac6C91C622021079");
+pub const BATCH_SUBMITTER: Address = address!("1b2ac3856D953110DB451Db177e5D4EEcdBA6BA8");
 
 /// The time window to wait for additional events to batch together (in seconds)
 pub const BATCH_WINDOW: u64 = 2;
