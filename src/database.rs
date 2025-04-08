@@ -358,21 +358,72 @@ impl Database {
         }
     }
 
-    pub async fn get_processed_events(&self) -> Result<Vec<EventUpdate>> {
-        let records = query(
+    pub async fn get_processed_events(&self, delay_seconds: i64) -> Result<Vec<EventUpdate>> {
+        // First check if enough time has passed since the last proof request
+        let should_proceed = query(
             r#"
             SELECT 
-                tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                amount, target_function, market, journal_index, journal,
-                seal, batch_tx_hash, received_at, processed_at,
-                proof_requested_at, proof_received_at, batch_submitted_at,
-                batch_included_at, tx_finished_at, resubmitted, error
-            FROM events 
-            WHERE status = 'Processed'::event_status
+                CASE 
+                    WHEN last_proof_requested_at IS NULL THEN true
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_proof_requested_at)) >= $1 THEN true
+                    ELSE false
+                END as should_proceed
+            FROM sync_timestamps
+            WHERE id = 1
             "#
         )
-        .fetch_all(&self.pool)
+        .bind(delay_seconds)
+        .fetch_one(&self.pool)
+        .await?
+        .try_get::<bool, _>("should_proceed")?;
+
+        if !should_proceed {
+            return Ok(Vec::new());
+        }
+
+        // Use a transaction to ensure atomicity
+        let mut tx = self.pool.begin().await?;
+        
+        // Update the last_proof_requested_at timestamp
+        query(
+            r#"
+            UPDATE sync_timestamps
+            SET last_proof_requested_at = NOW()
+            WHERE id = 1
+            "#
+        )
+        .execute(tx.as_mut())
         .await?;
+
+        // Get and update the processed events
+        let records = query(
+            r#"
+            WITH claimed_events AS (
+                UPDATE events 
+                SET status = 'ProofRequested'::event_status,
+                    proof_requested_at = NOW()
+                WHERE tx_hash IN (
+                    SELECT tx_hash 
+                    FROM events 
+                    WHERE status = 'Processed'::event_status
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING 
+                    tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
+                    amount, target_function, market, journal_index, journal,
+                    seal, batch_tx_hash, received_at, processed_at,
+                    proof_requested_at, proof_received_at, batch_submitted_at,
+                    batch_included_at, tx_finished_at, resubmitted, error
+            )
+            SELECT * FROM claimed_events
+            "#
+        )
+        .fetch_all(tx.as_mut())
+        .await?;
+
+        // Commit the transaction
+        tx.commit().await?;
 
         let mut events = Vec::new();
 
@@ -429,7 +480,43 @@ impl Database {
         Ok(events)
     }
 
-    pub async fn get_proven_events(&self) -> Result<Vec<EventUpdate>> {
+    pub async fn get_proven_events(&self, delay_seconds: i64) -> Result<Vec<EventUpdate>> {
+        // First check if enough time has passed since the last batch submission
+        let should_proceed = query(
+            r#"
+            SELECT 
+                CASE 
+                    WHEN last_batch_submitted_at IS NULL THEN true
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_batch_submitted_at)) >= $1 THEN true
+                    ELSE false
+                END as should_proceed
+            FROM sync_timestamps
+            WHERE id = 1
+            "#
+        )
+        .bind(delay_seconds)
+        .fetch_one(&self.pool)
+        .await?
+        .try_get::<bool, _>("should_proceed")?;
+
+        if !should_proceed {
+            return Ok(Vec::new());
+        }
+
+        // Use a transaction to ensure atomicity
+        let mut tx = self.pool.begin().await?;
+        
+        // Update the last_batch_submitted_at timestamp
+        query(
+            r#"
+            UPDATE sync_timestamps
+            SET last_batch_submitted_at = NOW()
+            WHERE id = 1
+            "#
+        )
+        .execute(tx.as_mut())
+        .await?;
+
         // First, get the journal with the earliest proof_received_at timestamp
         let first_event = query(
             r#"
@@ -439,13 +526,15 @@ impl Database {
             AND journal IS NOT NULL
             ORDER BY proof_received_at ASC
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             "#
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(tx.as_mut())
         .await?;
 
         // If no events found, return empty vector
         if first_event.is_none() {
+            tx.commit().await?;
             return Ok(Vec::new());
         }
 
@@ -453,27 +542,36 @@ impl Database {
 
         // If no journal found, return empty vector
         if first_journal.is_none() {
+            tx.commit().await?;
             return Ok(Vec::new());
         }
 
-        // Get all events with the same journal
+        // Get all events with the same journal and update their status
         let records = query(
             r#"
-            SELECT 
-                tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                amount, target_function, market, journal_index, journal,
-                seal, batch_tx_hash, received_at, processed_at,
-                proof_requested_at, proof_received_at, batch_submitted_at,
-                batch_included_at, tx_finished_at, resubmitted, error
-            FROM events 
-            WHERE status = 'ProofReceived'::event_status
-            AND journal = $1
+            WITH updated_events AS (
+                UPDATE events 
+                SET status = 'BatchSubmitted'::event_status,
+                    batch_submitted_at = NOW()
+                WHERE status = 'ProofReceived'::event_status
+                AND journal = $1
+                RETURNING 
+                    tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
+                    amount, target_function, market, journal_index, journal,
+                    seal, batch_tx_hash, received_at, processed_at,
+                    proof_requested_at, proof_received_at, batch_submitted_at,
+                    batch_included_at, tx_finished_at, resubmitted, error
+            )
+            SELECT * FROM updated_events
             ORDER BY journal_index ASC
             "#
         )
         .bind(first_journal)
-        .fetch_all(&self.pool)
+        .fetch_all(tx.as_mut())
         .await?;
+
+        // Commit the transaction
+        tx.commit().await?;
 
         let mut events = Vec::new();
 

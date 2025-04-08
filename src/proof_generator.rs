@@ -42,7 +42,7 @@ impl ProofGenerator {
 
         loop {
             // Get processed events from database
-            let processed_events = self.db.get_processed_events().await?;
+            let processed_events = self.db.get_processed_events(crate::constants::PROOF_REQUEST_DELAY as i64).await?;
             
             if processed_events.is_empty() {
                 info!("No processed events found, waiting for next check...");

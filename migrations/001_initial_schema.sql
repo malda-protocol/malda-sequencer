@@ -1,5 +1,6 @@
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS finished_events;
+DROP TABLE IF EXISTS sync_timestamps;
 
 DROP TYPE IF EXISTS event_status;
 
@@ -64,6 +65,17 @@ CREATE TABLE finished_events (
     resubmitted INTEGER,
     error TEXT
 );
+
+CREATE TABLE sync_timestamps (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    last_proof_requested_at TIMESTAMP WITH TIME ZONE,
+    last_batch_submitted_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT single_row CHECK (id = 1)
+);
+
+-- Insert initial row
+INSERT INTO sync_timestamps (id, last_proof_requested_at, last_batch_submitted_at)
+VALUES (1, NULL, NULL);
 
 CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX finished_events_status_idx ON finished_events(status);
