@@ -81,8 +81,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load environment variables
     dotenv::dotenv().ok();
 
-    // Initialize channels
-    let (processed_sender, processed_receiver) = mpsc::channel::<ProcessedEvent>(100);
     
     // Initialize database
     let database_url = std::env::var("DATABASE_URL")
@@ -215,7 +213,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     chain_id: *chain_id,
                 };
 
-                let processed_sender = processed_sender.clone();
                 let db = db.clone();
                 let handle = tokio::spawn(async move {
                     let mut current_listener = None;
@@ -226,7 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Create new listener
-                        current_listener = Some(EventListener::new(config.clone(), processed_sender.clone(), db.clone()));
+                        current_listener = Some(EventListener::new(config.clone(), db.clone()));
                         info!("Starting new event listener instance");
                         
                         if let Some(listener) = &current_listener {
@@ -308,31 +305,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Socket path: {}", UNIX_SOCKET_PATH);
     info!("----------------------------------------------------------");
     info!("All components initialized and running");
-
-    // Set up Unix socket for manual event injection
-    let socket_path = UNIX_SOCKET_PATH;
-    // Remove the socket file if it exists
-    let _ = fs::remove_file(socket_path);
-    let listener = UnixListener::bind(socket_path)?;
-
-    let processed_sender_clone = processed_sender.clone();
-    tokio::spawn(async move {
-        loop {
-            if let Ok((mut socket, _)) = listener.accept().await {
-                let tx = processed_sender_clone.clone();
-                tokio::spawn(async move {
-                    let mut buf = Vec::new();
-                    if let Ok(_) = socket.read_to_end(&mut buf).await {
-                        if let Ok(event) = serde_json::from_slice::<ProcessedEvent>(&buf) {
-                            if let Err(e) = tx.send(event).await {
-                                error!("Failed to forward manual event: {}", e);
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    });
 
     // Wait for all tasks to complete
     for handle in handles {
