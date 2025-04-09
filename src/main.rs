@@ -37,6 +37,9 @@ use sequencer::database::{Database, EventStatus, EventUpdate};
 use std::collections::HashMap;
 use std::env;
 
+mod event_proof_ready_checker;
+use event_proof_ready_checker::EventProofReadyChecker;
+
 pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
@@ -83,19 +86,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         database_url.replace("postgres://", "postgres://*****:*****@")
     );
     let db = Database::new(&database_url).await?;
-
-    // Test database connection
-    info!("Testing database connection...");
-    let test_update = EventUpdate {
-        tx_hash: TxHash::from_slice(&[0; 32]),
-        status: EventStatus::Received,
-        ..Default::default()
-    };
-
-    match db.update_event(test_update).await {
-        Ok(_) => info!("Successfully wrote test event to database"),
-        Err(e) => error!("Failed to write test event: {:?}", e),
-    }
 
     // Markets
     let markets = vec![
@@ -280,6 +270,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create transaction manager
     let mut transaction_manager = TransactionManager::new(tx_config, db.clone());
 
+    // Create the event proof ready checker
+    let event_proof_ready_checker = EventProofReadyChecker::new(
+        db.clone(),
+        Duration::from_secs(1), // Check every 10 seconds
+    );
+
     // Spawn processors
     let proof_generator_handle = tokio::spawn(async move {
         if let Err(e) = proof_generator.start().await {
@@ -294,6 +290,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     handles.push(tx_manager_handle);
+
+    // Start the event proof ready checker
+    let _event_proof_ready_checker_handle = tokio::spawn(async move {
+        if let Err(e) = event_proof_ready_checker.start().await {
+            error!("Event proof ready checker failed: {:?}", e);
+        }
+    });
 
     // Log configuration summary
     info!("----------------- SEQUENCER CONFIGURATION -----------------");
