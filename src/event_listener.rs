@@ -83,12 +83,11 @@ pub enum ProcessedEvent {
 
 pub struct EventListener {
     config: EventConfig,
-    processed_sender: mpsc::Sender<ProcessedEvent>,
     db: Database,
 }
 
 impl EventListener {
-    pub fn new(config: EventConfig, processed_sender: mpsc::Sender<ProcessedEvent>, db: Database) -> Self {
+    pub fn new(config: EventConfig, db: Database) -> Self {
         // Start the background task to update Ethereum block number
         task::spawn(async {
             let mut interval = interval(Duration::from_secs(6));
@@ -117,7 +116,6 @@ impl EventListener {
 
         Self {
             config,
-            processed_sender,
             db,
         }
     }
@@ -196,17 +194,7 @@ impl EventListener {
                 chain_id: self.config.chain_id,
             };
 
-            match self.process_raw_event(raw_event).await {
-                Ok(processed) => {
-                    // if let Err(e) = self.processed_sender.send(processed).await {
-                    //     error!("Failed to send processed event: {:?}", e);
-                    // }
-                    info!("Processed Raw Event");
-                }
-                Err(e) => {
-                    error!("Failed to process event: {:?}", e);
-                }
-            }
+            let _ = self.process_raw_event(raw_event).await;
         }
 
         warn!("Event stream ended unexpectedly");
