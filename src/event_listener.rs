@@ -89,31 +89,6 @@ pub struct EventListener {
 
 impl EventListener {
     pub fn new(config: EventConfig, db: Database) -> Self {
-        // Start the background task to update Ethereum block number
-        task::spawn(async {
-            let mut interval = interval(Duration::from_secs(6));
-            let provider = create_provider(
-                Url::parse(rpc_url_optimism_sepolia()).unwrap(),
-                "0xbd0974bec39a17e36ba2a6b4d238ff944bacb481cbed5efcae784d7bf4a2ff80",
-            )
-            .await
-            .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
-            .unwrap();
-            let l1_block_contract = IL1Block::new(L1_BLOCK_ADDRESS_OPSTACK, provider);
-
-            loop {
-                interval.tick().await;
-                match l1_block_contract.number().call().await {
-                    Ok(number_return) => {
-                        let block_number = number_return._0;
-                        ETHEREUM_BLOCK_NUMBER.store(block_number, Ordering::SeqCst);
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch Ethereum block number: {}", e);
-                    }
-                }
-            }
-        });
 
         Self {
             config,
@@ -324,19 +299,6 @@ impl EventListener {
         let log = &raw_event.log;
         let tx_hash = log.transaction_hash.expect("Log should have tx hash");
         debug!("Processing event with tx_hash: {}", hex::encode(tx_hash.0));
-
-        // Add delay for ETH Sepolia events
-        if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
-            let event_block = log.block_number.expect("Log should have block number");
-            while event_block > ETHEREUM_BLOCK_NUMBER.load(Ordering::SeqCst) {
-                debug!("ETH Sepolia event block {} not yet reached, current block {}, waiting {} seconds", 
-                    event_block, 
-                    ETHEREUM_BLOCK_NUMBER.load(Ordering::SeqCst), 
-                    ETHEREUM_BLOCK_DELAY
-                );
-                sleep(Duration::from_secs(ETHEREUM_BLOCK_DELAY)).await;
-            }
-        }
 
         let processed = if chain_id == LINEA_SEPOLIA_CHAIN_ID {
             // Process host chain events
