@@ -60,6 +60,7 @@ pub struct EventUpdate {
     pub amount: Option<U256>,
     pub target_function: Option<String>,
     pub market: Option<Address>,
+    pub received_at_block: Option<i32>,
     pub journal_index: Option<i32>,
     pub journal: Option<Bytes>,
     pub seal: Option<Bytes>,
@@ -173,19 +174,19 @@ impl Database {
             INSERT INTO events (
                 tx_hash, event_type, src_chain_id, dst_chain_id, 
                 msg_sender, amount, target_function, market,
-                journal_index, journal, seal, batch_tx_hash, 
+                received_at_block, journal_index, journal, seal, batch_tx_hash, 
                 status, resubmitted, error,
                 received_at, processed_at, 
                 proof_requested_at, proof_received_at,
                 batch_submitted_at, batch_included_at, tx_finished_at
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::event_status, $14, $15,
-                $16, $17, $18, $19, $20, $21, $22
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::event_status, $15, $16,
+                $17, $18, $19, $20, $21, $22, $23
             )
             ON CONFLICT (tx_hash) 
             DO UPDATE SET
-                status = $13::event_status,
+                status = $14::event_status,
                 event_type = COALESCE($2, events.event_type),
                 src_chain_id = COALESCE($3, events.src_chain_id),
                 dst_chain_id = COALESCE($4, events.dst_chain_id),
@@ -193,19 +194,20 @@ impl Database {
                 amount = COALESCE($6, events.amount),
                 target_function = COALESCE($7, events.target_function),
                 market = COALESCE($8, events.market),
-                journal_index = COALESCE($9, events.journal_index),
-                journal = COALESCE($10, events.journal),
-                seal = COALESCE($11, events.seal),
-                batch_tx_hash = COALESCE($12, events.batch_tx_hash),
-                resubmitted = COALESCE($14, events.resubmitted),
-                error = COALESCE($15, events.error),
-                received_at = COALESCE($16, events.received_at),
-                processed_at = COALESCE($17, events.processed_at),
-                proof_requested_at = COALESCE($18, events.proof_requested_at),
-                proof_received_at = COALESCE($19, events.proof_received_at),
-                batch_submitted_at = COALESCE($20, events.batch_submitted_at),
-                batch_included_at = COALESCE($21, events.batch_included_at),
-                tx_finished_at = COALESCE($22, events.tx_finished_at)
+                received_at_block = COALESCE($9, events.received_at_block),
+                journal_index = COALESCE($10, events.journal_index),
+                journal = COALESCE($11, events.journal),
+                seal = COALESCE($12, events.seal),
+                batch_tx_hash = COALESCE($13, events.batch_tx_hash),
+                resubmitted = COALESCE($15, events.resubmitted),
+                error = COALESCE($16, events.error),
+                received_at = COALESCE($17, events.received_at),
+                processed_at = COALESCE($18, events.processed_at),
+                proof_requested_at = COALESCE($19, events.proof_requested_at),
+                proof_received_at = COALESCE($20, events.proof_received_at),
+                batch_submitted_at = COALESCE($21, events.batch_submitted_at),
+                batch_included_at = COALESCE($22, events.batch_included_at),
+                tx_finished_at = COALESCE($23, events.tx_finished_at)
             "#,
         )
         .bind(update.tx_hash.to_string())
@@ -216,17 +218,14 @@ impl Database {
         .bind(update.amount.map(|amt| amt.to_string()))
         .bind(update.target_function)
         .bind(update.market.map(|addr| addr.to_string()))
+        .bind(update.received_at_block)
         .bind(update.journal_index)
-        .bind(update.journal.as_ref().map(|j| j.as_ref()))
-        .bind(update.seal.as_ref().map(|s| s.as_ref()))
+        .bind(update.journal.map(|j| j.to_vec()))
+        .bind(update.seal.map(|s| s.to_vec()))
         .bind(update.batch_tx_hash)
         .bind(update.status.to_db_string())
         .bind(update.resubmitted)
-        .bind(match update.status {
-            EventStatus::Failed { ref error } => Some(error),
-            EventStatus::BatchFailed { ref error } => Some(error),
-            _ => update.error.as_ref(),
-        })
+        .bind(update.error)
         .bind(update.received_at)
         .bind(update.processed_at)
         .bind(update.proof_requested_at)
@@ -237,11 +236,11 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Use the cloned values for logging
         info!(
-            "Updated event {} status to {:?}, batch_tx_hash: {:?}",
+            "Updated event {} with status {:?} and batch_tx_hash {:?}",
             update.tx_hash, update.status, batch_tx_hash
         );
+
         Ok(())
     }
 
@@ -339,6 +338,7 @@ impl Database {
                     amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
                     target_function: row.try_get("target_function")?,
                     market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                    received_at_block: row.try_get("received_at_block")?,
                     journal_index: row.try_get("journal_index")?,
                     journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                     seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
@@ -459,6 +459,7 @@ impl Database {
                 amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
                 target_function: row.try_get("target_function")?,
                 market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                received_at_block: row.try_get("received_at_block")?,
                 journal_index: row.try_get("journal_index")?,
                 journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                 seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
@@ -606,6 +607,7 @@ impl Database {
                 amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
                 target_function: row.try_get("target_function")?,
                 market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                received_at_block: row.try_get("received_at_block")?,
                 journal_index: row.try_get("journal_index")?,
                 journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                 seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),

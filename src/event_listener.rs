@@ -213,6 +213,7 @@ impl EventListener {
             event_type: Some(format!("{:?}", raw_event.log.topics())),
             src_chain_id: Some(raw_event.chain_id.try_into().unwrap()),
             market: Some(raw_event.market),
+            received_at_block: Some(raw_event.log.block_number.unwrap_or_default() as i32),
             status: EventStatus::Received,
             received_at: Some(Utc::now()),
             ..Default::default()
