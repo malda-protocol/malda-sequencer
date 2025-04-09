@@ -6,7 +6,6 @@ use alloy::{
 };
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use alloy::primitives::{ TxHash, U256};
 use eyre::eyre;
@@ -17,8 +16,10 @@ use std::time::Duration;
 use tokio::task;
 use tokio::time::interval;
 use tokio::time::sleep;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use std::cmp::max;
 
+use malda_rs::constants::*;
 use crate::{
     events::{parse_supplied_event, parse_withdraw_on_extension_chain_event},
 };
@@ -207,13 +208,31 @@ impl EventListener {
             .transaction_hash
             .ok_or_else(|| eyre!("No transaction hash"))?;
 
+        // Get the current block number
+        let current_block = raw_event.log.block_number.unwrap_or_default() as i32;
+        
+        // Calculate the block number when proof should be requested (current block + 100)
+        let reorg_protection_depth = match self.config.chain_id {
+            ETHEREUM_SEPOLIA_CHAIN_ID => max(REORG_PROTECTION_DEPTH_ETHEREUM, 6),
+            LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+            OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+            BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+            ETHEREUM_CHAIN_ID => max(REORG_PROTECTION_DEPTH_ETHEREUM, 6),
+            OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
+            BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
+            LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
+            _ => panic!("Unsupported chain ID: {}", self.config.chain_id),
+        };
+
+        let should_request_proof_at_block = Some(current_block + reorg_protection_depth as i32);
+
         // Initial event receipt
         let update = EventUpdate {
             tx_hash,
-            event_type: Some(format!("{:?}", raw_event.log.topics())),
             src_chain_id: Some(raw_event.chain_id.try_into().unwrap()),
             market: Some(raw_event.market),
-            received_at_block: Some(raw_event.log.block_number.unwrap_or_default() as i32),
+            received_at_block: Some(current_block),
+            should_request_proof_at_block,
             status: EventStatus::Received,
             received_at: Some(Utc::now()),
             ..Default::default()

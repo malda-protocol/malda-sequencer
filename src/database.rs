@@ -5,13 +5,13 @@ use sqlx::{query, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::info;
 use std::str::FromStr;
-use std::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
     Received,
     Processed,
     IncludedInBatch,
+    ReadyToRequestProof,
     ProofRequested,
     ProofReceived,
     BatchSubmitted,
@@ -29,6 +29,7 @@ impl EventStatus {
             EventStatus::Received => "Received",
             EventStatus::Processed => "Processed",
             EventStatus::IncludedInBatch => "IncludedInBatch",
+            EventStatus::ReadyToRequestProof => "ReadyToRequestProof",
             EventStatus::ProofRequested => "ProofRequested",
             EventStatus::ProofReceived => "ProofReceived",
             EventStatus::BatchSubmitted => "BatchSubmitted",
@@ -61,6 +62,7 @@ pub struct EventUpdate {
     pub target_function: Option<String>,
     pub market: Option<Address>,
     pub received_at_block: Option<i32>,
+    pub should_request_proof_at_block: Option<i32>,
     pub journal_index: Option<i32>,
     pub journal: Option<Bytes>,
     pub seal: Option<Bytes>,
@@ -102,7 +104,8 @@ impl Database {
             r#"
             SELECT 
                 event_type, src_chain_id, dst_chain_id, msg_sender, amount,
-                target_function, market, batch_tx_hash, received_at, processed_at,
+                target_function, market, received_at_block, should_request_proof_at_block,
+                batch_tx_hash, received_at, processed_at,
                 proof_requested_at, proof_received_at, batch_submitted_at,
                 batch_included_at, resubmitted, error
             FROM events 
@@ -118,14 +121,14 @@ impl Database {
             r#"
             INSERT INTO finished_events (
                 tx_hash, status, event_type, src_chain_id, dst_chain_id,
-                msg_sender, amount, target_function, market, batch_tx_hash,
-                received_at, processed_at, proof_requested_at, proof_received_at,
+                msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
+                batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
                 batch_submitted_at, batch_included_at, tx_finished_at,
                 resubmitted, error
             )
             VALUES (
-                $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19
+                $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                $13, $14, $15, $16, $17, $18, $19, $20, $21
             )
             "#
         )
@@ -138,6 +141,8 @@ impl Database {
         .bind(record.try_get::<Option<String>, _>("amount")?)
         .bind(record.try_get::<Option<String>, _>("target_function")?)
         .bind(record.try_get::<Option<String>, _>("market")?)
+        .bind(record.try_get::<Option<i32>, _>("received_at_block")?)
+        .bind(record.try_get::<Option<i32>, _>("should_request_proof_at_block")?)
         .bind(record.try_get::<Option<String>, _>("batch_tx_hash")?)
         .bind(record.try_get::<Option<DateTime<Utc>>, _>("received_at")?)
         .bind(record.try_get::<Option<DateTime<Utc>>, _>("processed_at")?)
@@ -174,19 +179,19 @@ impl Database {
             INSERT INTO events (
                 tx_hash, event_type, src_chain_id, dst_chain_id, 
                 msg_sender, amount, target_function, market,
-                received_at_block, journal_index, journal, seal, batch_tx_hash, 
+                received_at_block, should_request_proof_at_block, journal_index, journal, seal, batch_tx_hash, 
                 status, resubmitted, error,
                 received_at, processed_at, 
                 proof_requested_at, proof_received_at,
                 batch_submitted_at, batch_included_at, tx_finished_at
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::event_status, $15, $16,
-                $17, $18, $19, $20, $21, $22, $23
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::event_status, $16, $17,
+                $18, $19, $20, $21, $22, $23, $24
             )
             ON CONFLICT (tx_hash) 
             DO UPDATE SET
-                status = $14::event_status,
+                status = $15::event_status,
                 event_type = COALESCE($2, events.event_type),
                 src_chain_id = COALESCE($3, events.src_chain_id),
                 dst_chain_id = COALESCE($4, events.dst_chain_id),
@@ -195,19 +200,20 @@ impl Database {
                 target_function = COALESCE($7, events.target_function),
                 market = COALESCE($8, events.market),
                 received_at_block = COALESCE($9, events.received_at_block),
-                journal_index = COALESCE($10, events.journal_index),
-                journal = COALESCE($11, events.journal),
-                seal = COALESCE($12, events.seal),
-                batch_tx_hash = COALESCE($13, events.batch_tx_hash),
-                resubmitted = COALESCE($15, events.resubmitted),
-                error = COALESCE($16, events.error),
-                received_at = COALESCE($17, events.received_at),
-                processed_at = COALESCE($18, events.processed_at),
-                proof_requested_at = COALESCE($19, events.proof_requested_at),
-                proof_received_at = COALESCE($20, events.proof_received_at),
-                batch_submitted_at = COALESCE($21, events.batch_submitted_at),
-                batch_included_at = COALESCE($22, events.batch_included_at),
-                tx_finished_at = COALESCE($23, events.tx_finished_at)
+                should_request_proof_at_block = COALESCE($10, events.should_request_proof_at_block),
+                journal_index = COALESCE($11, events.journal_index),
+                journal = COALESCE($12, events.journal),
+                seal = COALESCE($13, events.seal),
+                batch_tx_hash = COALESCE($14, events.batch_tx_hash),
+                resubmitted = COALESCE($16, events.resubmitted),
+                error = COALESCE($17, events.error),
+                received_at = COALESCE($18, events.received_at),
+                processed_at = COALESCE($19, events.processed_at),
+                proof_requested_at = COALESCE($20, events.proof_requested_at),
+                proof_received_at = COALESCE($21, events.proof_received_at),
+                batch_submitted_at = COALESCE($22, events.batch_submitted_at),
+                batch_included_at = COALESCE($23, events.batch_included_at),
+                tx_finished_at = COALESCE($24, events.tx_finished_at)
             "#,
         )
         .bind(update.tx_hash.to_string())
@@ -219,6 +225,7 @@ impl Database {
         .bind(update.target_function)
         .bind(update.market.map(|addr| addr.to_string()))
         .bind(update.received_at_block)
+        .bind(update.should_request_proof_at_block)
         .bind(update.journal_index)
         .bind(update.journal.map(|j| j.to_vec()))
         .bind(update.seal.map(|s| s.to_vec()))
@@ -257,6 +264,7 @@ impl Database {
                 "Received" => Ok(Some(EventStatus::Received)),
                 "Processed" => Ok(Some(EventStatus::Processed)),
                 "IncludedInBatch" => Ok(Some(EventStatus::IncludedInBatch)),
+                "ReadyToRequestProof" => Ok(Some(EventStatus::ReadyToRequestProof)),
                 "ProofRequested" => Ok(Some(EventStatus::ProofRequested)),
                 "ProofReceived" => Ok(Some(EventStatus::ProofReceived)),
                 "BatchSubmitted" => Ok(Some(EventStatus::BatchSubmitted)),
@@ -313,6 +321,7 @@ impl Database {
                     "Received" => EventStatus::Received,
                     "Processed" => EventStatus::Processed,
                     "IncludedInBatch" => EventStatus::IncludedInBatch,
+                    "ReadyToRequestProof" => EventStatus::ReadyToRequestProof,
                     "ProofRequested" => EventStatus::ProofRequested,
                     "ProofReceived" => EventStatus::ProofReceived,
                     "BatchSubmitted" => EventStatus::BatchSubmitted,
@@ -339,6 +348,7 @@ impl Database {
                     target_function: row.try_get("target_function")?,
                     market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
                     received_at_block: row.try_get("received_at_block")?,
+                    should_request_proof_at_block: row.try_get("should_request_proof_at_block")?,
                     journal_index: row.try_get("journal_index")?,
                     journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                     seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
@@ -358,7 +368,7 @@ impl Database {
         }
     }
 
-    pub async fn get_processed_events(&self, delay_seconds: i64) -> Result<Vec<EventUpdate>> {
+    pub async fn get_ready_to_request_proof_events(&self, delay_seconds: i64) -> Result<Vec<EventUpdate>> {
         // First check if enough time has passed since the last proof request
         let should_proceed = query(
             r#"
@@ -405,12 +415,12 @@ impl Database {
                 WHERE tx_hash IN (
                     SELECT tx_hash 
                     FROM events 
-                    WHERE status = 'Processed'::event_status
+                    WHERE status = 'ReadyToRequestProof'::event_status
                 )
                 RETURNING 
                     tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                    amount, target_function, market, journal_index, journal,
-                    seal, batch_tx_hash, received_at, processed_at,
+                    amount, target_function, market, received_at_block, should_request_proof_at_block,
+                    journal_index, journal, seal, batch_tx_hash, received_at, processed_at,
                     proof_requested_at, proof_received_at, batch_submitted_at,
                     batch_included_at, tx_finished_at, resubmitted, error
             )
@@ -434,6 +444,7 @@ impl Database {
                 "Received" => EventStatus::Received,
                 "Processed" => EventStatus::Processed,
                 "IncludedInBatch" => EventStatus::IncludedInBatch,
+                "ReadyToRequestProof" => EventStatus::ReadyToRequestProof,
                 "ProofRequested" => EventStatus::ProofRequested,
                 "ProofReceived" => EventStatus::ProofReceived,
                 "BatchSubmitted" => EventStatus::BatchSubmitted,
@@ -460,6 +471,7 @@ impl Database {
                 target_function: row.try_get("target_function")?,
                 market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
                 received_at_block: row.try_get("received_at_block")?,
+                should_request_proof_at_block: row.try_get("should_request_proof_at_block")?,
                 journal_index: row.try_get("journal_index")?,
                 journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                 seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
@@ -544,24 +556,28 @@ impl Database {
             return Ok(Vec::new());
         }
 
-        // Get all events with the same journal and update their status
+        // Get and update the proven events
         let records = query(
             r#"
-            WITH updated_events AS (
+            WITH claimed_events AS (
                 UPDATE events 
                 SET status = 'BatchSubmitted'::event_status,
                     batch_submitted_at = NOW()
-                WHERE status = 'ProofReceived'::event_status
-                AND journal = $1
+                WHERE tx_hash IN (
+                    SELECT tx_hash 
+                    FROM events 
+                    WHERE status = 'ProofReceived'::event_status
+                    AND journal IS NOT NULL
+                    AND journal = $1
+                )
                 RETURNING 
                     tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                    amount, target_function, market, journal_index, journal,
-                    seal, batch_tx_hash, received_at, processed_at,
+                    amount, target_function, market, received_at_block, should_request_proof_at_block,
+                    journal_index, journal, seal, batch_tx_hash, received_at, processed_at,
                     proof_requested_at, proof_received_at, batch_submitted_at,
                     batch_included_at, tx_finished_at, resubmitted, error
             )
-            SELECT * FROM updated_events
-            ORDER BY journal_index ASC
+            SELECT * FROM claimed_events
             "#
         )
         .bind(first_journal)
@@ -582,6 +598,7 @@ impl Database {
                 "Received" => EventStatus::Received,
                 "Processed" => EventStatus::Processed,
                 "IncludedInBatch" => EventStatus::IncludedInBatch,
+                "ReadyToRequestProof" => EventStatus::ReadyToRequestProof,
                 "ProofRequested" => EventStatus::ProofRequested,
                 "ProofReceived" => EventStatus::ProofReceived,
                 "BatchSubmitted" => EventStatus::BatchSubmitted,
@@ -608,6 +625,7 @@ impl Database {
                 target_function: row.try_get("target_function")?,
                 market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
                 received_at_block: row.try_get("received_at_block")?,
+                should_request_proof_at_block: row.try_get("should_request_proof_at_block")?,
                 journal_index: row.try_get("journal_index")?,
                 journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
                 seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
