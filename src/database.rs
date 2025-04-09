@@ -407,7 +407,6 @@ impl Database {
                     FROM events 
                     WHERE status = 'Processed'::event_status
                     LIMIT 1
-                    FOR UPDATE SKIP LOCKED
                 )
                 RETURNING 
                     tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
@@ -526,7 +525,6 @@ impl Database {
             AND journal IS NOT NULL
             ORDER BY proof_received_at ASC
             LIMIT 1
-            FOR UPDATE SKIP LOCKED
             "#
         )
         .fetch_optional(tx.as_mut())
@@ -626,5 +624,98 @@ impl Database {
         }
 
         Ok(events)
+    }
+
+    pub async fn update_batch_submission(&self, update: EventUpdate) -> Result<()> {
+        // Use a transaction to ensure atomicity
+        let mut tx = self.pool.begin().await?;
+        
+        // First check if the event exists in the finished_events table
+        let exists_in_finished = query(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM finished_events WHERE tx_hash = $1
+            ) as exists
+            "#
+        )
+        .bind(update.tx_hash.to_string())
+        .fetch_one(tx.as_mut())
+        .await?
+        .try_get::<bool, _>("exists")?;
+
+        if exists_in_finished {
+            // Update in finished_events table (without changing status)
+            query(
+                r#"
+                UPDATE finished_events
+                SET 
+                    batch_tx_hash = COALESCE($2, batch_tx_hash),
+                    batch_submitted_at = COALESCE($3, batch_submitted_at),
+                    batch_included_at = COALESCE($4, batch_included_at)
+                WHERE tx_hash = $1
+                "#
+            )
+            .bind(update.tx_hash.to_string())
+            .bind(update.batch_tx_hash.clone())
+            .bind(update.batch_submitted_at)
+            .bind(update.batch_included_at)
+            .execute(tx.as_mut())
+            .await?;
+
+            info!(
+                "Updated batch submission for event {} in finished_events table, batch_tx_hash: {:?}",
+                update.tx_hash, update.batch_tx_hash.clone()
+            );
+        } else {
+            // Check if the event exists in the events table
+            let exists_in_events = query(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1 FROM events WHERE tx_hash = $1
+                ) as exists
+                "#
+            )
+            .bind(update.tx_hash.to_string())
+            .fetch_one(tx.as_mut())
+            .await?
+            .try_get::<bool, _>("exists")?;
+
+            if exists_in_events {
+                // Update in events table
+                query(
+                    r#"
+                    UPDATE events
+                    SET 
+                        status = COALESCE($2::event_status, status),
+                        batch_tx_hash = COALESCE($3, batch_tx_hash),
+                        batch_submitted_at = COALESCE($4, batch_submitted_at),
+                        batch_included_at = COALESCE($5, batch_included_at)
+                    WHERE tx_hash = $1
+                    "#
+                )
+                .bind(update.tx_hash.to_string())
+                .bind(update.status.to_db_string())
+                .bind(update.batch_tx_hash.clone())
+                .bind(update.batch_submitted_at)
+                .bind(update.batch_included_at)
+                .execute(tx.as_mut())
+                .await?;
+
+                info!(
+                    "Updated batch submission for event {} in events table, status: {:?}, batch_tx_hash: {:?}",
+                    update.tx_hash, update.status, update.batch_tx_hash
+                );
+            } else {
+                info!(
+                    "Event {} not found in either events or finished_events tables",
+                    update.tx_hash
+                );
+            }
+        }
+
+        // Commit the transaction
+        tx.commit().await?;
+        
+        Ok(())
     }
 }

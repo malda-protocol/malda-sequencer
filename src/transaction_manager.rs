@@ -267,13 +267,13 @@ impl TransactionManager {
             update.status = EventStatus::BatchSubmitted;
             update.batch_submitted_at = Some(Utc::now());
 
-            if let Err(e) = db.update_event(update).await {
+            if let Err(e) = db.update_batch_submission(update).await {
                 error!("Failed to update event status to BatchSubmitted: {:?}", e);
             }
         }
-
+        let gas_price = provider.get_gas_price().await? * 2;
         // Send the transaction and get pending transaction
-        let pending_tx = action.gas(gas_limit).send().await?;
+        let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
         let tx_hash = pending_tx.tx_hash().clone();
 
         info!("Submitted batch transaction: {:?}", tx_hash);
@@ -293,8 +293,19 @@ impl TransactionManager {
                     info!(
                         "Batch transaction mined successfully: hash={:?}, gas_used={}",
                         receipt.transaction_hash,
-                        receipt.gas_used()
-                    );
+                        receipt.gas_used());
+                    
+
+                        for event in events {
+                            let mut update = event.clone();
+                            update.status = EventStatus::BatchIncluded;
+                            update.batch_tx_hash = Some(tx_hash.to_string());
+                            update.batch_included_at = Some(Utc::now());
+    
+                            if let Err(e) = db.update_batch_submission(update).await {
+                                error!("Failed to update event with failure status: {:?}", e);
+                            }
+                    }
                 } else {
                     // Transaction reverted
                     error!("Transaction reverted with hash {:?}", hash);
