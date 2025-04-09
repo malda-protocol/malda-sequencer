@@ -406,7 +406,6 @@ impl Database {
                     SELECT tx_hash 
                     FROM events 
                     WHERE status = 'Processed'::event_status
-                    LIMIT 1
                 )
                 RETURNING 
                     tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
