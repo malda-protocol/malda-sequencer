@@ -169,20 +169,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = tokio::spawn(async move {
             let mut current_listener = None;
             loop {
-                // Drop the old listener if it exists
+                // Create new listener
+                let new_listener = BatchEventListener::new(config.clone(), db.clone());
+                info!("Starting new batch event listener instance");
+                
+                // Start the new listener
+                if let Err(e) = new_listener.start().await {
+                    error!("Batch event listener failed: {:?}", e);
+                }
+                
+                // Wait 2 seconds before dropping the old listener
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                
+                // Now drop the old listener if it exists
                 if let Some(listener) = current_listener.take() {
                     drop(listener);
                 }
-
-                // Create new listener
-                current_listener = Some(BatchEventListener::new(config.clone(), db.clone()));
-                info!("Starting new batch event listener instance");
                 
-                if let Some(listener) = &current_listener {
-                    if let Err(e) = listener.start().await {
-                        error!("Batch event listener failed: {:?}", e);
-                    }
-                }
+                // Store the new listener
+                current_listener = Some(new_listener);
 
                 // Wait 10 minutes before creating a new instance
                 tokio::time::sleep(Duration::from_secs(600)).await;
@@ -217,20 +222,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let handle = tokio::spawn(async move {
                     let mut current_listener = None;
                     loop {
-                        // Drop the old listener if it exists
+                        // Create new listener
+                        let new_listener = EventListener::new(config.clone(), db.clone());
+                        info!("Starting new event listener instance");
+                        
+                        // Start the new listener
+                        if let Err(e) = new_listener.start().await {
+                            error!("Event listener failed: {:?}", e);
+                        }
+                        
+                        // Wait 2 seconds before dropping the old listener
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        
+                        // Now drop the old listener if it exists
                         if let Some(listener) = current_listener.take() {
                             drop(listener);
                         }
-
-                        // Create new listener
-                        current_listener = Some(EventListener::new(config.clone(), db.clone()));
-                        info!("Starting new event listener instance");
                         
-                        if let Some(listener) = &current_listener {
-                            if let Err(e) = listener.start().await {
-                                error!("Event listener failed: {:?}", e);
-                            }
-                        }
+                        // Store the new listener
+                        current_listener = Some(new_listener);
 
                         // Wait 10 minutes before creating a new instance
                         tokio::time::sleep(Duration::from_secs(600)).await;
