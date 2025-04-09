@@ -11,7 +11,6 @@ use alloy::{
 use eyre::Result;
 use malda_rs::constants::*;
 use std::time::Duration;
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 pub mod constants;
@@ -21,8 +20,7 @@ pub mod types;
 use crate::{constants::*, events::*};
 
 mod event_listener;
-use event_listener::{EventConfig, EventListener, RawEvent, ProcessedEvent};
-use tokio::sync::mpsc;
+use event_listener::{EventConfig, EventListener};
 
 mod proof_generator;
 use proof_generator::{ProofGenerator};
@@ -33,12 +31,7 @@ use transaction_manager::{TransactionConfig, TransactionManager};
 mod batch_event_listener;
 use batch_event_listener::{BatchEventConfig, BatchEventListener};
 
-use std::fs;
-use tokio::io::AsyncReadExt;
-use tokio::net::UnixListener;
-
 use alloy::primitives::TxHash;
-use dotenv::dotenv;
 use sequencer::database::{Database, EventStatus, EventUpdate};
 
 use std::collections::HashMap;
