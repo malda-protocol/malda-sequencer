@@ -179,7 +179,7 @@ impl TransactionManager {
 
     async fn process_chain_batch(
         db: &Database,
-        events: &[EventUpdate],
+        events: &Vec<EventUpdate>,
         start_idx: usize,
         _end_idx: usize,
         chain_id: u32,
@@ -261,17 +261,9 @@ impl TransactionManager {
             estimated_gas, gas_limit
         );
 
-        // Update events with batch submission pending
-        for event in events {
-            let mut update = event.clone();
-            update.status = EventStatus::BatchSubmitted;
-            update.batch_submitted_at = Some(Utc::now());
+        let batch_submitted_at = Utc::now();
 
-            if let Err(e) = db.update_batch_submission(update).await {
-                error!("Failed to update event status to BatchSubmitted: {:?}", e);
-            }
-        }
-        let gas_price = provider.get_gas_price().await? * 2;
+        let gas_price = provider.get_gas_price().await?  * 12 / 10;
         // Send the transaction and get pending transaction
         let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
         let tx_hash = pending_tx.tx_hash().clone();
@@ -295,32 +287,34 @@ impl TransactionManager {
                         receipt.transaction_hash,
                         receipt.gas_used());
                     
-
-                        for event in events {
-                            let mut update = event.clone();
-                            update.status = EventStatus::BatchIncluded;
-                            update.batch_tx_hash = Some(tx_hash.to_string());
-                            update.batch_included_at = Some(Utc::now());
+                    // Create a mutable copy of the events to update
+                    let mut events_to_update = events.clone();
+                    for update in &mut events_to_update {
+                        update.status = EventStatus::BatchIncluded;
+                        update.batch_tx_hash = Some(tx_hash.to_string());
+                        update.batch_included_at = Some(Utc::now());
+                        update.batch_submitted_at = Some(batch_submitted_at);
+                    }
     
-                            if let Err(e) = db.update_batch_submission(update).await {
-                                error!("Failed to update event with failure status: {:?}", e);
-                            }
+                    if let Err(e) = db.update_finished_events(&events_to_update).await {
+                        error!("Failed to update event with failure status: {:?}", e);
                     }
                 } else {
                     // Transaction reverted
                     error!("Transaction reverted with hash {:?}", hash);
 
-                    // Update all events with failure status
-                    for event in events {
-                        let mut update = event.clone();
+                    // Create a mutable copy of the events to update
+                    let mut events_to_update = events.clone();
+                    for update in &mut events_to_update {
                         update.status = EventStatus::BatchFailed {
                             error: "Transaction reverted".to_string(),
                         };
                         update.batch_tx_hash = Some(tx_hash.to_string());
+                        update.batch_submitted_at = Some(batch_submitted_at);
+                    }
 
-                        if let Err(e) = db.update_event(update).await {
-                            error!("Failed to update event with failure status: {:?}", e);
-                        }
+                    if let Err(e) = db.update_finished_events(&events_to_update).await {
+                        error!("Failed to update event with failure status: {:?}", e);
                     }
                 }
             }
@@ -328,17 +322,18 @@ impl TransactionManager {
                 // Transaction failed or timed out
                 error!("Transaction failed or timed out: {}", e);
 
-                // Update all events with failure status
-                for event in events {
-                    let mut update = event.clone();
+                // Create a mutable copy of the events to update
+                let mut events_to_update = events.clone();
+                for update in &mut events_to_update {
                     update.status = EventStatus::BatchFailed {
                         error: format!("Transaction error: {}", e),
                     };
                     update.batch_tx_hash = Some(tx_hash.to_string());
+                    update.batch_submitted_at = Some(batch_submitted_at);
+                }
 
-                    if let Err(db_err) = db.update_event(update).await {
-                        error!("Failed to update event with failure status: {:?}", db_err);
-                    }
+                if let Err(db_err) = db.update_finished_events(&events_to_update).await {
+                    error!("Failed to update event with failure status: {:?}", db_err);
                 }
             }
         }
