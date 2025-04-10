@@ -98,78 +98,6 @@ impl Database {
         Ok(Self { pool })
     }
 
-    pub async fn migrate_to_finished_events(&self, tx_hash: TxHash, status: EventStatus) -> Result<()> {
-        // First, get all data from the events table
-        let record = query(
-            r#"
-            SELECT 
-                event_type, src_chain_id, dst_chain_id, msg_sender, amount,
-                target_function, market, received_at_block, should_request_proof_at_block,
-                batch_tx_hash, received_at, processed_at,
-                proof_requested_at, proof_received_at, batch_submitted_at,
-                batch_included_at, resubmitted, error
-            FROM events 
-            WHERE tx_hash = $1
-            "#
-        )
-        .bind(tx_hash.to_string())
-        .fetch_one(&self.pool)
-        .await?;
-
-        // Insert into finished_events
-        query(
-            r#"
-            INSERT INTO finished_events (
-                tx_hash, status, event_type, src_chain_id, dst_chain_id,
-                msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
-                batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
-                batch_submitted_at, batch_included_at, tx_finished_at,
-                resubmitted, error
-            )
-            VALUES (
-                $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20, $21
-            )
-            "#
-        )
-        .bind(tx_hash.to_string())
-        .bind(status.to_db_string())
-        .bind(record.try_get::<Option<String>, _>("event_type")?)
-        .bind(record.try_get::<Option<i32>, _>("src_chain_id")?)
-        .bind(record.try_get::<Option<i32>, _>("dst_chain_id")?)
-        .bind(record.try_get::<Option<String>, _>("msg_sender")?)
-        .bind(record.try_get::<Option<String>, _>("amount")?)
-        .bind(record.try_get::<Option<String>, _>("target_function")?)
-        .bind(record.try_get::<Option<String>, _>("market")?)
-        .bind(record.try_get::<Option<i32>, _>("received_at_block")?)
-        .bind(record.try_get::<Option<i32>, _>("should_request_proof_at_block")?)
-        .bind(record.try_get::<Option<String>, _>("batch_tx_hash")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("received_at")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("processed_at")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_requested_at")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_received_at")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_submitted_at")?)
-        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_included_at")?)
-        .bind(Utc::now())
-        .bind(record.try_get::<Option<i32>, _>("resubmitted")?)
-        .bind(record.try_get::<Option<String>, _>("error")?)
-        .execute(&self.pool)
-        .await?;
-
-        // Delete from events
-        query("DELETE FROM events WHERE tx_hash = $1")
-            .bind(tx_hash.to_string())
-            .execute(&self.pool)
-            .await?;
-
-        info!(
-            "Successfully migrated event {} to finished_events with status {:?}",
-            tx_hash, status
-        );
-
-        Ok(())
-    }
-
     pub async fn update_event(&self, update: EventUpdate) -> Result<()> {
         // Clone the values we need for logging before they're moved
         let batch_tx_hash = update.batch_tx_hash.clone();
@@ -720,96 +648,187 @@ impl Database {
         Ok(events)
     }
 
-    pub async fn update_batch_submission(&self, update: EventUpdate) -> Result<()> {
-        // Use a transaction to ensure atomicity
-        let mut tx = self.pool.begin().await?;
-        
-        // First check if the event exists in the finished_events table
-        let exists_in_finished = query(
-            r#"
-            SELECT EXISTS (
-                SELECT 1 FROM finished_events WHERE tx_hash = $1
-            ) as exists
-            "#
-        )
-        .bind(update.tx_hash.to_string())
-        .fetch_one(tx.as_mut())
-        .await?
-        .try_get::<bool, _>("exists")?;
+    pub async fn update_finished_events(&self, updates: &Vec<EventUpdate>) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
 
-        if exists_in_finished {
-            // Update in finished_events table (without changing status)
+        // Store the length before the loop
+        let updates_len = updates.len();
+
+        // Start a transaction
+        let mut tx = self.pool.begin().await?;
+
+        for update in updates {
+            // Insert into finished_events
             query(
                 r#"
-                UPDATE finished_events
-                SET 
-                    batch_tx_hash = COALESCE($2, batch_tx_hash),
-                    batch_submitted_at = COALESCE($3, batch_submitted_at),
-                    batch_included_at = COALESCE($4, batch_included_at)
-                WHERE tx_hash = $1
+                INSERT INTO finished_events (
+                    tx_hash, status, event_type, src_chain_id, dst_chain_id,
+                    msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
+                    batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
+                    batch_submitted_at, batch_included_at, tx_finished_at,
+                    resubmitted, error
+                )
+                VALUES (
+                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                    $13, $14, $15, $16, $17, $18, $19, $20, $21
+                )
                 "#
             )
             .bind(update.tx_hash.to_string())
+            .bind(update.status.to_db_string())
+            .bind(update.event_type.clone())
+            .bind(update.src_chain_id.map(|id| id as i32))
+            .bind(update.dst_chain_id.map(|id| id as i32))
+            .bind(update.msg_sender.map(|addr| addr.to_string()))
+            .bind(update.amount.map(|amt| amt.to_string()))
+            .bind(update.target_function.clone())
+            .bind(update.market.map(|addr| addr.to_string()))
+            .bind(update.received_at_block)
+            .bind(update.should_request_proof_at_block)
             .bind(update.batch_tx_hash.clone())
+            .bind(update.received_at)
+            .bind(update.processed_at)
+            .bind(update.proof_requested_at)
+            .bind(update.proof_received_at)
             .bind(update.batch_submitted_at)
             .bind(update.batch_included_at)
-            .execute(tx.as_mut())
+            .bind(update.tx_finished_at.unwrap_or_else(Utc::now))
+            .bind(update.resubmitted)
+            .bind(update.error.clone())
+            .execute(&mut *tx)
             .await?;
 
-            info!(
-                "Updated batch submission for event {} in finished_events table, batch_tx_hash: {:?}",
-                update.tx_hash, update.batch_tx_hash.clone()
-            );
-        } else {
-            // Check if the event exists in the events table
-            let exists_in_events = query(
-                r#"
-                SELECT EXISTS (
-                    SELECT 1 FROM events WHERE tx_hash = $1
-                ) as exists
-                "#
-            )
-            .bind(update.tx_hash.to_string())
-            .fetch_one(tx.as_mut())
-            .await?
-            .try_get::<bool, _>("exists")?;
-
-            if exists_in_events {
-                // Update in events table
-                query(
-                    r#"
-                    UPDATE events
-                    SET 
-                        status = COALESCE($2::event_status, status),
-                        batch_tx_hash = COALESCE($3, batch_tx_hash),
-                        batch_submitted_at = COALESCE($4, batch_submitted_at),
-                        batch_included_at = COALESCE($5, batch_included_at)
-                    WHERE tx_hash = $1
-                    "#
-                )
+            // Delete from events
+            query("DELETE FROM events WHERE tx_hash = $1")
                 .bind(update.tx_hash.to_string())
-                .bind(update.status.to_db_string())
-                .bind(update.batch_tx_hash.clone())
-                .bind(update.batch_submitted_at)
-                .bind(update.batch_included_at)
-                .execute(tx.as_mut())
+                .execute(&mut *tx)
                 .await?;
-
-                info!(
-                    "Updated batch submission for event {} in events table, status: {:?}, batch_tx_hash: {:?}",
-                    update.tx_hash, update.status, update.batch_tx_hash
-                );
-            } else {
-                info!(
-                    "Event {} not found in either events or finished_events tables",
-                    update.tx_hash
-                );
-            }
         }
 
         // Commit the transaction
         tx.commit().await?;
-        
+
+        info!("Successfully migrated {} events to finished_events", updates_len);
+
+        Ok(())
+    }
+
+    pub async fn migrate_to_finished_events(&self, tx_hash: TxHash, status: EventStatus) -> Result<()> {
+        // First, get all data from the events table
+        let record = query(
+            r#"
+            SELECT 
+                event_type, src_chain_id, dst_chain_id, msg_sender, amount,
+                target_function, market, received_at_block, should_request_proof_at_block,
+                batch_tx_hash, received_at, processed_at,
+                proof_requested_at, proof_received_at, batch_submitted_at,
+                batch_included_at, resubmitted, error
+            FROM events 
+            WHERE tx_hash = $1
+            "#
+        )
+        .bind(tx_hash.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Insert into finished_events
+        query(
+            r#"
+            INSERT INTO finished_events (
+                tx_hash, status, event_type, src_chain_id, dst_chain_id,
+                msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
+                batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
+                batch_submitted_at, batch_included_at, tx_finished_at,
+                resubmitted, error
+            )
+            VALUES (
+                $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                $13, $14, $15, $16, $17, $18, $19, $20, $21
+            )
+            "#
+        )
+        .bind(tx_hash.to_string())
+        .bind(status.to_db_string())
+        .bind(record.try_get::<Option<String>, _>("event_type")?)
+        .bind(record.try_get::<Option<i32>, _>("src_chain_id")?)
+        .bind(record.try_get::<Option<i32>, _>("dst_chain_id")?)
+        .bind(record.try_get::<Option<String>, _>("msg_sender")?)
+        .bind(record.try_get::<Option<String>, _>("amount")?)
+        .bind(record.try_get::<Option<String>, _>("target_function")?)
+        .bind(record.try_get::<Option<String>, _>("market")?)
+        .bind(record.try_get::<Option<i32>, _>("received_at_block")?)
+        .bind(record.try_get::<Option<i32>, _>("should_request_proof_at_block")?)
+        .bind(record.try_get::<Option<String>, _>("batch_tx_hash")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("received_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("processed_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_requested_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("proof_received_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_submitted_at")?)
+        .bind(record.try_get::<Option<DateTime<Utc>>, _>("batch_included_at")?)
+        .bind(Utc::now())
+        .bind(record.try_get::<Option<i32>, _>("resubmitted")?)
+        .bind(record.try_get::<Option<String>, _>("error")?)
+        .execute(&self.pool)
+        .await?;
+
+        // Delete from events
+        query("DELETE FROM events WHERE tx_hash = $1")
+            .bind(tx_hash.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        info!(
+            "Successfully migrated event {} to finished_events with status {:?}",
+            tx_hash, status
+        );
+
+        Ok(())
+    }
+
+    pub async fn update_events(&self, updates: &Vec<EventUpdate>) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Start a transaction
+        let mut tx = self.pool.begin().await?;
+
+        for update in updates {
+            // Update the event
+            query(
+                r#"
+                UPDATE events SET 
+                    status = $2::event_status,
+                    batch_tx_hash = $3,
+                    batch_submitted_at = $4,
+                    batch_included_at = $5,
+                    tx_finished_at = $6,
+                    resubmitted = $7,
+                    error = $8
+                WHERE tx_hash = $1
+                "#
+            )
+            .bind(update.tx_hash.to_string())
+            .bind(update.status.to_db_string())
+            .bind(update.batch_tx_hash.clone())
+            .bind(update.batch_submitted_at)
+            .bind(update.batch_included_at)
+            .bind(update.tx_finished_at.unwrap_or_else(Utc::now))
+            .bind(update.resubmitted)
+            .bind(update.error.clone())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Commit the transaction
+        tx.commit().await?;
+
+        info!("Successfully batch updated {} events", updates.len());
+
         Ok(())
     }
 }
+
+
