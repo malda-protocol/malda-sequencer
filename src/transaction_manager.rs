@@ -1,9 +1,12 @@
 use alloy::{
     network::ReceiptResponse,
-    primitives::{FixedBytes, TxHash, U256},
+    primitives::{Address, FixedBytes, TxHash, U256, U64},
     providers::Provider,
     transports::http::reqwest::Url,
+    sol_types::SolCall,
 };
+use reqwest;
+use serde_json;
 use eyre::Result;
 use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
@@ -186,7 +189,6 @@ impl TransactionManager {
         config: &TransactionConfig,
     ) -> Result<TxHash> {
         let provider = Self::get_provider_for_chain(chain_id, config).await?;
-        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
         let mut receivers = Vec::new();
@@ -246,89 +248,204 @@ impl TransactionManager {
             events.len()
         );
 
-        // Submit the batch
+        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
+        let call = IBatchSubmitter::batchProcessCall{msg: msg.clone()};
         let action = batch_submitter.batchProcess(msg).from(SEQUENCER_ADDRESS);
 
-        // Estimate gas with a buffer
-        let estimated_gas = action.estimate_gas().await?;
-        let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
+        // If running on a Linea chain, override gas estimation with the linea_estimateGas RPC.
+        if chain_id == malda_rs::constants::LINEA_CHAIN_ID as u32 ||
+            chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 {
+            // Get the RPC URL from the configuration for this chain.
+            let rpc_url = config
+                .rpc_urls
+                .iter()
+                .find(|(id, _)| *id == chain_id)
+                .map(|(_, url)| url.clone())
+                .expect("No RPC URL configured for this chain");
+            
+            // Read the sequencer address from the environment.
+            let addr = dotenv::var("SEQUENCER_ADDRESS")
+                .expect("SEQUENCER_ADDRESS must be set in environment");
+            let sequencer_address = Address::parse_checksummed(&addr, None)
+                .expect("Invalid sequencer address format");
 
-        debug!(
-            "Estimated gas: {}, using gas limit: {}",
-            estimated_gas, gas_limit
-        );
+            // Use the call struct for encoding
+            let encoded_data = call.abi_encode();
 
-        // Update events with batch submission pending
-        for event in events {
-            let mut update = event.clone();
-            update.status = EventStatus::BatchSubmitted;
-            update.batch_submitted_at = Some(Utc::now());
+            // Build the transaction payload.
+            let tx_params = serde_json::json!({
+                "from": sequencer_address.to_string(),
+                "to": BATCH_SUBMITTER.to_string(),
+                "data": format!("0x{}", hex::encode(&encoded_data)),
+                "value": U256::ZERO.to_string(),
+            });
+            
+            // Use Self:: to call the method
+            let estimated_gas = Self::linea_estimate_gas(&rpc_url, tx_params)
+                .await
+                .expect("Failed to estimate gas via linea_estimateGas");
+            
+            let gas_limit = estimated_gas + (estimated_gas / 2);
+            debug!("Estimated gas: {}, using gas limit: {}", estimated_gas, gas_limit);
 
-            if let Err(e) = db.update_event(update).await {
-                error!("Failed to update event status to BatchSubmitted: {:?}", e);
+            // Send the transaction.
+            let pending_tx = action.gas(gas_limit).send().await?;
+            let tx_hash = pending_tx.tx_hash().clone();
+
+            info!("Submitted batch transaction: {:?}", tx_hash);
+
+            // Wait for confirmation...
+            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                Ok(hash) => {
+                    info!("Batch transaction confirmed with hash {:?}", hash);
+                    let receipt = provider
+                        .get_transaction_receipt(hash)
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+                    if receipt.status() == true {
+                        info!(
+                            "Batch transaction mined successfully: hash={:?}, gas_used={}",
+                            receipt.transaction_hash,
+                            receipt.gas_used()
+                        );
+                    } else {
+                        error!("Transaction reverted with hash {:?}", hash);
+                        for event in events {
+                            let mut update = event.clone();
+                            update.status = EventStatus::BatchFailed {
+                                error: "Transaction reverted".to_string(),
+                            };
+                            update.batch_tx_hash = Some(tx_hash.to_string());
+                            if let Err(e) = db.update_event(update).await {
+                                error!("Failed to update event with failure status: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Transaction failed or timed out: {}", e);
+                    for event in events {
+                        let mut update = event.clone();
+                        update.status = EventStatus::BatchFailed {
+                            error: format!("Transaction error: {}", e),
+                        };
+                        update.batch_tx_hash = Some(tx_hash.to_string());
+                        if let Err(db_err) = db.update_event(update).await {
+                            error!("Failed to update event with failure status: {:?}", db_err);
+                        }
+                    }
+                }
             }
+
+            Ok(tx_hash)
         }
 
-        // Send the transaction and get pending transaction
-        let pending_tx = action.gas(gas_limit).send().await?;
-        let tx_hash = pending_tx.tx_hash().clone();
+        // Estimate gas with a buffer
+        else {
+            let estimated_gas = action.estimate_gas().await?;
+            let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
 
-        info!("Submitted batch transaction: {:?}", tx_hash);
+            debug!(
+                "Estimated gas: {}, using gas limit: {}",
+                estimated_gas, gas_limit
+            );
 
-        // Wait for transaction confirmation
-        match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-            Ok(hash) => {
-                info!("Batch transaction confirmed with hash {:?}", hash);
+            // Update events with batch submission pending
+            for event in events {
+                let mut update = event.clone();
+                update.status = EventStatus::BatchSubmitted;
+                update.batch_submitted_at = Some(Utc::now());
 
-                let receipt = provider
-                    .get_transaction_receipt(hash)
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+                if let Err(e) = db.update_event(update).await {
+                    error!("Failed to update event status to BatchSubmitted: {:?}", e);
+                }
+            }
 
-                // Check transaction status
-                if receipt.status() == true {
-                    info!(
-                        "Batch transaction mined successfully: hash={:?}, gas_used={}",
-                        receipt.transaction_hash,
-                        receipt.gas_used()
-                    );
-                } else {
-                    // Transaction reverted
-                    error!("Transaction reverted with hash {:?}", hash);
+            // Send the transaction and get pending transaction
+            let pending_tx = action.gas(gas_limit).send().await?;
+            let tx_hash = pending_tx.tx_hash().clone();
+
+            info!("Submitted batch transaction: {:?}", tx_hash);
+
+            // Wait for transaction confirmation
+            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                Ok(hash) => {
+                    info!("Batch transaction confirmed with hash {:?}", hash);
+
+                    let receipt = provider
+                        .get_transaction_receipt(hash)
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+
+                    // Check transaction status
+                    if receipt.status() == true {
+                        info!(
+                            "Batch transaction mined successfully: hash={:?}, gas_used={}",
+                            receipt.transaction_hash,
+                            receipt.gas_used()
+                        );
+                    } else {
+                        // Transaction reverted
+                        error!("Transaction reverted with hash {:?}", hash);
+
+                        // Update all events with failure status
+                        for event in events {
+                            let mut update = event.clone();
+                            update.status = EventStatus::BatchFailed {
+                                error: "Transaction reverted".to_string(),
+                            };
+                            update.batch_tx_hash = Some(tx_hash.to_string());
+
+                            if let Err(e) = db.update_event(update).await {
+                                error!("Failed to update event with failure status: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Transaction failed or timed out
+                    error!("Transaction failed or timed out: {}", e);
 
                     // Update all events with failure status
                     for event in events {
                         let mut update = event.clone();
                         update.status = EventStatus::BatchFailed {
-                            error: "Transaction reverted".to_string(),
+                            error: format!("Transaction error: {}", e),
                         };
                         update.batch_tx_hash = Some(tx_hash.to_string());
 
-                        if let Err(e) = db.update_event(update).await {
-                            error!("Failed to update event with failure status: {:?}", e);
+                        if let Err(db_err) = db.update_event(update).await {
+                            error!("Failed to update event with failure status: {:?}", db_err);
                         }
                     }
                 }
             }
-            Err(e) => {
-                // Transaction failed or timed out
-                error!("Transaction failed or timed out: {}", e);
 
-                // Update all events with failure status
-                for event in events {
-                    let mut update = event.clone();
-                    update.status = EventStatus::BatchFailed {
-                        error: format!("Transaction error: {}", e),
-                    };
-                    update.batch_tx_hash = Some(tx_hash.to_string());
-
-                    if let Err(db_err) = db.update_event(update).await {
-                        error!("Failed to update event with failure status: {:?}", db_err);
-                    }
-                }
-            }
+            Ok(tx_hash)
         }
+    }
 
-        Ok(tx_hash)
+    async fn linea_estimate_gas(rpc_url: &str, tx: serde_json::Value) -> Result<u64> {
+        let client = reqwest::Client::new();
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "linea_estimateGas",
+            "params": [tx],
+            "id": 1
+        });
+        
+        let response = client.post(rpc_url)
+            .json(&payload)
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+        
+        let gas_str = response["result"].as_str()
+            .ok_or_else(|| eyre::eyre!("Missing result in gas estimate response"))?;
+        
+        // Convert the hex gas value to u64.
+        Ok(U64::from_str_radix(gas_str.trim_start_matches("0x"), 16)?
+              .to::<u64>())
     }
 }
