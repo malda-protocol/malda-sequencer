@@ -188,7 +188,7 @@ impl EventListener {
         
         // Calculate the block number when proof should be requested (current block + 100)
         let reorg_protection_depth = match self.config.chain_id {
-            ETHEREUM_SEPOLIA_CHAIN_ID => max(REORG_PROTECTION_DEPTH_ETHEREUM, 6),
+            ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
             LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
             OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
             BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
