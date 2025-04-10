@@ -660,7 +660,7 @@ impl Database {
         let mut tx = self.pool.begin().await?;
 
         for update in updates {
-            // Insert into finished_events
+            // Insert into finished_events with ON CONFLICT DO UPDATE
             query(
                 r#"
                 INSERT INTO finished_events (
@@ -674,6 +674,27 @@ impl Database {
                     $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
                     $13, $14, $15, $16, $17, $18, $19, $20, $21
                 )
+                ON CONFLICT (tx_hash) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    event_type = COALESCE(EXCLUDED.event_type, finished_events.event_type),
+                    src_chain_id = COALESCE(EXCLUDED.src_chain_id, finished_events.src_chain_id),
+                    dst_chain_id = COALESCE(EXCLUDED.dst_chain_id, finished_events.dst_chain_id),
+                    msg_sender = COALESCE(EXCLUDED.msg_sender, finished_events.msg_sender),
+                    amount = COALESCE(EXCLUDED.amount, finished_events.amount),
+                    target_function = COALESCE(EXCLUDED.target_function, finished_events.target_function),
+                    market = COALESCE(EXCLUDED.market, finished_events.market),
+                    received_at_block = COALESCE(EXCLUDED.received_at_block, finished_events.received_at_block),
+                    should_request_proof_at_block = COALESCE(EXCLUDED.should_request_proof_at_block, finished_events.should_request_proof_at_block),
+                    batch_tx_hash = COALESCE(EXCLUDED.batch_tx_hash, finished_events.batch_tx_hash),
+                    received_at = COALESCE(EXCLUDED.received_at, finished_events.received_at),
+                    processed_at = COALESCE(EXCLUDED.processed_at, finished_events.processed_at),
+                    proof_requested_at = COALESCE(EXCLUDED.proof_requested_at, finished_events.proof_requested_at),
+                    proof_received_at = COALESCE(EXCLUDED.proof_received_at, finished_events.proof_received_at),
+                    batch_submitted_at = COALESCE(EXCLUDED.batch_submitted_at, finished_events.batch_submitted_at),
+                    batch_included_at = COALESCE(EXCLUDED.batch_included_at, finished_events.batch_included_at),
+                    tx_finished_at = COALESCE(EXCLUDED.tx_finished_at, finished_events.tx_finished_at),
+                    resubmitted = COALESCE(EXCLUDED.resubmitted, finished_events.resubmitted),
+                    error = COALESCE(EXCLUDED.error, finished_events.error)
                 "#
             )
             .bind(update.tx_hash.to_string())
@@ -796,17 +817,16 @@ impl Database {
         let mut tx = self.pool.begin().await?;
 
         for update in updates {
-            // Update the event
             query(
                 r#"
                 UPDATE events SET 
                     status = $2::event_status,
-                    batch_tx_hash = $3,
-                    batch_submitted_at = $4,
-                    batch_included_at = $5,
-                    tx_finished_at = $6,
-                    resubmitted = $7,
-                    error = $8
+                    batch_tx_hash = COALESCE($3, events.batch_tx_hash),
+                    batch_submitted_at = COALESCE($4, events.batch_submitted_at),
+                    batch_included_at = COALESCE($5, events.batch_included_at),
+                    tx_finished_at = COALESCE($6, events.tx_finished_at),
+                    resubmitted = COALESCE($7, events.resubmitted),
+                    error = COALESCE($8, events.error)
                 WHERE tx_hash = $1
                 "#
             )
@@ -815,7 +835,7 @@ impl Database {
             .bind(update.batch_tx_hash.clone())
             .bind(update.batch_submitted_at)
             .bind(update.batch_included_at)
-            .bind(update.tx_finished_at.unwrap_or_else(Utc::now))
+            .bind(update.tx_finished_at)
             .bind(update.resubmitted)
             .bind(update.error.clone())
             .execute(&mut *tx)

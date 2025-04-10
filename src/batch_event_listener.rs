@@ -8,7 +8,10 @@ use chrono::{DateTime, Duration, Utc};
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
+use tokio::time::{sleep, timeout, Duration as TokioDuration};
 use tracing::{debug, error, info};
+use std::time::Duration as StdDuration;
+use std::vec::Vec;
 
 use crate::events::{
     parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG,
@@ -76,48 +79,106 @@ impl BatchEventListener {
 
         // Spawn success event handler
         let success_handle = tokio::spawn(async move {
-            while let Some(log) = success_stream.next().await {
-                let event = parse_batch_process_success_event(&log);
+            let mut success_events: Vec<EventUpdate> = Vec::new();
 
-                info!(
-                    "Batch process success on chain {}: init_hash={:?}, waiting for timestamp",
-                    chain_id, event.init_hash
-                );
+            loop {
+                // Try to get next event with a timeout
+                match timeout(TokioDuration::from_secs(1), success_stream.next()).await {
+                    Ok(Some(log)) => {
+                        let event = parse_batch_process_success_event(&log);
+                        let mut event_update = EventUpdate::default();
+                        event_update.tx_hash = event.init_hash;
+                        event_update.status = EventStatus::TxProcessSuccess;
+                        event_update.tx_finished_at = Some(Utc::now());
+                        success_events.push(event_update);
 
+                        info!(
+                            "Collected batch process success on chain {}: init_hash={:?}",
+                            chain_id, event.init_hash
+                        );
+                    }
+                    Ok(None) => {
+                        // Stream ended
+                        error!("Success event stream ended");
+                        break;
+                    }
+                    Err(_) => {
+                        // Timeout occurred, check if we should process events
+                        if !success_events.is_empty() {
+                            info!(
+                                "Waiting 5 seconds before processing {} success events on chain {}",
+                                success_events.len(),
+                                chain_id
+                            );
+                            sleep(StdDuration::from_secs(5)).await;
 
-                if let Err(e) = db_success
-                    .migrate_to_finished_events(event.init_hash, EventStatus::TxProcessSuccess)
-                    .await
-                {
-                    error!("Failed to migrate success event to finished_events: {:?}", e);
+                            info!(
+                                "Processing batch of {} success events on chain {}",
+                                success_events.len(),
+                                chain_id
+                            );
+
+                            if let Err(e) = db_success.update_finished_events(&success_events).await {
+                                error!("Failed to update success events to finished_events: {:?}", e);
+                            }
+                            success_events.clear();
+                        }
+                    }
                 }
             }
-            error!("Success event stream ended");
         });
 
         // Spawn failure event handler
         let failure_handle = tokio::spawn(async move {
-            while let Some(log) = failure_stream.next().await {
-                let event = parse_batch_process_failed_event(&log);
+            let mut failure_events: Vec<EventUpdate> = Vec::new();
 
-                error!(
-                    "Batch process failed on chain {}: init_hash={:?}, reason={:?}, waiting for timestamp",
-                    chain_id, event.init_hash, event.reason
-                );
-
-                if let Err(e) = db_failure
-                    .migrate_to_finished_events(
-                        event.init_hash,
-                        EventStatus::Failed {
+            loop {
+                // Try to get next event with a timeout
+                match timeout(TokioDuration::from_secs(1), failure_stream.next()).await {
+                    Ok(Some(log)) => {
+                        let event = parse_batch_process_failed_event(&log);
+                        let mut event_update = EventUpdate::default();
+                        event_update.tx_hash = event.init_hash;
+                        event_update.status = EventStatus::Failed {
                             error: hex::encode(&event.reason),
-                        },
-                    )
-                    .await
-                {
-                    error!("Failed to migrate failure event to finished_events: {:?}", e);
+                        };
+                        event_update.tx_finished_at = Some(Utc::now());
+                        failure_events.push(event_update);
+
+                        error!(
+                            "Collected batch process failed on chain {}: init_hash={:?}, reason={:?}",
+                            chain_id, event.init_hash, event.reason
+                        );
+                    }
+                    Ok(None) => {
+                        // Stream ended
+                        error!("Failure event stream ended");
+                        break;
+                    }
+                    Err(_) => {
+                        // Timeout occurred, check if we should process events
+                        if !failure_events.is_empty() {
+                            info!(
+                                "Waiting 5 seconds before processing {} failure events on chain {}",
+                                failure_events.len(),
+                                chain_id
+                            );
+                            sleep(StdDuration::from_secs(5)).await;
+
+                            info!(
+                                "Processing batch of {} failure events on chain {}",
+                                failure_events.len(),
+                                chain_id
+                            );
+
+                            if let Err(e) = db_failure.update_finished_events(&failure_events).await {
+                                error!("Failed to update failure events to finished_events: {:?}", e);
+                            }
+                            failure_events.clear();
+                        }
+                    }
                 }
             }
-            error!("Failure event stream ended");
         });
 
         // Wait for both tasks to complete (they should run indefinitely)

@@ -263,7 +263,7 @@ impl TransactionManager {
 
         let batch_submitted_at = Utc::now();
 
-        let gas_price = provider.get_gas_price().await?  * 12 / 10;
+        let gas_price = provider.get_gas_price().await?  * 2;
         // Send the transaction and get pending transaction
         let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
         let tx_hash = pending_tx.tx_hash().clone();
