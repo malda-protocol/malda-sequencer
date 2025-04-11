@@ -126,20 +126,20 @@ impl TransactionManager {
         debug!("Events sorted by journal index");
         trace!("Sorted events: {:?}", sorted_events);
         
-        // Group events by destination chain ID
-        let mut chain_start_indices: HashMap<u32, usize> = HashMap::new();
+        // Group events by destination chain ID and track both start and end indices
+        let mut chain_indices: HashMap<u32, (usize, usize)> = HashMap::new();
         let mut current_chain_id = None;
         let mut current_start_idx = 0;
         
-        // Find the start index for each chain
+        // Find the start and end indices for each chain
         for (idx, event) in sorted_events.iter().enumerate() {
             let dst_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
             
             if current_chain_id != Some(dst_chain_id) {
-                // If we've seen this chain before, update its start index
+                // If we've seen this chain before, update its end index
                 if let Some(chain_id) = current_chain_id {
-                    chain_start_indices.insert(chain_id, current_start_idx);
-                    debug!("Chain {} events start at index {}", chain_id, current_start_idx);
+                    chain_indices.insert(chain_id, (current_start_idx, idx));
+                    debug!("Chain {} events from index {} to {}", chain_id, current_start_idx, idx);
                 }
                 
                 current_chain_id = Some(dst_chain_id);
@@ -148,31 +148,23 @@ impl TransactionManager {
             }
         }
         
-        // Don't forget to add the last chain
+        // Don't forget to add the last chain with the end index being the length of sorted_events
         if let Some(chain_id) = current_chain_id {
-            chain_start_indices.insert(chain_id, current_start_idx);
-            debug!("Chain {} events start at index {}", chain_id, current_start_idx);
+            chain_indices.insert(chain_id, (current_start_idx, sorted_events.len()));
+            debug!("Chain {} events from index {} to {}", chain_id, current_start_idx, sorted_events.len());
         }
         
-        info!("Events grouped by {} different chains", chain_start_indices.len());
-        info!("Chain start indices: {:?}", chain_start_indices);
+        info!("Events grouped by {} different chains", chain_indices.len());
+        info!("Chain indices: {:?}", chain_indices);
         
         let mut chain_tasks = Vec::new();
         let config = self.config.clone();
         let db = self.db.clone();
         
         // Process one batch per chain
-        for (chain_id, start_idx) in &chain_start_indices {
-            // Find the end index for this chain (start of next chain or end of vector)
-            let end_idx = chain_start_indices
-                .iter()
-                .filter(|(id, _idx)| **id > *chain_id)
-                .map(|(_, idx)| *idx)
-                .min()
-                .unwrap_or(sorted_events.len());
-            
+        for (chain_id, (start_idx, end_idx)) in &chain_indices {
             // Get the slice of events for this chain
-            let chain_events = &sorted_events[*start_idx..end_idx];
+            let chain_events = &sorted_events[*start_idx..*end_idx];
             
             info!("Processing chain {} with {} events (indices {} to {})", 
                   chain_id, chain_events.len(), start_idx, end_idx - 1);
