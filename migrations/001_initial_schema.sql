@@ -47,7 +47,7 @@ CREATE TABLE events (
     error TEXT
 );
 
-CREATE TABLE finished_events (
+CREATE TABLE IF NOT EXISTS finished_events (
     tx_hash TEXT PRIMARY KEY,
     status event_status NOT NULL,
     event_type TEXT,
@@ -59,6 +59,8 @@ CREATE TABLE finished_events (
     market TEXT,
     received_at_block INTEGER,
     should_request_proof_at_block INTEGER,
+    journal_index INTEGER,
+    seal BYTEA,
     batch_tx_hash TEXT,
     received_at TIMESTAMP WITH TIME ZONE,
     processed_at TIMESTAMP WITH TIME ZONE,

@@ -254,14 +254,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (
                 ETHEREUM_SEPOLIA_CHAIN_ID as u32,
                 rpc_url_ethereum_sepolia().to_string(),
+                24, // 5 seconds delay for Ethereum Sepolia
             ),
             (
                 OPTIMISM_SEPOLIA_CHAIN_ID as u32,
                 rpc_url_optimism_sepolia().to_string(),
+                5, // 5 seconds delay for Optimism Sepolia
             ),
             (
                 LINEA_SEPOLIA_CHAIN_ID as u32,
                 rpc_url_linea_sepolia().to_string(),
+                5, // 5 seconds delay for Linea Sepolia
             ),
         ],
         poll_interval: Duration::from_secs(5), // Check for new events every 5 seconds

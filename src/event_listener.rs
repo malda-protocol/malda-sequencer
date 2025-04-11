@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::Address,
+    primitives::{Address, keccak256},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
@@ -23,6 +23,7 @@ use malda_rs::constants::*;
 use crate::{
     events::{parse_supplied_event, parse_withdraw_on_extension_chain_event},
 };
+use crate::{HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, HOST_BORROW_ON_EXTENSION_CHAIN_SIG};
 
 // Import the chain ID constant from malda_rs
 use malda_rs::constants::{
@@ -177,11 +178,25 @@ impl EventListener {
             // Process host chain events
             let event = parse_withdraw_on_extension_chain_event(&log);
             
+            // Get the event signature from topic 0
+            let event_signature = &log.topics()[0];
+            
+            // Determine event type based on the event signature
+            let (event_type, target_function) = if *event_signature == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) {
+                ("HostBorrow", "outHere")
+            } else if *event_signature == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) {
+                ("HostWithdraw", "outHere")
+            } else {
+                info!("Unknown event signature: {}", event_signature);
+                return Err(eyre::eyre!("Unknown event signature: {}", event_signature));
+                
+            };
+            
             event_update.msg_sender = Some(event.sender);
             event_update.dst_chain_id = Some(event.dst_chain_id);
             event_update.amount = Some(event.amount);
-            event_update.target_function = Some("outHere".to_string());
-            event_update.event_type = Some("HostWithdraw".to_string());
+            event_update.target_function = Some(target_function.to_string());
+            event_update.event_type = Some(event_type.to_string());
         } else {
             // Process extension chain events
             let event = parse_supplied_event(&log);
