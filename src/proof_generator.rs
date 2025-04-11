@@ -188,11 +188,14 @@ impl ProofGeneratorWorker {
             users.clone(),
             markets.clone(),
             dst_chain_ids.clone(),
-            src_chain_ids,
+            src_chain_ids.clone(),
         ).await?;
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
+
+        info!("Source chains included in the proof: {:?}", src_chain_ids);
+        info!("Destination chains included in the proof: {:?}", dst_chain_ids);
 
         // Update database with proof data for each event
         for event in sorted_events.iter() {

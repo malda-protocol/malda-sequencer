@@ -139,9 +139,7 @@ impl BatchEventListener {
                         let event = parse_batch_process_failed_event(&log);
                         let mut event_update = EventUpdate::default();
                         event_update.tx_hash = event.init_hash;
-                        event_update.status = EventStatus::Failed {
-                            error: hex::encode(&event.reason),
-                        };
+                        event_update.status = EventStatus::TxProcessFail;
                         event_update.tx_finished_at = Some(Utc::now());
                         failure_events.push(event_update);
 

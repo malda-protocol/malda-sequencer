@@ -156,7 +156,7 @@ impl Database {
         .bind(update.should_request_proof_at_block)
         .bind(update.journal_index)
         .bind(update.journal.map(|j| j.to_vec()))
-        .bind(update.seal.map(|s| s.to_vec()))
+        .bind(update.seal.clone().map(|s| s.to_vec()))
         .bind(update.batch_tx_hash)
         .bind(update.status.to_db_string())
         .bind(update.resubmitted)
@@ -666,13 +666,13 @@ impl Database {
                 INSERT INTO finished_events (
                     tx_hash, status, event_type, src_chain_id, dst_chain_id,
                     msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
-                    batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
+                    journal_index, seal, batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
                     batch_submitted_at, batch_included_at, tx_finished_at,
                     resubmitted, error
                 )
                 VALUES (
-                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                    $13, $14, $15, $16, $17, $18, $19, $20, $21
+                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18, $19, $20, $21, $22, $23
                 )
                 ON CONFLICT (tx_hash) DO UPDATE SET
                     status = EXCLUDED.status,
@@ -685,6 +685,8 @@ impl Database {
                     market = COALESCE(EXCLUDED.market, finished_events.market),
                     received_at_block = COALESCE(EXCLUDED.received_at_block, finished_events.received_at_block),
                     should_request_proof_at_block = COALESCE(EXCLUDED.should_request_proof_at_block, finished_events.should_request_proof_at_block),
+                    journal_index = COALESCE(EXCLUDED.journal_index, finished_events.journal_index),
+                    seal = COALESCE(EXCLUDED.seal, finished_events.seal),
                     batch_tx_hash = COALESCE(EXCLUDED.batch_tx_hash, finished_events.batch_tx_hash),
                     received_at = COALESCE(EXCLUDED.received_at, finished_events.received_at),
                     processed_at = COALESCE(EXCLUDED.processed_at, finished_events.processed_at),
@@ -708,6 +710,8 @@ impl Database {
             .bind(update.market.map(|addr| addr.to_string()))
             .bind(update.received_at_block)
             .bind(update.should_request_proof_at_block)
+            .bind(update.journal_index)
+            .bind(update.seal.clone().map(|s| s.to_vec()))
             .bind(update.batch_tx_hash.clone())
             .bind(update.received_at)
             .bind(update.processed_at)
