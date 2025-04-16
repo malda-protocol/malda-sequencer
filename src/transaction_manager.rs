@@ -276,13 +276,13 @@ impl TransactionManager {
 
         let msg = BatchProcessMsg {
             receivers,
-            journalData: Bytes::new(),
-            seal: Bytes::new(),
+            journalData: journal_data,
+            seal,
             mTokens: markets,
             amounts,
             selectors,
             initHashes: init_hashes,
-            startIndex: U256::ZERO,
+            startIndex: U256::from(start_idx as u64),
         };
 
         info!(
