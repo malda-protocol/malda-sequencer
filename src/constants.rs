@@ -53,7 +53,8 @@ pub const ETHEREUM_BLOCK_DELAY: u64 = 12;
 // Add this with other constants
 pub const PROOF_REQUEST_DELAY: u64 = 15;
 
-pub const BATCH_SUBMITTER: Address = address!("1b2ac3856D953110DB451Db177e5D4EEcdBA6BA8");
+// pub const BATCH_SUBMITTER_OLD: Address = address!("1b2ac3856D953110DB451Db177e5D4EEcdBA6BA8");
+pub const BATCH_SUBMITTER: Address = address!("4C79acd767b2D5aA121790c0311105912f7C4E95");
 
 /// The time window to wait for additional events to batch together (in seconds)
 pub const BATCH_WINDOW: u64 = 2;

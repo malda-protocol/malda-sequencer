@@ -342,7 +342,8 @@ impl TransactionManager {
             init_hashes.push(event.tx_hash.into());
         }
 
-        let minAmountsOut = vec![U256::from(0); amounts.len()];
+
+        let min_amounts_out = vec![U256::from(0); amounts.len()];
 
         let msg = BatchProcessMsg {
             receivers,
@@ -350,7 +351,7 @@ impl TransactionManager {
             seal,
             mTokens: markets,
             amounts,
-            minAmountsOut,
+            minAmountsOut: min_amounts_out,
             selectors,
             initHashes: init_hashes,
             startIndex: U256::from(start_idx as u64),
