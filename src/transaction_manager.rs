@@ -1,6 +1,6 @@
 use alloy::{
     network::ReceiptResponse,
-    primitives::{FixedBytes, TxHash, U256, Address},
+    primitives::{FixedBytes, TxHash, U256, Address, Bytes},
     providers::Provider,
     transports::http::reqwest::Url,
 };
@@ -276,13 +276,13 @@ impl TransactionManager {
 
         let msg = BatchProcessMsg {
             receivers,
-            journalData: journal_data,
-            seal,
+            journalData: Bytes::new(),
+            seal: Bytes::new(),
             mTokens: markets,
             amounts,
             selectors,
             initHashes: init_hashes,
-            startIndex: U256::from(start_idx as u64),
+            startIndex: U256::ZERO,
         };
 
         info!(
@@ -466,5 +466,64 @@ mod tests {
         assert!(priority_fee >= 0, "Priority fee should be greater than or equal to 0");
 
         println!("Linea gas estimate: limit={}, base_fee={}, priority_fee={}", gas_limit, base_fee, priority_fee);
+    }
+
+    #[tokio::test]
+    async fn test_linea_estimate_gas_erc20_approve() {
+        // Create a provider for Linea Sepolia
+        let rpc_url = "https://linea-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
+        let url = Url::parse(rpc_url).unwrap();
+        let provider = create_provider(url, SEQUENCER_PRIVATE_KEY).await.unwrap();
+
+        // Create an ERC20 approve transaction
+        let from = SEQUENCER_ADDRESS;
+        // The ERC20 token address on Linea Sepolia
+        let token_address = Address::from_str("0xc6e1FB449b08B26B2063c289DF9BBcb79B91c992").unwrap();
+        
+        // The spender address (using a random address)
+        let spender_address = Address::from_str("0x742d35Cc6634C0532925a3b844Bc454e4438f44e").unwrap();
+        
+        // Amount to approve (1 token with 6 decimals)
+        let amount = U256::from(1_000_000u64); // 1 token
+        
+        // Create the calldata for the approve function
+        // Function selector: 0x095ea7b3 (keccak256 of "approve(address,uint256)")
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0x09, 0x5e, 0xa7, 0xb3]); // Function selector
+        
+        // Pad the spender address to 32 bytes
+        let mut spender_bytes = [0u8; 32];
+        spender_bytes[12..].copy_from_slice(spender_address.as_slice());
+        data.extend_from_slice(&spender_bytes);
+        
+        // Pad the amount to 32 bytes
+        let mut amount_bytes = [0u8; 32];
+        amount_bytes[..].copy_from_slice(&amount.to_be_bytes::<32>());
+        data.extend_from_slice(&amount_bytes);
+        
+        // No value for this transaction
+        let value = U256::ZERO;
+
+        // Call the linea_estimate_gas function
+        let result = TransactionManager::linea_estimate_gas(
+            &provider,
+            from,
+            token_address,
+            data,
+            value,
+        ).await;
+
+        // Check if the result is Ok
+        assert!(result.is_ok(), "linea_estimate_gas failed: {:?}", result.err());
+
+        // Unwrap the result
+        let (gas_limit, base_fee, priority_fee) = result.unwrap();
+
+        // Check if the gas parameters are reasonable
+        assert!(gas_limit > 0, "Gas limit should be greater than 0");
+        assert!(base_fee >= 0, "Base fee should be greater than or equal to 0");
+        assert!(priority_fee >= 0, "Priority fee should be greater than or equal to 0");
+
+        println!("Linea ERC20 approve gas estimate: limit={}, base_fee={}, priority_fee={}", gas_limit, base_fee, priority_fee);
     }
 }
