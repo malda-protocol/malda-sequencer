@@ -1,12 +1,9 @@
 use alloy::{
     network::ReceiptResponse,
-    primitives::{Address, FixedBytes, TxHash, U256, U64},
+    primitives::{FixedBytes, TxHash, U256, Address},
     providers::Provider,
     transports::http::reqwest::Url,
-    sol_types::SolCall,
 };
-use reqwest;
-use serde_json;
 use eyre::Result;
 use futures::future::join_all;
 use sequencer::database::{Database, EventStatus, EventUpdate};
@@ -15,6 +12,8 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 use tracing::{error, info};
 use chrono::{DateTime, Utc};
+use hex;
+use serde_json;
 
 type Bytes4 = FixedBytes<4>;
 
@@ -53,6 +52,53 @@ impl TransactionManager {
             config,
             db,
         }
+    }
+
+    /// Estimates gas for Linea and Linea Sepolia chains using the linea_estimateGas JSON-RPC method
+    /// Returns a tuple of (gas_limit, base_fee_per_gas, priority_fee_per_gas)
+    async fn linea_estimate_gas(
+        provider: &ProviderType,
+        from: Address,
+        to: Address,
+        data: Vec<u8>,
+        value: U256,
+    ) -> Result<(u64, u64, u64)> {
+        // Create the request parameters for linea_estimateGas
+        let params = serde_json::json!({
+            "from": format!("{:?}", from),
+            "to": format!("{:?}", to),
+            "data": format!("0x{}", hex::encode(data)),
+            "value": format!("0x{:x}", value),
+        });
+
+        // Call the linea_estimateGas JSON-RPC method
+        let response: serde_json::Value = provider
+            .raw_request(std::borrow::Cow::Borrowed("linea_estimateGas"), vec![params])
+            .await
+            .map_err(|e| eyre::eyre!("Failed to call linea_estimateGas: {}", e))?;
+
+        // Parse the response
+        let result = response.as_object().ok_or_else(|| eyre::eyre!("Invalid response format"))?;
+        
+        let gas_limit = result
+            .get("gasLimit")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse gasLimit"))?;
+            
+        let base_fee_per_gas = result
+            .get("baseFeePerGas")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse baseFeePerGas"))?;
+            
+        let priority_fee_per_gas = result
+            .get("priorityFeePerGas")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse priorityFeePerGas"))?;
+
+        Ok((gas_limit, base_fee_per_gas, priority_fee_per_gas))
     }
 
     pub async fn start(&mut self) -> Result<()> {
@@ -189,6 +235,7 @@ impl TransactionManager {
         config: &TransactionConfig,
     ) -> Result<TxHash> {
         let provider = Self::get_provider_for_chain(chain_id, config).await?;
+        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
         let mut receivers = Vec::new();
@@ -248,204 +295,176 @@ impl TransactionManager {
             events.len()
         );
 
-        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
-        let call = IBatchSubmitter::batchProcessCall{msg: msg.clone()};
+        // Submit the batch
         let action = batch_submitter.batchProcess(msg).from(SEQUENCER_ADDRESS);
 
-        // If running on a Linea chain, override gas estimation with the linea_estimateGas RPC.
-        if chain_id == malda_rs::constants::LINEA_CHAIN_ID as u32 ||
-            chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 {
-            // Get the RPC URL from the configuration for this chain.
-            let rpc_url = config
-                .rpc_urls
-                .iter()
-                .find(|(id, _)| *id == chain_id)
-                .map(|(_, url)| url.clone())
-                .expect("No RPC URL configured for this chain");
-            
-            // Read the sequencer address from the environment.
-            let addr = dotenv::var("SEQUENCER_ADDRESS")
-                .expect("SEQUENCER_ADDRESS must be set in environment");
-            let sequencer_address = Address::parse_checksummed(&addr, None)
-                .expect("Invalid sequencer address format");
-
-            // Use the call struct for encoding
-            let encoded_data = call.abi_encode();
-
-            // Build the transaction payload.
-            let tx_params = serde_json::json!({
-                "from": sequencer_address.to_string(),
-                "to": BATCH_SUBMITTER.to_string(),
-                "data": format!("0x{}", hex::encode(&encoded_data)),
-                "value": U256::ZERO.to_string(),
-            });
-            
-            // Use Self:: to call the method
-            let estimated_gas = Self::linea_estimate_gas(&rpc_url, tx_params)
-                .await
-                .expect("Failed to estimate gas via linea_estimateGas");
-            
-            let gas_limit = estimated_gas + (estimated_gas / 2);
-            debug!("Estimated gas: {}, using gas limit: {}", estimated_gas, gas_limit);
-
-            // Send the transaction.
-            let pending_tx = action.gas(gas_limit).send().await?;
-            let tx_hash = pending_tx.tx_hash().clone();
-
-            info!("Submitted batch transaction: {:?}", tx_hash);
-
-            // Wait for confirmation...
-            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                Ok(hash) => {
-                    info!("Batch transaction confirmed with hash {:?}", hash);
-                    let receipt = provider
-                        .get_transaction_receipt(hash)
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
-                    if receipt.status() == true {
-                        info!(
-                            "Batch transaction mined successfully: hash={:?}, gas_used={}",
-                            receipt.transaction_hash,
-                            receipt.gas_used()
-                        );
-                    } else {
-                        error!("Transaction reverted with hash {:?}", hash);
-                        for event in events {
-                            let mut update = event.clone();
-                            update.status = EventStatus::BatchFailed {
-                                error: "Transaction reverted".to_string(),
-                            };
-                            update.batch_tx_hash = Some(tx_hash.to_string());
-                            if let Err(e) = db.update_event(update).await {
-                                error!("Failed to update event with failure status: {:?}", e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Transaction failed or timed out: {}", e);
-                    for event in events {
-                        let mut update = event.clone();
-                        update.status = EventStatus::BatchFailed {
-                            error: format!("Transaction error: {}", e),
-                        };
-                        update.batch_tx_hash = Some(tx_hash.to_string());
-                        if let Err(db_err) = db.update_event(update).await {
-                            error!("Failed to update event with failure status: {:?}", db_err);
-                        }
-                    }
-                }
-            }
-
-            Ok(tx_hash)
-        }
-
         // Estimate gas with a buffer
-        else {
+        let (gas_limit, base_fee, priority_fee) = if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 {
+            // Use linea_estimateGas for Linea chain
+            let (gas_limit, base_fee, priority_fee) = Self::linea_estimate_gas(
+                &provider,
+                SEQUENCER_ADDRESS,
+                BATCH_SUBMITTER,
+                action.calldata().to_vec(),
+                U256::ZERO,
+            ).await?;
+            
+            // Add a buffer to the gas limit (50%)
+            let gas_limit_with_buffer = gas_limit + (gas_limit / 2);
+            
+            debug!(
+                "Linea gas estimate: limit={}, base_fee={}, priority_fee={}, using gas limit: {}",
+                gas_limit, base_fee, priority_fee, gas_limit_with_buffer
+            );
+            
+            (gas_limit_with_buffer, base_fee, priority_fee)
+        } else {
+            // Use standard gas estimation for other chains
             let estimated_gas = action.estimate_gas().await?;
             let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
-
+            
             debug!(
                 "Estimated gas: {}, using gas limit: {}",
                 estimated_gas, gas_limit
             );
+            
+            // For non-Linea chains, we don't have base_fee and priority_fee from the estimate
+            // These will be determined by the network
+            (gas_limit, 0, 0)
+        };
 
-            // Update events with batch submission pending
-            for event in events {
-                let mut update = event.clone();
-                update.status = EventStatus::BatchSubmitted;
-                update.batch_submitted_at = Some(Utc::now());
+        // Update events with batch submission pending
+        for event in events {
+            let mut update = event.clone();
+            update.status = EventStatus::BatchSubmitted;
+            update.batch_submitted_at = Some(Utc::now());
 
-                if let Err(e) = db.update_event(update).await {
-                    error!("Failed to update event status to BatchSubmitted: {:?}", e);
-                }
+            if let Err(e) = db.update_event(update).await {
+                error!("Failed to update event status to BatchSubmitted: {:?}", e);
             }
+        }
 
-            // Send the transaction and get pending transaction
-            let pending_tx = action.gas(gas_limit).send().await?;
-            let tx_hash = pending_tx.tx_hash().clone();
+        // Send the transaction and get pending transaction
+        let pending_tx = if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 {
+            // For Linea chain, use the gas parameters from linea_estimateGas
+            action
+                .gas(gas_limit)
+                .max_fee_per_gas(base_fee as u128 + priority_fee as u128)
+                .max_priority_fee_per_gas(priority_fee as u128)
+                .send()
+                .await?
+        } else {
+            // For other chains, use standard gas parameter
+            action.gas(gas_limit).send().await?
+        };
+        
+        let tx_hash = pending_tx.tx_hash().clone();
 
-            info!("Submitted batch transaction: {:?}", tx_hash);
+        info!("Submitted batch transaction: {:?}", tx_hash);
 
-            // Wait for transaction confirmation
-            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-                Ok(hash) => {
-                    info!("Batch transaction confirmed with hash {:?}", hash);
+        // Wait for transaction confirmation
+        match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+            Ok(hash) => {
+                info!("Batch transaction confirmed with hash {:?}", hash);
 
-                    let receipt = provider
-                        .get_transaction_receipt(hash)
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+                let receipt = provider
+                    .get_transaction_receipt(hash)
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
-                    // Check transaction status
-                    if receipt.status() == true {
-                        info!(
-                            "Batch transaction mined successfully: hash={:?}, gas_used={}",
-                            receipt.transaction_hash,
-                            receipt.gas_used()
-                        );
-                    } else {
-                        // Transaction reverted
-                        error!("Transaction reverted with hash {:?}", hash);
-
-                        // Update all events with failure status
-                        for event in events {
-                            let mut update = event.clone();
-                            update.status = EventStatus::BatchFailed {
-                                error: "Transaction reverted".to_string(),
-                            };
-                            update.batch_tx_hash = Some(tx_hash.to_string());
-
-                            if let Err(e) = db.update_event(update).await {
-                                error!("Failed to update event with failure status: {:?}", e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Transaction failed or timed out
-                    error!("Transaction failed or timed out: {}", e);
+                // Check transaction status
+                if receipt.status() == true {
+                    info!(
+                        "Batch transaction mined successfully: hash={:?}, gas_used={}",
+                        receipt.transaction_hash,
+                        receipt.gas_used()
+                    );
+                } else {
+                    // Transaction reverted
+                    error!("Transaction reverted with hash {:?}", hash);
 
                     // Update all events with failure status
                     for event in events {
                         let mut update = event.clone();
                         update.status = EventStatus::BatchFailed {
-                            error: format!("Transaction error: {}", e),
+                            error: "Transaction reverted".to_string(),
                         };
                         update.batch_tx_hash = Some(tx_hash.to_string());
 
-                        if let Err(db_err) = db.update_event(update).await {
-                            error!("Failed to update event with failure status: {:?}", db_err);
+                        if let Err(e) = db.update_event(update).await {
+                            error!("Failed to update event with failure status: {:?}", e);
                         }
                     }
                 }
             }
+            Err(e) => {
+                // Transaction failed or timed out
+                error!("Transaction failed or timed out: {}", e);
 
-            Ok(tx_hash)
+                // Update all events with failure status
+                for event in events {
+                    let mut update = event.clone();
+                    update.status = EventStatus::BatchFailed {
+                        error: format!("Transaction error: {}", e),
+                    };
+                    update.batch_tx_hash = Some(tx_hash.to_string());
+
+                    if let Err(db_err) = db.update_event(update).await {
+                        error!("Failed to update event with failure status: {:?}", db_err);
+                    }
+                }
+            }
         }
-    }
 
-    async fn linea_estimate_gas(rpc_url: &str, tx: serde_json::Value) -> Result<u64> {
-        let client = reqwest::Client::new();
-        let payload = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "linea_estimateGas",
-            "params": [tx],
-            "id": 1
-        });
-        
-        let response = client.post(rpc_url)
-            .json(&payload)
-            .send()
-            .await?
-            .json::<serde_json::Value>()
-            .await?;
-        
-        let gas_str = response["result"].as_str()
-            .ok_or_else(|| eyre::eyre!("Missing result in gas estimate response"))?;
-        
-        // Convert the hex gas value to u64.
-        Ok(U64::from_str_radix(gas_str.trim_start_matches("0x"), 16)?
-              .to::<u64>())
+        Ok(tx_hash)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::providers::Provider;
+    use alloy::transports::http::reqwest::Url;
+    use crate::create_provider;
+    use crate::constants::{SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY, BATCH_SUBMITTER};
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn test_linea_estimate_gas() {
+        // Create a provider for Linea Sepolia
+        let rpc_url = "https://linea-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
+        let url = Url::parse(rpc_url).unwrap();
+        let provider = create_provider(url, SEQUENCER_PRIVATE_KEY).await.unwrap();
+
+        // Create a simple ETH transfer transaction
+        let from = SEQUENCER_ADDRESS;
+        // Use a random address as the recipient
+        let to = Address::from_str("0x742d35Cc6634C0532925a3b844Bc454e4438f44e").unwrap();
+        // Empty data for a simple ETH transfer
+        let data = Vec::new();
+        // Transfer 0.001 ETH
+        let value = U256::from(1_000_000_000_000_000u64); // 0.001 ETH in wei
+
+        // Call the linea_estimate_gas function
+        let result = TransactionManager::linea_estimate_gas(
+            &provider,
+            from,
+            to,
+            data,
+            value,
+        ).await;
+
+        // Check if the result is Ok
+        assert!(result.is_ok(), "linea_estimate_gas failed: {:?}", result.err());
+
+        // Unwrap the result
+        let (gas_limit, base_fee, priority_fee) = result.unwrap();
+
+        // Check if the gas parameters are reasonable
+        assert!(gas_limit > 0, "Gas limit should be greater than 0");
+        assert!(base_fee >= 0, "Base fee should be greater than or equal to 0");
+        assert!(priority_fee >= 0, "Priority fee should be greater than or equal to 0");
+
+        println!("Linea gas estimate: limit={}, base_fee={}, priority_fee={}", gas_limit, base_fee, priority_fee);
     }
 }

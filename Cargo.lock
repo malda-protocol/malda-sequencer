@@ -6397,7 +6397,6 @@ dependencies = [
  "lazy_static",
  "malda_rs",
  "rand",
- "reqwest 0.12.9",
  "risc0-ethereum-contracts",
  "serde",
  "serde_json",
