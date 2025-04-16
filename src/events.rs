@@ -142,8 +142,8 @@ pub fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtension
     }
 }
 
-pub const BATCH_PROCESS_FAILED_SIG: &str = "BatchProcessFailed(bytes32,bytes)";
-pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32)";
+pub const BATCH_PROCESS_FAILED_SIG: &str = "BatchProcessFailed(bytes32,address,address,uint256,uint256,bytes4,bytes)";
+pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32,address,address,uint256,uint256,bytes4)";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessFailedEvent {
