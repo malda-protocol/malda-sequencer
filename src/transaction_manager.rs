@@ -119,11 +119,7 @@ impl TransactionManager {
 
         // Sort events by journal_index to maintain the same order as in the proof generator
         let mut sorted_events = events;
-        sorted_events.sort_by(|a, b| {
-            let a_journal_idx = a.journal_index.unwrap_or(0);
-            let b_journal_idx = b.journal_index.unwrap_or(0);
-            a_journal_idx.cmp(&b_journal_idx)
-        });
+        sorted_events.sort_by_key(|event| event.journal_index.unwrap_or(0));
         
         debug!("Events sorted by journal index");
         trace!("Sorted events: {:?}", sorted_events);
@@ -137,6 +133,7 @@ impl TransactionManager {
         for (idx, event) in sorted_events.iter().enumerate() {
             let dst_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
             
+            // Check if we're switching to a new chain
             if current_chain_id != Some(dst_chain_id) {
                 // If we've seen this chain before, update its end index
                 if let Some(chain_id) = current_chain_id {
@@ -158,6 +155,19 @@ impl TransactionManager {
         
         info!("Events grouped by {} different chains", chain_indices.len());
         info!("Chain indices: {:?}", chain_indices);
+        
+        // Verify that each event is assigned to the correct chain
+        for (chain_id, (start_idx, end_idx)) in &chain_indices {
+            for idx in *start_idx..*end_idx {
+                let event_chain_id = sorted_events[idx].dst_chain_id.unwrap_or(0) as u32;
+                if event_chain_id != *chain_id {
+                    error!("Event at index {} has chain ID {} but is in group for chain {}", 
+                           idx, event_chain_id, chain_id);
+                    return Err(eyre::eyre!("Event at index {} has chain ID {} but is in group for chain {}", 
+                                         idx, event_chain_id, chain_id));
+                }
+            }
+        }
         
         let mut chain_tasks = Vec::new();
         let config = self.config.clone();
@@ -228,6 +238,10 @@ impl TransactionManager {
         config: &TransactionConfig,
     ) -> Result<ProviderType> {
         debug!("Getting provider for chain {}", chain_id);
+        
+        // Log all configured RPC URLs for debugging
+        debug!("Configured RPC URLs: {:?}", config.rpc_urls);
+        
         let rpc_url = config
             .rpc_urls
             .iter()
@@ -237,6 +251,10 @@ impl TransactionManager {
 
         debug!("Found RPC URL for chain {}: {}", chain_id, rpc_url);
         let url = Url::parse(&rpc_url)?;
+        
+        // Log the URL components for verification
+        debug!("Parsed URL for chain {}: scheme={}, host={}, path={}", 
+               chain_id, url.scheme(), url.host_str().unwrap_or("unknown"), url.path());
         
         let provider = create_provider(url, SEQUENCER_PRIVATE_KEY)
             .await
@@ -256,6 +274,17 @@ impl TransactionManager {
     ) -> Result<TxHash> {
         let batch_start = Instant::now();
         info!("Starting batch processing for chain {} with {} events", chain_id, events.len());
+        
+        // Verify that all events have the correct destination chain ID
+        for (idx, event) in events.iter().enumerate() {
+            let event_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
+            if event_chain_id != chain_id {
+                error!("Event at index {} has chain ID {} but is being processed for chain {}", 
+                       idx, event_chain_id, chain_id);
+                return Err(eyre::eyre!("Event at index {} has chain ID {} but is being processed for chain {}", 
+                                     idx, event_chain_id, chain_id));
+            }
+        }
 
         // Get the submission delay for this chain
         let submission_delay = config
@@ -321,7 +350,11 @@ impl TransactionManager {
 
         // Collect data for the batch
         for (idx, event) in events.iter().enumerate() {
-            trace!("Processing event {} for chain {}: {:?}", idx, chain_id, event);
+            trace!("Processing batch on chain {}: index {} with target chain {}", chain_id, idx, event.dst_chain_id.unwrap_or(0));
+            if event.journal != Some(journal_data.clone()) || event.seal != Some(seal.clone()) {
+                error!("Event {} for chain {} has different journal or seal", idx, chain_id);
+                return Err(eyre::eyre!("Event {} for chain {} has different journal or seal", idx, chain_id));
+            }
             receivers.push(event.msg_sender.unwrap_or_default());
             markets.push(event.market.unwrap_or_default());
             amounts.push(event.amount.unwrap_or_default());
@@ -381,14 +414,34 @@ impl TransactionManager {
             // Create the action for this attempt
             let action = batch_submitter.batchProcess(msg.clone()).from(SEQUENCER_ADDRESS);
             
-            // Estimate gas for this attempt
-            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
-                linea_estimate_gas(&provider, action.calldata().to_vec()).await?
+            // Estimate gas for this attempt with proper error handling
+            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
+                linea_estimate_gas(&provider, action.calldata().to_vec()).await
             } else {
-                let gas_limit = action.estimate_gas().await? * 120 / 100; // 20% buffer
-                let base_fee_per_gas = provider.get_gas_price().await?;
-                let priority_fee_per_gas = base_fee_per_gas;
-                (gas_limit, base_fee_per_gas, priority_fee_per_gas)
+                // For non-Linea chains, estimate gas and get base fee
+                let gas_result = action.estimate_gas().await;
+                let base_fee_result = provider.get_gas_price().await;
+                
+                // Combine results with proper error handling
+                match (gas_result, base_fee_result) {
+                    (Ok(gas_limit), Ok(base_fee_per_gas)) => {
+                        let gas_limit = gas_limit * 120 / 100; // 20% buffer
+                        let priority_fee_per_gas = base_fee_per_gas;
+                        Ok((gas_limit, base_fee_per_gas, priority_fee_per_gas))
+                    },
+                    (Err(e), _) => Err(eyre::eyre!("Failed to estimate gas: {}", e)),
+                    (_, Err(e)) => Err(eyre::eyre!("Failed to get gas price: {}", e)),
+                }
+            } {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("Gas estimation failed for chain {}: {}", chain_id, e);
+                    // Wait before retrying
+                    info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                    sleep(config.retry_delay).await;
+                    retry_count += 1;
+                    continue;
+                }
             };
             
             let max_fee_per_gas = max_fee_per_gas * (1 + retry_count) * (100 + percent_increase_per_retry_numerator) / 100;
@@ -398,8 +451,23 @@ impl TransactionManager {
                 chain_id, gas_limit, max_fee_per_gas, max_priority_fee_per_gas
             );
             
-            // Send the transaction and get pending transaction
-            let pending_tx = action.gas(gas_limit).max_fee_per_gas(max_fee_per_gas).max_priority_fee_per_gas(max_priority_fee_per_gas).send().await?;
+            // Send the transaction and get pending transaction with proper error handling
+            let pending_tx = match action.gas(gas_limit)
+                .max_fee_per_gas(max_fee_per_gas)
+                .max_priority_fee_per_gas(max_priority_fee_per_gas)
+                .send()
+                .await {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        error!("Transaction submission failed for chain {}: {}", chain_id, e);
+                        // Wait before retrying
+                        info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                        sleep(config.retry_delay).await;
+                        retry_count += 1;
+                        continue;
+                    }
+                };
+                
             tx_hash = Some(pending_tx.tx_hash().clone());
 
             info!("Submitted batch transaction for chain {}: hash={:?} (attempt {}/{})", 
@@ -603,5 +671,5 @@ mod tests {
             .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
             .ok_or_else(|| eyre::eyre!("Failed to parse priorityFeePerGas"))?;
 
-        Ok((gas_limit, base_fee_per_gas + priority_fee_per_gas, priority_fee_per_gas))
+        Ok(( 150 * gas_limit / 100, base_fee_per_gas + priority_fee_per_gas, priority_fee_per_gas))
     }
