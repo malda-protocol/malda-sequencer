@@ -1,6 +1,6 @@
 use alloy::{
     network::ReceiptResponse,
-    primitives::{FixedBytes, TxHash, U256},
+    primitives::{FixedBytes, TxHash, U256, Address},
     providers::Provider,
     transports::http::reqwest::Url,
 };
@@ -18,6 +18,8 @@ use std::collections::HashMap;
 
 type Bytes4 = FixedBytes<4>;
 
+use malda_rs::constants::*;
+
 use crate::{
     constants::{BATCH_SUBMITTER, SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY, TX_TIMEOUT},
     create_provider,
@@ -34,7 +36,7 @@ lazy_static! {
 
 #[derive(Debug, Clone)]
 pub struct TransactionConfig {
-    pub max_retries: u32,
+    pub max_retries: u128,
     pub retry_delay: Duration,
     pub rpc_urls: Vec<(u32, String, u64)>, // (chain_id, url, submission_delay_seconds)
     pub poll_interval: Duration,
@@ -367,112 +369,239 @@ impl TransactionManager {
             events.len()
         );
 
-        // Submit the batch
-        let action = batch_submitter.batchProcess(msg).from(SEQUENCER_ADDRESS);
-
-        // Estimate gas with a buffer
-        let estimated_gas = action.estimate_gas().await?;
-        let gas_limit = estimated_gas + (estimated_gas / 2); // Add 50% buffer
-
-        
-
-        info!(
-            "Gas estimation for chain {}: estimated={}, limit={}",
-            chain_id, estimated_gas, gas_limit
-        );
-
         let batch_submitted_at = Utc::now();
-
-        let gas_price = provider.get_gas_price().await? * 2;
-        info!("Using gas price of {} for chain {}", gas_price, chain_id);
         
-        // Send the transaction and get pending transaction
-        let pending_tx = action.gas(gas_limit).gas_price(gas_price).send().await?;
-        let tx_hash = pending_tx.tx_hash().clone();
+        // Retry loop for transaction submission
+        let mut retry_count = 0u128;
+        let mut tx_hash = None;
 
-        info!("Submitted batch transaction for chain {}: hash={:?}", chain_id, tx_hash);
+        let percent_increase_per_retry_numerator = 20u128;
+        
+        while retry_count < config.max_retries {
+            // Create the action for this attempt
+            let action = batch_submitter.batchProcess(msg.clone()).from(SEQUENCER_ADDRESS);
+            
+            // Estimate gas for this attempt
+            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
+                linea_estimate_gas(&provider, action.calldata().to_vec()).await?
+            } else {
+                let gas_limit = action.estimate_gas().await? * 120 / 100; // 20% buffer
+                let base_fee_per_gas = provider.get_gas_price().await?;
+                let priority_fee_per_gas = base_fee_per_gas;
+                (gas_limit, base_fee_per_gas, priority_fee_per_gas)
+            };
+            
+            let max_fee_per_gas = max_fee_per_gas * (1 + retry_count) * (100 + percent_increase_per_retry_numerator) / 100;
+            let max_priority_fee_per_gas = max_priority_fee_per_gas * (1 + retry_count) * (100 + percent_increase_per_retry_numerator) / 100;
+            info!(
+                "Gas estimation for chain {}: limit={}, max_fee={}, max_priority={}",
+                chain_id, gas_limit, max_fee_per_gas, max_priority_fee_per_gas
+            );
+            
+            // Send the transaction and get pending transaction
+            let pending_tx = action.gas(gas_limit).max_fee_per_gas(max_fee_per_gas).max_priority_fee_per_gas(max_priority_fee_per_gas).send().await?;
+            tx_hash = Some(pending_tx.tx_hash().clone());
 
-        // Wait for transaction confirmation
-        match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
-            Ok(hash) => {
-                info!("Batch transaction confirmed for chain {}: hash={:?}", chain_id, hash);
+            info!("Submitted batch transaction for chain {}: hash={:?} (attempt {}/{})", 
+                  chain_id, tx_hash, retry_count + 1, config.max_retries);
 
-                let receipt = provider
-                    .get_transaction_receipt(hash)
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+            // Wait for transaction confirmation
+            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+                Ok(hash) => {
+                    info!("Batch transaction confirmed for chain {}: hash={:?}", chain_id, hash);
 
-                // Check transaction status
-                if receipt.status() == true {
-                    info!(
-                        "Batch transaction successful for chain {}: hash={:?}, gas_used={}, duration={:?}",
-                        chain_id,
-                        receipt.transaction_hash,
-                        receipt.gas_used(),
-                        batch_start.elapsed()
-                    );
+                    let receipt = provider
+                        .get_transaction_receipt(hash)
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+
+                    // Check transaction status
+                    if receipt.status() == true {
+                        info!(
+                            "Batch transaction successful for chain {}: hash={:?}, gas_used={}, duration={:?}",
+                            chain_id,
+                            receipt.transaction_hash,
+                            receipt.gas_used(),
+                            batch_start.elapsed()
+                        );
+                        
+                        // Create a mutable copy of the events to update
+                        let mut events_to_update = events.clone();
+                        for update in &mut events_to_update {
+                            update.status = EventStatus::BatchIncluded;
+                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
+                            update.batch_included_at = Some(Utc::now());
+                            update.batch_submitted_at = Some(batch_submitted_at);
+                        }
+        
+                        if let Err(e) = db.update_finished_events(&events_to_update).await {
+                            error!("Failed to update events for chain {}: {:?}", chain_id, e);
+                        } else {
+                            info!("Successfully updated {} events for chain {}", events.len(), chain_id);
+                        }
+                        
+                        // Success - break out of retry loop
+                        break;
+                    } else {
+                        // Transaction reverted
+                        error!("Transaction reverted for chain {}: hash={:?}", chain_id, hash);
+
+                        // Create a mutable copy of the events to update
+                        let mut events_to_update = events.clone();
+                        for update in &mut events_to_update {
+                            update.status = EventStatus::BatchFailed {
+                                error: "Transaction reverted".to_string(),
+                            };
+                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
+                            update.batch_submitted_at = Some(batch_submitted_at);
+                        }
+
+                        if let Err(e) = db.update_finished_events(&events_to_update).await {
+                            error!("Failed to update reverted events for chain {}: {:?}", chain_id, e);
+                        } else {
+                            info!("Updated {} reverted events for chain {}", events.len(), chain_id);
+                        }
+                        
+                        // Reverted - break out of retry loop
+                        break;
+                    }
+                }
+                Err(e) => {
+                    // Transaction failed or timed out
+                    error!("Transaction failed for chain {}: error={}, duration={:?}, hash={:?}", 
+                           chain_id, e, batch_start.elapsed(), tx_hash);
                     
-                    // Create a mutable copy of the events to update
-                    let mut events_to_update = events.clone();
-                    for update in &mut events_to_update {
-                        update.status = EventStatus::BatchIncluded;
-                        update.batch_tx_hash = Some(tx_hash.to_string());
-                        update.batch_included_at = Some(Utc::now());
-                        update.batch_submitted_at = Some(batch_submitted_at);
-                    }
-    
-                    if let Err(e) = db.update_finished_events(&events_to_update).await {
-                        error!("Failed to update events for chain {}: {:?}", chain_id, e);
-                    } else {
-                        info!("Successfully updated {} events for chain {}", events.len(), chain_id);
-                    }
-                } else {
-                    // Transaction reverted
-                    error!("Transaction reverted for chain {}: hash={:?}", chain_id, hash);
+                    // If we've reached max retries, update the events as failed
+                    if retry_count == config.max_retries - 1 {
+                        // Create a mutable copy of the events to update
+                        let mut events_to_update = events.clone();
+                        for update in &mut events_to_update {
+                            update.status = EventStatus::BatchFailed {
+                                error: format!("Transaction error after {} retries: {}", config.max_retries, e),
+                            };
+                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
+                            update.batch_submitted_at = Some(batch_submitted_at);
+                        }
 
-                    // Create a mutable copy of the events to update
-                    let mut events_to_update = events.clone();
-                    for update in &mut events_to_update {
-                        update.status = EventStatus::BatchFailed {
-                            error: "Transaction reverted".to_string(),
-                        };
-                        update.batch_tx_hash = Some(tx_hash.to_string());
-                        update.batch_submitted_at = Some(batch_submitted_at);
-                    }
-
-                    if let Err(e) = db.update_finished_events(&events_to_update).await {
-                        error!("Failed to update reverted events for chain {}: {:?}", chain_id, e);
+                        if let Err(db_err) = db.update_finished_events(&events_to_update).await {
+                            error!("Failed to update failed events for chain {}: {:?}", chain_id, db_err);
+                        } else {
+                            info!("Updated {} failed events for chain {}", events.len(), chain_id);
+                        }
                     } else {
-                        info!("Updated {} reverted events for chain {}", events.len(), chain_id);
+                        // Wait before retrying
+                        info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                        sleep(config.retry_delay).await;
                     }
                 }
             }
-            Err(e) => {
-                // Transaction failed or timed out
-                error!("Transaction failed for chain {}: error={}, duration={:?}", 
-                       chain_id, e, batch_start.elapsed());
-
-                // Create a mutable copy of the events to update
-                let mut events_to_update = events.clone();
-                for update in &mut events_to_update {
-                    update.status = EventStatus::BatchFailed {
-                        error: format!("Transaction error: {}", e),
-                    };
-                    update.batch_tx_hash = Some(tx_hash.to_string());
-                    update.batch_submitted_at = Some(batch_submitted_at);
-                }
-
-                if let Err(db_err) = db.update_finished_events(&events_to_update).await {
-                    error!("Failed to update failed events for chain {}: {:?}", chain_id, db_err);
-                } else {
-                    info!("Updated {} failed events for chain {}", events.len(), chain_id);
-                }
-            }
+            
+            retry_count += 1;
         }
 
         let batch_duration = batch_start.elapsed();
         info!("Completed batch processing for chain {} in {:?}", chain_id, batch_duration);
 
-        Ok(tx_hash)
+        Ok(tx_hash.unwrap())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::{providers::ProviderBuilder, primitives::U256};
+    use eyre::Result;
+    use url::Url;
+
+    // Placeholder RPC URLs - Replace with actual ones
+
+    // Placeholder RPC URLs - Replace with actual ones
+    const ETH_SEPOLIA_RPC: &str = "http://localhost:8545"; // Example, replace if needed
+    const OP_SEPOLIA_RPC: &str = "http://localhost:8547"; // Example, replace if needed
+    const LINEA_SEPOLIA_RPC: &str = "http://localhost:8555"; // Example, replace if needed
+
+    // Chain IDs - Replace if different ones are used in your constants
+    const ETH_SEPOLIA_CHAIN_ID: u32 = 11155111;
+    const OP_SEPOLIA_CHAIN_ID: u32 = 11155420;
+    const LINEA_SEPOLIA_CHAIN_ID: u32 = 59141;
+
+
+    #[tokio::test]
+    async fn test_get_gas_prices() -> Result<()> {
+        let chains = vec![
+            ("ETH Sepolia", ETH_SEPOLIA_CHAIN_ID, ETH_SEPOLIA_RPC),
+            ("OP Sepolia", OP_SEPOLIA_CHAIN_ID, OP_SEPOLIA_RPC),
+            ("Linea Sepolia", LINEA_SEPOLIA_CHAIN_ID, LINEA_SEPOLIA_RPC),
+        ];
+
+        println!("\nFetching Gas Prices:");
+
+        for (name, chain_id, rpc_url_str) in chains {
+            println!("--- Chain: {} (ID: {}) ---", name, chain_id);
+            let rpc_url = Url::parse(rpc_url_str)?;
+            println!("Using RPC URL: {}", rpc_url);
+
+            // Create a basic provider (no signer needed for get_gas_price)
+            let provider = ProviderBuilder::new().on_http(rpc_url);
+
+            match provider.get_gas_price().await {
+                Ok(gas_price) => {
+                    println!("Current Gas Price: {} wei", gas_price);
+                }
+                Err(e) => {
+                    eprintln!("Failed to get gas price for {}: {}", name, e);
+                    // Optionally decide if the test should fail here
+                    // return Err(e.into());
+                }
+            }
+            println!("-------------------------\n");
+        }
+        panic!("test");
+        Ok(())
+    }
+ 
+}
+
+    /// Estimates gas for Linea and Linea Sepolia chains using the linea_estimateGas JSON-RPC method
+    /// Returns a tuple of (gas_limit, base_fee_per_gas, priority_fee_per_gas)
+    async fn linea_estimate_gas(
+        provider: &ProviderType,
+        data: Vec<u8>,
+    ) -> Result<(u64, u128, u128)> {
+        // Create the request parameters for linea_estimateGas
+        let params = serde_json::json!({
+            "from": format!("{:?}", SEQUENCER_ADDRESS),
+            "to": format!("{:?}", BATCH_SUBMITTER),
+            "data": format!("0x{}", hex::encode(data)),
+            "value": format!("0x{:x}", U256::from(0)),
+        });
+
+        // Call the linea_estimateGas JSON-RPC method
+        let response: serde_json::Value = provider
+            .raw_request(std::borrow::Cow::Borrowed("linea_estimateGas"), vec![params])
+            .await
+            .map_err(|e| eyre::eyre!("Failed to call linea_estimateGas: {}", e))?;
+
+        // Parse the response
+        let result = response.as_object().ok_or_else(|| eyre::eyre!("Invalid response format"))?;
+        
+        let gas_limit = result
+            .get("gasLimit")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse gasLimit"))?;
+            
+        let base_fee_per_gas = result
+            .get("baseFeePerGas")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse baseFeePerGas"))?;
+            
+        let priority_fee_per_gas = result
+            .get("priorityFeePerGas")
+            .and_then(|v| v.as_str())
+            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre::eyre!("Failed to parse priorityFeePerGas"))?;
+
+        Ok((gas_limit, base_fee_per_gas + priority_fee_per_gas, priority_fee_per_gas))
+    }
