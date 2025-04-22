@@ -117,15 +117,22 @@ impl ProofGeneratorWorker {
             }
         });
 
+        // Create a new vector for events to update
+        let mut events_to_update = Vec::new();
+        
         // Update status to ProofRequested for all events with their journal indices
         for (idx, event) in sorted_events.iter().enumerate() {
-            let mut update = event.clone();
-            update.status = EventStatus::ProofRequested;
-            update.proof_requested_at = Some(Utc::now());
-            update.journal_index = Some(idx as i32);
-
-            if let Err(e) = self.db.update_event(update).await {
-                error!("Failed to update event status to ProofRequested: {:?}", e);
+            let mut updated_event = event.clone();
+            updated_event.status = EventStatus::ProofRequested;
+            updated_event.proof_requested_at = Some(Utc::now());
+            updated_event.journal_index = Some(idx as i32);
+            events_to_update.push(updated_event);
+        }
+        
+        // Update all events at once
+        if !events_to_update.is_empty() {
+            if let Err(e) = self.db.update_events(&events_to_update).await {
+                error!("Failed to update events status to ProofRequested: {:?}", e);
             }
         }
 
@@ -197,16 +204,23 @@ impl ProofGeneratorWorker {
         info!("Source chains included in the proof: {:?}", src_chain_ids);
         info!("Destination chains included in the proof: {:?}", dst_chain_ids);
 
+        // Create a new vector for events to update
+        let mut events_to_update = Vec::new();
+        
         // Update database with proof data for each event
         for event in sorted_events.iter() {
-            let mut update = event.clone();
-            update.status = EventStatus::ProofReceived;
-            update.journal = Some(journal.clone());
-            update.seal = Some(seal.clone());
-            update.proof_received_at = Some(Utc::now());
+            let mut updated_event = event.clone();
+            updated_event.status = EventStatus::ProofReceived;
+            updated_event.journal = Some(journal.clone());
+            updated_event.seal = Some(seal.clone());
+            updated_event.proof_received_at = Some(Utc::now());
+            events_to_update.push(updated_event);
+        }
 
-            if let Err(e) = self.db.update_event(update).await {
-                error!("Failed to update event with proof data: {:?}", e);
+        // Update all events at once
+        if !events_to_update.is_empty() {
+            if let Err(e) = self.db.update_events(&events_to_update).await {
+                error!("Failed to update events with proof data: {:?}", e);
             }
         }
 
