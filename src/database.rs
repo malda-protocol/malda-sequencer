@@ -155,7 +155,7 @@ impl Database {
         .bind(update.received_at_block)
         .bind(update.should_request_proof_at_block)
         .bind(update.journal_index)
-        .bind(update.journal.map(|j| j.to_vec()))
+        .bind(update.journal.clone().map(|j| j.to_vec()))
         .bind(update.seal.clone().map(|s| s.to_vec()))
         .bind(update.batch_tx_hash)
         .bind(update.status.to_db_string())
@@ -821,29 +821,82 @@ impl Database {
         let mut tx = self.pool.begin().await?;
 
         for update in updates {
+            // Clone the values we need for logging before they're moved
+            let batch_tx_hash = update.batch_tx_hash.clone();
+
             query(
                 r#"
-                UPDATE events SET 
-                    status = $2::event_status,
-                    batch_tx_hash = COALESCE($3, events.batch_tx_hash),
-                    batch_submitted_at = COALESCE($4, events.batch_submitted_at),
-                    batch_included_at = COALESCE($5, events.batch_included_at),
-                    tx_finished_at = COALESCE($6, events.tx_finished_at),
-                    resubmitted = COALESCE($7, events.resubmitted),
-                    error = COALESCE($8, events.error)
-                WHERE tx_hash = $1
-                "#
+                INSERT INTO events (
+                    tx_hash, event_type, src_chain_id, dst_chain_id, 
+                    msg_sender, amount, target_function, market,
+                    received_at_block, should_request_proof_at_block, journal_index, journal, seal, batch_tx_hash, 
+                    status, resubmitted, error,
+                    received_at, processed_at, 
+                    proof_requested_at, proof_received_at,
+                    batch_submitted_at, batch_included_at, tx_finished_at
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::event_status, $16, $17,
+                    $18, $19, $20, $21, $22, $23, $24
+                )
+                ON CONFLICT (tx_hash) 
+                DO UPDATE SET
+                    status = $15::event_status,
+                    event_type = COALESCE($2, events.event_type),
+                    src_chain_id = COALESCE($3, events.src_chain_id),
+                    dst_chain_id = COALESCE($4, events.dst_chain_id),
+                    msg_sender = COALESCE($5, events.msg_sender),
+                    amount = COALESCE($6, events.amount),
+                    target_function = COALESCE($7, events.target_function),
+                    market = COALESCE($8, events.market),
+                    received_at_block = COALESCE($9, events.received_at_block),
+                    should_request_proof_at_block = COALESCE($10, events.should_request_proof_at_block),
+                    journal_index = COALESCE($11, events.journal_index),
+                    journal = COALESCE($12, events.journal),
+                    seal = COALESCE($13, events.seal),
+                    batch_tx_hash = COALESCE($14, events.batch_tx_hash),
+                    resubmitted = COALESCE($16, events.resubmitted),
+                    error = COALESCE($17, events.error),
+                    received_at = COALESCE($18, events.received_at),
+                    processed_at = COALESCE($19, events.processed_at),
+                    proof_requested_at = COALESCE($20, events.proof_requested_at),
+                    proof_received_at = COALESCE($21, events.proof_received_at),
+                    batch_submitted_at = COALESCE($22, events.batch_submitted_at),
+                    batch_included_at = COALESCE($23, events.batch_included_at),
+                    tx_finished_at = COALESCE($24, events.tx_finished_at)
+                "#,
             )
             .bind(update.tx_hash.to_string())
-            .bind(update.status.to_db_string())
+            .bind(update.event_type.clone())
+            .bind(update.src_chain_id.map(|id| id as i32))
+            .bind(update.dst_chain_id.map(|id| id as i32))
+            .bind(update.msg_sender.map(|addr| addr.to_string()))
+            .bind(update.amount.map(|amt| amt.to_string()))
+            .bind(update.target_function.clone())
+            .bind(update.market.map(|addr| addr.to_string()))
+            .bind(update.received_at_block)
+            .bind(update.should_request_proof_at_block)
+            .bind(update.journal_index)
+            .bind(update.journal.clone().map(|j| j.to_vec()))
+            .bind(update.seal.clone().map(|s| s.to_vec()))
             .bind(update.batch_tx_hash.clone())
+            .bind(update.status.to_db_string())
+            .bind(update.resubmitted)
+            .bind(update.error.clone())
+            .bind(update.received_at)
+            .bind(update.processed_at)
+            .bind(update.proof_requested_at)
+            .bind(update.proof_received_at)
             .bind(update.batch_submitted_at)
             .bind(update.batch_included_at)
             .bind(update.tx_finished_at)
-            .bind(update.resubmitted)
-            .bind(update.error.clone())
             .execute(&mut *tx)
             .await?;
+
+            info!(
+                "Updated event {} with status {:?} and batch_tx_hash {:?}",
+                update.tx_hash, update.status, batch_tx_hash
+            );
         }
 
         // Commit the transaction

@@ -35,11 +35,11 @@ pub use malda_rs::constants::{
 
 // WebSocket URLs
 pub const WS_URL_ETH_SEPOLIA: &str =
-    "ws://localhost:8546";
+    "wss://eth-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const WS_URL_OPT_SEPOLIA: &str =
-    "ws://localhost:8548";
+    "wss://opt-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 pub const WS_URL_LINEA_SEPOLIA: &str =
-    "ws://localhost:8556";
+    "wss://linea-sepolia.g.alchemy.com/v2/XJ0Ro-Iy8q_T-F4O9mUn_oRWY0x57sGK";
 
 // Sequencer configuration
 pub const SEQUENCER_ADDRESS: Address = address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3");
