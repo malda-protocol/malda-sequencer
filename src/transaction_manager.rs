@@ -331,7 +331,30 @@ impl TransactionManager {
             debug!("Acquired processing lock for chain {}", chain_id);
         }
 
-        let provider = Self::get_provider_for_chain(chain_id, config).await?;
+        // Detailed error handling for provider creation
+        let provider = match Self::get_provider_for_chain(chain_id, config).await {
+            Ok(p) => {
+                info!("Successfully created provider for chain {}", chain_id);
+                p
+            },
+            Err(e) => {
+                error!("Failed to create provider for chain {}: {}", chain_id, e);
+                // Update events to failed status due to provider creation error
+                let mut events_to_update = events.clone();
+                for update in &mut events_to_update {
+                    update.status = EventStatus::BatchFailed {
+                        error: format!("Failed to create provider: {}", e),
+                    };
+                    update.batch_submitted_at = Some(Utc::now());
+                }
+                if let Err(db_err) = db.update_finished_events(&events_to_update).await {
+                    error!("Failed to update events after provider error for chain {}: {:?}", chain_id, db_err);
+                }
+                return Err(e);
+            }
+        };
+
+        info!("Creating batch submitter for chain {}", chain_id);
         let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
@@ -387,10 +410,12 @@ impl TransactionManager {
             mTokens: markets,
             amounts,
             minAmountsOut: min_amounts_out,
-            selectors,
+            selectors: selectors.clone(),
             initHashes: init_hashes,
             startIndex: U256::from(start_idx as u64),
         };
+
+        info!("Selectors: {:?}", selectors.clone());
 
         info!(
             "Preparing batch transaction for chain {}: start_idx={}, journal_size={}, seal_size={}, markets={:?}, tx_count={}",
@@ -407,20 +432,37 @@ impl TransactionManager {
         // Retry loop for transaction submission
         let mut retry_count = 0u128;
         let mut tx_hash = None;
+        let mut last_error = None;
 
         let percent_increase_per_retry_numerator = 20u128;
         
         while retry_count < config.max_retries {
+            info!("Starting retry attempt {}/{} for chain {}", retry_count + 1, config.max_retries, chain_id);
+            
             // Create the action for this attempt
             let action = batch_submitter.batchProcess(msg.clone()).from(SEQUENCER_ADDRESS);
             
             // Estimate gas for this attempt with proper error handling
-            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
+            info!("Estimating gas for chain {} (attempt {}/{})", chain_id, retry_count + 1, config.max_retries);
+            let gas_estimation_result = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
+                info!("Using Linea gas estimation for chain {}", chain_id);
                 linea_estimate_gas(&provider, action.calldata().to_vec()).await
             } else {
                 // For non-Linea chains, estimate gas and get base fee
+                info!("Using standard gas estimation for chain {}", chain_id);
                 let gas_result = action.estimate_gas().await;
                 let base_fee_result = provider.get_gas_price().await;
+                
+                // Log gas estimation results
+                match &gas_result {
+                    Ok(gas) => info!("Gas estimation successful: {}", gas),
+                    Err(e) => warn!("Gas estimation failed: {}", e),
+                }
+                
+                match &base_fee_result {
+                    Ok(fee) => info!("Gas price query successful: {}", fee),
+                    Err(e) => warn!("Gas price query failed: {}", e),
+                }
                 
                 // Combine results with proper error handling
                 match (gas_result, base_fee_result) {
@@ -432,10 +474,16 @@ impl TransactionManager {
                     (Err(e), _) => Err(eyre::eyre!("Failed to estimate gas: {}", e)),
                     (_, Err(e)) => Err(eyre::eyre!("Failed to get gas price: {}", e)),
                 }
-            } {
-                Ok(result) => result,
+            };
+
+            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match gas_estimation_result {
+                Ok(result) => {
+                    info!("Successfully estimated gas for chain {}", chain_id);
+                    result
+                },
                 Err(e) => {
                     error!("Gas estimation failed for chain {}: {}", chain_id, e);
+                    last_error = Some(e.to_string());
                     // Wait before retrying
                     info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
                     sleep(config.retry_delay).await;
@@ -452,21 +500,30 @@ impl TransactionManager {
             );
             
             // Send the transaction and get pending transaction with proper error handling
-            let pending_tx = match action.gas(gas_limit)
+            info!("Attempting to send transaction for chain {} (attempt {}/{})", 
+                  chain_id, retry_count + 1, config.max_retries);
+            
+            let tx_send_result = action.gas(gas_limit)
                 .max_fee_per_gas(max_fee_per_gas)
                 .max_priority_fee_per_gas(max_priority_fee_per_gas)
                 .send()
-                .await {
-                    Ok(tx) => tx,
-                    Err(e) => {
-                        error!("Transaction submission failed for chain {}: {}", chain_id, e);
-                        // Wait before retrying
-                        info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                        sleep(config.retry_delay).await;
-                        retry_count += 1;
-                        continue;
-                    }
-                };
+                .await;
+                
+            let pending_tx = match tx_send_result {
+                Ok(tx) => {
+                    info!("Transaction successfully sent for chain {}", chain_id);
+                    tx
+                },
+                Err(e) => {
+                    error!("Transaction submission failed for chain {}: {}", chain_id, e);
+                    last_error = Some(e.to_string());
+                    // Wait before retrying
+                    info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                    sleep(config.retry_delay).await;
+                    retry_count += 1;
+                    continue;
+                }
+            };
                 
             tx_hash = Some(pending_tx.tx_hash().clone());
 
@@ -474,14 +531,42 @@ impl TransactionManager {
                   chain_id, tx_hash, retry_count + 1, config.max_retries);
 
             // Wait for transaction confirmation
-            match pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await {
+            info!("Watching transaction with timeout {:?} for chain {}: hash={:?}", 
+                  TX_TIMEOUT, chain_id, tx_hash);
+                  
+            let watch_result = pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await;
+            
+            match watch_result {
                 Ok(hash) => {
                     info!("Batch transaction confirmed for chain {}: hash={:?}", chain_id, hash);
 
-                    let receipt = provider
-                        .get_transaction_receipt(hash)
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
+                    info!("Getting receipt for confirmed transaction on chain {}", chain_id);
+                    let receipt_result = provider.get_transaction_receipt(hash).await;
+                    
+                    let receipt = match receipt_result {
+                        Ok(Some(r)) => {
+                            info!("Receipt obtained for transaction on chain {}", chain_id);
+                            r
+                        },
+                        Ok(None) => {
+                            error!("Transaction receipt not found for chain {}: hash={:?}", chain_id, hash);
+                            last_error = Some("Transaction receipt not found".to_string());
+                            // Wait before retrying
+                            info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                            sleep(config.retry_delay).await;
+                            retry_count += 1;
+                            continue;
+                        },
+                        Err(e) => {
+                            error!("Failed to get transaction receipt for chain {}: {}", chain_id, e);
+                            last_error = Some(format!("Failed to get receipt: {}", e));
+                            // Wait before retrying
+                            info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
+                            sleep(config.retry_delay).await;
+                            retry_count += 1;
+                            continue;
+                        }
+                    };
 
                     // Check transaction status
                     if receipt.status() == true {
@@ -570,7 +655,19 @@ impl TransactionManager {
         let batch_duration = batch_start.elapsed();
         info!("Completed batch processing for chain {} in {:?}", chain_id, batch_duration);
 
-        Ok(tx_hash.unwrap())
+        match tx_hash {
+            Some(hash) => Ok(hash),
+            None => {
+                let error_msg = format!(
+                    "Failed to submit transaction for chain {} after {} retries: {}", 
+                    chain_id, 
+                    config.max_retries,
+                    last_error.unwrap_or_else(|| "Unknown error".to_string())
+                );
+                error!("{}", error_msg);
+                Err(eyre::eyre!(error_msg))
+            }
+        }
     }
 }
 
