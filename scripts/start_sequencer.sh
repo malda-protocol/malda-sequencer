@@ -13,7 +13,7 @@ echo "Sequencer directory: $SEQUENCER_DIR"
 mkdir -p "$SEQUENCER_DIR/logs"
 
 # Set Bonsai API environment variables
-export BONSAI_API_KEY="SrSzB6P4SFaWv7WAK12ph5K6aL6dXs4S1a0XMif5"
+export BONSAI_API_KEY="tpXcM8jXP08AKwfZ9M7ryaXVDX3u0Zaa4Z2Cpzhe"
 export BONSAI_API_URL="https://api.bonsai.xyz/"
 
 # Set database URL
