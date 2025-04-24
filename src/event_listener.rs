@@ -49,6 +49,7 @@ pub struct EventConfig {
     pub chain_id: u64,
 }
 
+#[derive(Clone)]
 pub struct EventListener {
     config: EventConfig,
     db: Database,
@@ -107,7 +108,7 @@ impl EventListener {
             .parse()
             .wrap_err_with(|| format!("Invalid WSS URL: {}", self.config.ws_url))?;
 
-        debug!("Connecting to WebSocket at {}", ws_url);
+        debug!("Connecting to provider at {}", ws_url);
         let ws = WsConnect::new(ws_url);
         let provider = ProviderBuilder::new()
             .on_ws(ws)
@@ -118,23 +119,107 @@ impl EventListener {
             .event(&self.config.event_signature)
             .address(self.config.market);
 
-        debug!("Subscribing to events with filter: {:?}", filter);
-        let sub = provider.subscribe_logs(&filter).await?;
-        let mut stream = sub.into_stream();
+        debug!("Setting up polling with filter: {:?}", filter);
 
-        info!("Successfully subscribed to events");
+        // Track the latest block we've processed
+        let mut last_processed_block = 0u64;
+        
+        // Poll interval in seconds
+        let poll_interval = Duration::from_secs(5);
+        let mut interval = interval(poll_interval);
 
-        while let Some(log) = stream.next().await {
+        info!("Started polling for events");
+
+        loop {
+            interval.tick().await;
+
+            // Get current block number
+            let current_block = match provider.get_block_number().await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!("Failed to get current block number: {:?}", e);
+                    continue;
+                }
+            };
+
+            // Don't query if we're already up to date
+            if last_processed_block >= current_block {
+                debug!("No new blocks since last poll (block: {})", current_block);
+                continue;
+            }
+
+            // Set the from_block to the next block after the last processed one
+            // If this is the first poll, start from current block
+            let from_block = if last_processed_block > 0 {
+                last_processed_block + 1
+            } else {
+                current_block
+            };
+
             debug!(
-                "Received event on chain {} for market {:?}",
-                self.config.chain_id, self.config.market
+                "Polling for logs from block {} to {}",
+                from_block, current_block
             );
 
-            let _ = self.process_event(log).await;
-        }
+            // Update filter to include block range
+            let range_filter = filter.clone().from_block(from_block).to_block(current_block);
 
-        warn!("Event stream ended unexpectedly");
-        Ok(())
+            // Get logs for the block range
+            let logs = match provider.get_logs(&range_filter).await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    error!("Failed to get logs: {:?}", e);
+                    continue;
+                }
+            };
+
+            info!("Found {} logs in blocks {} to {}", logs.len(), from_block, current_block);
+
+            if logs.is_empty() {
+                debug!("No new events found in blocks {} to {}", from_block, current_block);
+                last_processed_block = current_block;
+                continue;
+            }
+
+            // Process all logs in parallel
+            let mut handles = Vec::new();
+            
+            for log in logs {
+                let self_clone = self.clone();
+                let handle = tokio::spawn(async move {
+                    match self_clone.process_event(log).await {
+                        Ok(event_update) => Some(event_update),
+                        Err(e) => {
+                            error!("Failed to process event: {:?}", e);
+                            None
+                        }
+                    }
+                });
+                handles.push(handle);
+            }
+
+            // Collect results
+            let mut pending_updates = Vec::new();
+            for handle in handles {
+                if let Ok(Some(event_update)) = handle.await {
+                    pending_updates.push(event_update);
+                }
+            }
+
+            // Write updates to database if any
+            if !pending_updates.is_empty() {
+                let count = pending_updates.len();
+                info!("Writing batch of {} events to database", count);
+                
+                match self.db.update_events(&pending_updates).await {
+                    Ok(_) => info!("Successfully wrote {} events to database", count),
+                    Err(e) => error!("Failed to write events to database: {:?}", e),
+                }
+            }
+
+            // Update last processed block
+            last_processed_block = current_block;
+        }
     }
 
     async fn process_event(&self, log: Log) -> Result<EventUpdate> {
@@ -225,11 +310,7 @@ impl EventListener {
             event_update.event_type = Some("ExtensionSupply".to_string());
         }
 
-        // Single database update with all processed information
-        if let Err(e) = self.db.update_event(event_update.clone()).await {
-            error!("Failed to update event in database: {:?}", e);
-        }
-
+        // Don't update database here - return the event update for batch processing
         Ok(event_update)
     }
 }

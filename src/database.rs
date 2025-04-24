@@ -336,15 +336,26 @@ impl Database {
         // Get and update the processed events
         let records = query(
             r#"
-            WITH claimed_events AS (
+            WITH ready_events AS (
+                SELECT tx_hash, dst_chain_id
+                FROM events 
+                WHERE status = 'ReadyToRequestProof'::event_status
+            ),
+            ranked_events AS (
+                SELECT tx_hash, 
+                       ROW_NUMBER() OVER (PARTITION BY dst_chain_id ORDER BY tx_hash) as row_num
+                FROM ready_events
+            ),
+            claim_targets AS (
+                SELECT tx_hash
+                FROM ranked_events
+                WHERE row_num <= 50
+            ),
+            claimed_events AS (
                 UPDATE events 
                 SET status = 'ProofRequested'::event_status,
                     proof_requested_at = NOW()
-                WHERE tx_hash IN (
-                    SELECT tx_hash 
-                    FROM events 
-                    WHERE status = 'ReadyToRequestProof'::event_status
-                )
+                WHERE tx_hash IN (SELECT tx_hash FROM claim_targets)
                 RETURNING 
                     tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
                     amount, target_function, market, received_at_block, should_request_proof_at_block,
