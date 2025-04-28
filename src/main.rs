@@ -241,12 +241,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All event listeners started");
 
+    let batch_limit_per_dst = 100;
     // Create proof generator
     let mut proof_generator = ProofGenerator::new(
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
         db.clone(),
-        BATCH_SIZE,
+        batch_limit_per_dst,
     );
 
     // Add the config before creating TransactionManager
@@ -298,12 +299,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     handles.push(tx_manager_handle);
 
-    // Start the event proof ready checker
-    let _event_proof_ready_checker_handle = tokio::spawn(async move {
-        if let Err(e) = event_proof_ready_checker.start().await {
-            error!("Event proof ready checker failed: {:?}", e);
+    // Spawn the event proof ready checker loop
+    let db_clone_checker = db.clone(); // Clone db for the checker loop task
+    let event_proof_ready_checker_handle = tokio::spawn(async move {
+        let mut current_checker = None;
+        loop {
+            // Create new checker instance
+            let new_checker = EventProofReadyChecker::new(
+                db_clone_checker.clone(),      // Use the cloned db
+                Duration::from_secs(2),  // Poll interval
+                Duration::from_secs(2),  // Block update interval
+            );
+            info!("Starting new event proof ready checker instance");
+
+            // Spawn the checker's start method in its own task
+            let checker_task_handle = tokio::spawn({
+                let checker_to_start = new_checker.clone(); // Clone instance for the task
+                async move {
+                    if let Err(e) = checker_to_start.start().await {
+                        error!("Event proof ready checker instance failed: {:?}", e);
+                    }
+                }
+            });
+
+            // Wait a moment for the new checker to initialize
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            // Drop the old checker instance (if it exists)
+            if let Some(checker) = current_checker.take() {
+                drop(checker);
+                // Optional: Abort the previous checker's task if needed
+                // checker_task_handle.abort(); // Consider if aborting is necessary/safe
+            }
+
+            // Store the new checker instance
+            current_checker = Some(new_checker);
+
+            // Wait 10 minutes before creating the next instance
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            info!("Restarting event proof ready checker...");
         }
     });
+    handles.push(event_proof_ready_checker_handle); // Add the handle for the loop task
 
     // Log configuration summary
     info!("----------------- SEQUENCER CONFIGURATION -----------------");

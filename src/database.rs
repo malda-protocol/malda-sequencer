@@ -5,6 +5,8 @@ use sqlx::{query, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::info;
 use std::str::FromStr;
+use std::collections::HashMap;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
@@ -343,8 +345,12 @@ impl Database {
         }
     }
 
-    pub async fn get_ready_to_request_proof_events(&self, delay_seconds: i64) -> Result<Vec<EventUpdate>> {
-        // First check if enough time has passed since the last proof request
+    pub async fn get_ready_to_request_proof_events(
+        &self, 
+        delay_seconds: i64, 
+        batch_limit_per_dst: i64
+    ) -> Result<Vec<EventUpdate>> { 
+        // Re-added rate limiting check using sync_timestamps
         let should_proceed = query(
             r#"
             SELECT 
@@ -354,22 +360,24 @@ impl Database {
                     ELSE false
                 END as should_proceed
             FROM sync_timestamps
-            WHERE id = 1
+            WHERE id = 1 -- Assuming a single row for global proof request timestamp
             "#
         )
         .bind(delay_seconds)
-        .fetch_one(&self.pool)
+        .fetch_one(&self.pool) // Use fetch_one, assuming the row always exists
         .await?
         .try_get::<bool, _>("should_proceed")?;
 
         if !should_proceed {
-            return Ok(Vec::new());
+            debug!("Proof request delay ({}s) not met, skipping claim.", delay_seconds);
+            return Ok(Vec::new()); // Return empty if delay not met
         }
 
         // Use a transaction to ensure atomicity
         let mut tx = self.pool.begin().await?;
         
-        // Update the last_proof_requested_at timestamp
+        // Re-added UPDATE sync_timestamps set last_proof_requested_at = NOW()
+        // This acts as a lock for this cycle
         query(
             r#"
             UPDATE sync_timestamps
@@ -380,7 +388,7 @@ impl Database {
         .execute(tx.as_mut())
         .await?;
 
-        // Get and update the processed events
+        // Claim events and set status/timestamp atomically, returning only needed fields
         let records = query(
             r#"
             WITH ready_events AS (
@@ -390,29 +398,26 @@ impl Database {
             ),
             ranked_events AS (
                 SELECT tx_hash, 
-                       ROW_NUMBER() OVER (PARTITION BY dst_chain_id ORDER BY tx_hash) as row_num
+                       ROW_NUMBER() OVER (PARTITION BY dst_chain_id ORDER BY received_at ASC, tx_hash ASC) as row_num -- Order by received time first
                 FROM ready_events
             ),
             claim_targets AS (
                 SELECT tx_hash
                 FROM ranked_events
-                WHERE row_num <= 50
+                WHERE row_num <= $1 -- Use parameter for batch size limit
             ),
             claimed_events AS (
                 UPDATE events 
                 SET status = 'ProofRequested'::event_status,
-                    proof_requested_at = NOW()
+                    proof_requested_at = NOW() -- Set timestamp here
                 WHERE tx_hash IN (SELECT tx_hash FROM claim_targets)
-                RETURNING 
-                    tx_hash, status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                    amount, target_function, market, received_at_block, should_request_proof_at_block,
-                    journal_index, journal, seal, batch_tx_hash, received_at, processed_at,
-                    proof_requested_at, proof_received_at, batch_submitted_at,
-                    batch_included_at, tx_finished_at, resubmitted, error
+                RETURNING -- Only return necessary fields
+                    tx_hash, src_chain_id, dst_chain_id, msg_sender, market
             )
             SELECT * FROM claimed_events
             "#
         )
+        .bind(batch_limit_per_dst) // Bind the batch limit parameter
         .fetch_all(tx.as_mut())
         .await?;
 
@@ -420,57 +425,27 @@ impl Database {
         tx.commit().await?;
 
         let mut events = Vec::new();
+        if records.is_empty() {
+            return Ok(events);
+        }
+
+        info!("Claimed {} events for proof generation.", records.len());
 
         for row in records {
             let tx_hash_str: String = row.try_get("tx_hash")?;
             let tx_hash = TxHash::from_str(&tx_hash_str)?;
             
-            let status_str: String = row.try_get("status")?;
-            let status = match status_str.as_str() {
-                "Received" => EventStatus::Received,
-                "Processed" => EventStatus::Processed,
-                "IncludedInBatch" => EventStatus::IncludedInBatch,
-                "ReadyToRequestProof" => EventStatus::ReadyToRequestProof,
-                "ProofRequested" => EventStatus::ProofRequested,
-                "ProofReceived" => EventStatus::ProofReceived,
-                "BatchSubmitted" => EventStatus::BatchSubmitted,
-                "BatchIncluded" => EventStatus::BatchIncluded,
-                "BatchFailed" => EventStatus::BatchFailed {
-                    error: row.try_get("error")?,
-                },
-                "TxProcessSuccess" => EventStatus::TxProcessSuccess,
-                "TxProcessFail" => EventStatus::TxProcessFail,
-                "Failed" => EventStatus::Failed {
-                    error: row.try_get("error")?,
-                },
-                _ => return Err(eyre::eyre!("Unknown status: {}", status_str)),
-            };
-
+            // We know the status is ProofRequested because we just set it.
+            // Only populate fields returned by the query.
             events.push(EventUpdate {
                 tx_hash,
-                status,
-                event_type: row.try_get("event_type")?,
+                status: EventStatus::ProofRequested, // Set status explicitly
                 src_chain_id: row.try_get::<Option<i32>, _>("src_chain_id")?.map(|id| id as u32),
                 dst_chain_id: row.try_get::<Option<i32>, _>("dst_chain_id")?.map(|id| id as u32),
                 msg_sender: row.try_get::<Option<String>, _>("msg_sender")?.map(|addr| addr.parse().unwrap()),
-                amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
-                target_function: row.try_get("target_function")?,
                 market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
-                received_at_block: row.try_get("received_at_block")?,
-                should_request_proof_at_block: row.try_get("should_request_proof_at_block")?,
-                journal_index: row.try_get("journal_index")?,
-                journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
-                seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
-                batch_tx_hash: row.try_get("batch_tx_hash")?,
-                received_at: row.try_get("received_at")?,
-                processed_at: row.try_get("processed_at")?,
-                proof_requested_at: row.try_get("proof_requested_at")?,
-                proof_received_at: row.try_get("proof_received_at")?,
-                batch_submitted_at: row.try_get("batch_submitted_at")?,
-                batch_included_at: row.try_get("batch_included_at")?,
-                tx_finished_at: row.try_get("tx_finished_at")?,
-                resubmitted: row.try_get("resubmitted")?,
-                error: row.try_get("error")?,
+                // Other fields are Default::default()
+                ..Default::default()
             });
         }
 
@@ -870,101 +845,6 @@ impl Database {
         Ok(())
     }
 
-    pub async fn update_events(&self, updates: &Vec<EventUpdate>) -> Result<()> {
-        if updates.is_empty() {
-            return Ok(());
-        }
-
-        // Start a transaction
-        let mut tx = self.pool.begin().await?;
-
-        for update in updates {
-            // Clone the values we need for logging before they're moved
-            let batch_tx_hash = update.batch_tx_hash.clone();
-
-            query(
-                r#"
-                INSERT INTO events (
-                    tx_hash, event_type, src_chain_id, dst_chain_id, 
-                    msg_sender, amount, target_function, market,
-                    received_at_block, should_request_proof_at_block, journal_index, journal, seal, batch_tx_hash, 
-                    status, resubmitted, error,
-                    received_at, processed_at, 
-                    proof_requested_at, proof_received_at,
-                    batch_submitted_at, batch_included_at, tx_finished_at
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::event_status, $16, $17,
-                    $18, $19, $20, $21, $22, $23, $24
-                )
-                ON CONFLICT (tx_hash) 
-                DO UPDATE SET
-                    status = $15::event_status,
-                    event_type = COALESCE($2, events.event_type),
-                    src_chain_id = COALESCE($3, events.src_chain_id),
-                    dst_chain_id = COALESCE($4, events.dst_chain_id),
-                    msg_sender = COALESCE($5, events.msg_sender),
-                    amount = COALESCE($6, events.amount),
-                    target_function = COALESCE($7, events.target_function),
-                    market = COALESCE($8, events.market),
-                    received_at_block = COALESCE($9, events.received_at_block),
-                    should_request_proof_at_block = COALESCE($10, events.should_request_proof_at_block),
-                    journal_index = COALESCE($11, events.journal_index),
-                    journal = COALESCE($12, events.journal),
-                    seal = COALESCE($13, events.seal),
-                    batch_tx_hash = COALESCE($14, events.batch_tx_hash),
-                    resubmitted = COALESCE($16, events.resubmitted),
-                    error = COALESCE($17, events.error),
-                    received_at = COALESCE($18, events.received_at),
-                    processed_at = COALESCE($19, events.processed_at),
-                    proof_requested_at = COALESCE($20, events.proof_requested_at),
-                    proof_received_at = COALESCE($21, events.proof_received_at),
-                    batch_submitted_at = COALESCE($22, events.batch_submitted_at),
-                    batch_included_at = COALESCE($23, events.batch_included_at),
-                    tx_finished_at = COALESCE($24, events.tx_finished_at)
-                "#,
-            )
-            .bind(update.tx_hash.to_string())
-            .bind(update.event_type.clone())
-            .bind(update.src_chain_id.map(|id| id as i32))
-            .bind(update.dst_chain_id.map(|id| id as i32))
-            .bind(update.msg_sender.map(|addr| addr.to_string()))
-            .bind(update.amount.map(|amt| amt.to_string()))
-            .bind(update.target_function.clone())
-            .bind(update.market.map(|addr| addr.to_string()))
-            .bind(update.received_at_block)
-            .bind(update.should_request_proof_at_block)
-            .bind(update.journal_index)
-            .bind(update.journal.clone().map(|j| j.to_vec()))
-            .bind(update.seal.clone().map(|s| s.to_vec()))
-            .bind(update.batch_tx_hash.clone())
-            .bind(update.status.to_db_string())
-            .bind(update.resubmitted)
-            .bind(update.error.clone())
-            .bind(update.received_at)
-            .bind(update.processed_at)
-            .bind(update.proof_requested_at)
-            .bind(update.proof_received_at)
-            .bind(update.batch_submitted_at)
-            .bind(update.batch_included_at)
-            .bind(update.tx_finished_at)
-            .execute(&mut *tx)
-            .await?;
-
-            info!(
-                "Updated event {} with status {:?} and batch_tx_hash {:?}",
-                update.tx_hash, update.status, batch_tx_hash
-            );
-        }
-
-        // Commit the transaction
-        tx.commit().await?;
-
-        info!("Successfully batch updated {} events", updates.len());
-
-        Ok(())
-    }
-
     pub async fn set_events_to_ready_to_request_proof(&self, tx_hashes: &Vec<TxHash>) -> Result<()> {
         if tx_hashes.is_empty() {
             return Ok(());
@@ -986,6 +866,96 @@ impl Database {
         .rows_affected();
 
         info!("Attempted to set {} events to ReadyToRequestProof, {} rows affected.", count, rows_affected);
+
+        Ok(())
+    }
+
+    // New function to update events based on current block numbers
+    pub async fn update_events_to_ready_status(&self, current_block_map: &HashMap<u64, i32>) -> Result<()> {
+        if current_block_map.is_empty() {
+            info!("No current block numbers provided, skipping update.");
+            return Ok(());
+        }
+
+        // Convert HashMap to vectors for binding
+        let chain_ids: Vec<i64> = current_block_map.keys().map(|&k| k as i64).collect();
+        let block_numbers: Vec<i32> = current_block_map.values().cloned().collect();
+
+        let rows_affected = query(
+            r#"
+            WITH current_blocks (chain_id, block_num) AS (
+                -- Unnest the arrays of chain IDs and corresponding block numbers
+                SELECT * FROM UNNEST($1::bigint[], $2::int[])
+            )
+            UPDATE events e
+            SET status = 'ReadyToRequestProof'::event_status
+            FROM current_blocks cb
+            WHERE e.status = 'Processed'::event_status                -- Only consider 'Processed' events
+              AND e.src_chain_id = cb.chain_id                     -- Match event's chain ID (assuming src_chain_id is BIGINT or compatible)
+              AND e.should_request_proof_at_block <= cb.block_num; -- Check if the block number condition is met
+            "#
+        )
+        .bind(&chain_ids)
+        .bind(&block_numbers)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            info!("Updated {} events to ReadyToRequestProof status based on current block numbers.", rows_affected);
+        } else {
+            debug!("No events updated to ReadyToRequestProof status in this cycle.");
+        }
+
+        Ok(())
+    }
+
+    // New function to update events after proof is received, including journal index
+    pub async fn set_events_proof_received_with_index(
+        &self,
+        updates: &Vec<(TxHash, i32)>, // Vec of (tx_hash, journal_index)
+        journal: &Bytes,
+        seal: &Bytes,
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let tx_hashes: Vec<String> = updates.iter().map(|(h, _)| h.to_string()).collect();
+        let journal_indices: Vec<i32> = updates.iter().map(|(_, idx)| *idx).collect();
+        let count = updates.len();
+
+        // Use UNNEST and JOIN to update journal_index based on tx_hash
+        let rows_affected = query(
+            r#"
+            WITH index_data (tx_hash_text, journal_idx) AS (
+                SELECT * FROM UNNEST($1::text[], $2::int[])
+            )
+            UPDATE events e
+            SET 
+                status = 'ProofReceived'::event_status,
+                journal = $3,
+                seal = $4,
+                proof_received_at = NOW(),
+                journal_index = id.journal_idx
+            FROM index_data id
+            WHERE e.tx_hash = id.tx_hash_text
+              AND e.status = 'ProofRequested'::event_status; -- Ensure we only update events we claimed
+            "#
+        )
+        .bind(&tx_hashes)
+        .bind(&journal_indices)
+        .bind(journal.to_vec()) // Bind journal bytes
+        .bind(seal.to_vec())     // Bind seal bytes
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected == count as u64 {
+            info!("Successfully updated {} events with proof data and journal indices.", count);
+        } else {
+            warn!("Attempted to update {} events with proof data, but {} rows were affected. Some events might not have been in 'ProofRequested' state.", count, rows_affected);
+        }
 
         Ok(())
     }
