@@ -147,87 +147,6 @@ impl Database {
         Ok(())
     }
 
-    pub async fn update_event(&self, update: EventUpdate) -> Result<()> {
-        // Clone the values we need for logging before they're moved
-        let batch_tx_hash = update.batch_tx_hash.clone();
-
-        query(
-            r#"
-            INSERT INTO events (
-                tx_hash, event_type, src_chain_id, dst_chain_id, 
-                msg_sender, amount, target_function, market,
-                received_at_block, should_request_proof_at_block, journal_index, journal, seal, batch_tx_hash, 
-                status, resubmitted, error,
-                received_at, processed_at, 
-                proof_requested_at, proof_received_at,
-                batch_submitted_at, batch_included_at, tx_finished_at
-            )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::event_status, $16, $17,
-                $18, $19, $20, $21, $22, $23, $24
-            )
-            ON CONFLICT (tx_hash) 
-            DO UPDATE SET
-                status = $15::event_status,
-                event_type = COALESCE($2, events.event_type),
-                src_chain_id = COALESCE($3, events.src_chain_id),
-                dst_chain_id = COALESCE($4, events.dst_chain_id),
-                msg_sender = COALESCE($5, events.msg_sender),
-                amount = COALESCE($6, events.amount),
-                target_function = COALESCE($7, events.target_function),
-                market = COALESCE($8, events.market),
-                received_at_block = COALESCE($9, events.received_at_block),
-                should_request_proof_at_block = COALESCE($10, events.should_request_proof_at_block),
-                journal_index = COALESCE($11, events.journal_index),
-                journal = COALESCE($12, events.journal),
-                seal = COALESCE($13, events.seal),
-                batch_tx_hash = COALESCE($14, events.batch_tx_hash),
-                resubmitted = COALESCE($16, events.resubmitted),
-                error = COALESCE($17, events.error),
-                received_at = COALESCE($18, events.received_at),
-                processed_at = COALESCE($19, events.processed_at),
-                proof_requested_at = COALESCE($20, events.proof_requested_at),
-                proof_received_at = COALESCE($21, events.proof_received_at),
-                batch_submitted_at = COALESCE($22, events.batch_submitted_at),
-                batch_included_at = COALESCE($23, events.batch_included_at),
-                tx_finished_at = COALESCE($24, events.tx_finished_at)
-            "#,
-        )
-        .bind(update.tx_hash.to_string())
-        .bind(update.event_type)
-        .bind(update.src_chain_id.map(|id| id as i32))
-        .bind(update.dst_chain_id.map(|id| id as i32))
-        .bind(update.msg_sender.map(|addr| addr.to_string()))
-        .bind(update.amount.map(|amt| amt.to_string()))
-        .bind(update.target_function)
-        .bind(update.market.map(|addr| addr.to_string()))
-        .bind(update.received_at_block)
-        .bind(update.should_request_proof_at_block)
-        .bind(update.journal_index)
-        .bind(update.journal.clone().map(|j| j.to_vec()))
-        .bind(update.seal.clone().map(|s| s.to_vec()))
-        .bind(update.batch_tx_hash)
-        .bind(update.status.to_db_string())
-        .bind(update.resubmitted)
-        .bind(update.error)
-        .bind(update.received_at)
-        .bind(update.processed_at)
-        .bind(update.proof_requested_at)
-        .bind(update.proof_received_at)
-        .bind(update.batch_submitted_at)
-        .bind(update.batch_included_at)
-        .bind(update.tx_finished_at)
-        .execute(&self.pool)
-        .await?;
-
-        info!(
-            "Updated event {} with status {:?} and batch_tx_hash {:?}",
-            update.tx_hash, update.status, batch_tx_hash
-        );
-
-        Ok(())
-    }
-
     pub async fn get_event_status(&self, tx_hash: &TxHash) -> Result<Option<EventStatus>> {
         // Use query_as to handle the event_status enum type
         let record =
@@ -392,7 +311,7 @@ impl Database {
         let records = query(
             r#"
             WITH ready_events AS (
-                SELECT tx_hash, dst_chain_id
+                SELECT tx_hash, dst_chain_id, received_at
                 FROM events 
                 WHERE status = 'ReadyToRequestProof'::event_status
             ),
@@ -845,30 +764,6 @@ impl Database {
         Ok(())
     }
 
-    pub async fn set_events_to_ready_to_request_proof(&self, tx_hashes: &Vec<TxHash>) -> Result<()> {
-        if tx_hashes.is_empty() {
-            return Ok(());
-        }
-
-        let tx_hash_strings: Vec<String> = tx_hashes.iter().map(|h| h.to_string()).collect();
-        let count = tx_hash_strings.len();
-
-        let rows_affected = query(
-            r#"
-            UPDATE events
-            SET status = 'ReadyToRequestProof'::event_status
-            WHERE tx_hash = ANY($1) AND status = 'Processed'::event_status
-            "#
-        )
-        .bind(&tx_hash_strings) // Bind as array
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
-
-        info!("Attempted to set {} events to ReadyToRequestProof, {} rows affected.", count, rows_affected);
-
-        Ok(())
-    }
 
     // New function to update events based on current block numbers
     pub async fn update_events_to_ready_status(&self, current_block_map: &HashMap<u64, i32>) -> Result<()> {
