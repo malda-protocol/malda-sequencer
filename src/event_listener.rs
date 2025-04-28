@@ -47,6 +47,9 @@ pub struct EventConfig {
     pub market: Address,
     pub event_signature: String,
     pub chain_id: u64,
+    pub max_retries: u32,
+    pub retry_delay_secs: u64,
+    pub poll_interval_secs: u64,
 }
 
 #[derive(Clone)]
@@ -70,8 +73,8 @@ impl EventListener {
         );
 
         let mut retry_count = 0;
-        let max_retries = 5;
-        let mut retry_delay = Duration::from_secs(1);
+        let max_retries = self.config.max_retries;
+        let retry_delay = Duration::from_secs(self.config.retry_delay_secs);
 
         loop {
             match self.run_event_listener().await {
@@ -82,7 +85,6 @@ impl EventListener {
                         return Ok(());
                     }
                     retry_count += 1;
-                    retry_delay *= 2; // Exponential backoff
                     info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
                     sleep(retry_delay).await;
                 }
@@ -93,7 +95,6 @@ impl EventListener {
                         return Err(e);
                     }
                     retry_count += 1;
-                    retry_delay *= 2; // Exponential backoff
                     info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
                     sleep(retry_delay).await;
                 }
@@ -125,7 +126,7 @@ impl EventListener {
         let mut last_processed_block = 0u64;
         
         // Poll interval in seconds
-        let poll_interval = Duration::from_secs(5);
+        let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
         let mut interval = interval(poll_interval);
 
         info!("Started polling for events");
@@ -173,7 +174,7 @@ impl EventListener {
                 }
             };
 
-            info!("Found {} logs in blocks {} to {}", logs.len(), from_block, current_block);
+            // info!("Found {} logs in blocks {} to {}", logs.len(), from_block, current_block);
 
             if logs.is_empty() {
                 debug!("No new events found in blocks {} to {}", from_block, current_block);
@@ -209,10 +210,10 @@ impl EventListener {
             // Write updates to database if any
             if !pending_updates.is_empty() {
                 let count = pending_updates.len();
-                info!("Writing batch of {} events to database", count);
+                // info!("Writing batch of {} events to database", count);
                 
-                match self.db.update_events(&pending_updates).await {
-                    Ok(_) => info!("Successfully wrote {} events to database", count),
+                match self.db.add_new_events(&pending_updates).await {
+                    Ok(_) => info!("Successfully added batch of {} new events to database", count),
                     Err(e) => error!("Failed to write events to database: {:?}", e),
                 }
             }

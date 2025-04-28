@@ -7,9 +7,8 @@ use alloy::{
 use chrono::{DateTime, Duration, Utc};
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
-use tokio::time::{sleep, timeout, Duration as TokioDuration};
-use tracing::{debug, error, info};
+use tokio::time::{interval, sleep, Duration as TokioDuration};
+use tracing::{debug, error, info, warn};
 use std::time::Duration as StdDuration;
 use std::vec::Vec;
 
@@ -26,6 +25,7 @@ pub struct BatchEventConfig {
     pub chain_id: u64,
 }
 
+#[derive(Clone)]
 pub struct BatchEventListener {
     config: BatchEventConfig,
     db: Database,
@@ -42,19 +42,53 @@ impl BatchEventListener {
             self.config.batch_submitter, self.config.chain_id
         );
 
+        let mut retry_count = 0;
+        let max_retries = 5;
+        let mut retry_delay = StdDuration::from_secs(1);
+
+        loop {
+            match self.run_event_listener().await {
+                Ok(_) => {
+                    warn!("Batch event listener stopped, attempting to reconnect...");
+                    if retry_count >= max_retries {
+                        error!("Max retries reached, giving up on reconnection");
+                        return Ok(());
+                    }
+                    retry_count += 1;
+                    retry_delay *= 2; // Exponential backoff
+                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    sleep(retry_delay).await;
+                }
+                Err(e) => {
+                    error!("Batch event listener error: {:?}", e);
+                    if retry_count >= max_retries {
+                        error!("Max retries reached, giving up on reconnection");
+                        return Err(e);
+                    }
+                    retry_count += 1;
+                    retry_delay *= 2; // Exponential backoff
+                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    sleep(retry_delay).await;
+                }
+            }
+        }
+    }
+
+    async fn run_event_listener(&self) -> Result<()> {
         let ws_url: Url = self
             .config
             .ws_url
             .parse()
             .wrap_err_with(|| format!("Invalid WSS URL: {}", self.config.ws_url))?;
 
-        debug!("Connecting to WebSocket at {}", ws_url);
+        debug!("Connecting to provider at {}", ws_url);
         let ws = WsConnect::new(ws_url);
         let provider = ProviderBuilder::new()
             .on_ws(ws)
             .await
             .wrap_err("Failed to connect to WebSocket")?;
 
+        // Create base filters for success and failure events
         let success_filter = Filter::new()
             .event(BATCH_PROCESS_SUCCESS_SIG)
             .address(self.config.batch_submitter);
@@ -63,128 +97,147 @@ impl BatchEventListener {
             .event(BATCH_PROCESS_FAILED_SIG)
             .address(self.config.batch_submitter);
 
-        debug!("Subscribing to batch events");
-        let success_sub = provider.subscribe_logs(&success_filter).await?;
-        let failure_sub = provider.subscribe_logs(&failure_filter).await?;
+        debug!("Setting up polling with filters");
 
-        let mut success_stream = success_sub.into_stream();
-        let mut failure_stream = failure_sub.into_stream();
+        // Track the latest block we've processed
+        let mut last_processed_block = 0u64;
+        
+        // Poll interval in seconds
+        let poll_interval = StdDuration::from_secs(5);
+        let mut interval = interval(poll_interval);
 
-        info!("Successfully subscribed to batch events");
+        info!("Started polling for batch events");
 
-        // Clone db for both tasks
-        let db_success = self.db.clone();
-        let db_failure = self.db.clone();
-        let chain_id = self.config.chain_id;
+        loop {
+            interval.tick().await;
 
-        // Spawn success event handler
-        let success_handle = tokio::spawn(async move {
-            let mut success_events: Vec<EventUpdate> = Vec::new();
-
-            loop {
-                // Try to get next event with a timeout
-                match timeout(TokioDuration::from_secs(1), success_stream.next()).await {
-                    Ok(Some(log)) => {
-                        let event = parse_batch_process_success_event(&log);
-                        let mut event_update = EventUpdate::default();
-                        event_update.tx_hash = event.init_hash;
-                        event_update.status = EventStatus::TxProcessSuccess;
-                        event_update.tx_finished_at = Some(Utc::now());
-                        success_events.push(event_update);
-
-                        info!(
-                            "Collected batch process success on chain {}: init_hash={:?}",
-                            chain_id, event.init_hash
-                        );
-                    }
-                    Ok(None) => {
-                        // Stream ended
-                        error!("Success event stream ended");
-                        break;
-                    }
-                    Err(_) => {
-                        // Timeout occurred, check if we should process events
-                        if !success_events.is_empty() {
-                            info!(
-                                "Waiting 5 seconds before processing {} success events on chain {}",
-                                success_events.len(),
-                                chain_id
-                            );
-                            sleep(StdDuration::from_secs(5)).await;
-
-                            info!(
-                                "Processing batch of {} success events on chain {}",
-                                success_events.len(),
-                                chain_id
-                            );
-
-                            if let Err(e) = db_success.update_finished_events(&success_events).await {
-                                error!("Failed to update success events to finished_events: {:?}", e);
-                            }
-                            success_events.clear();
-                        }
-                    }
+            // Get current block number
+            let current_block = match provider.get_block_number().await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!("Failed to get current block number: {:?}", e);
+                    continue;
                 }
-            }
-        });
+            };
 
-        // Spawn failure event handler
-        let failure_handle = tokio::spawn(async move {
+            // Don't query if we're already up to date
+            if last_processed_block >= current_block {
+                debug!("No new blocks since last poll (block: {})", current_block);
+                continue;
+            }
+
+            // Set the from_block to the next block after the last processed one
+            // If this is the first poll, start from current block
+            let from_block = if last_processed_block > 0 {
+                last_processed_block + 1
+            } else {
+                current_block
+            };
+
+            debug!(
+                "Polling for batch events from block {} to {}",
+                from_block, current_block
+            );
+
+            // Update filters to include block range
+            let success_range_filter = success_filter.clone()
+                .from_block(from_block)
+                .to_block(current_block);
+
+            let failure_range_filter = failure_filter.clone()
+                .from_block(from_block)
+                .to_block(current_block);
+
+            // Get success logs for the block range
+            let success_logs = match provider.get_logs(&success_range_filter).await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    error!("Failed to get success logs: {:?}", e);
+                    continue;
+                }
+            };
+
+            // Get failure logs for the block range
+            let failure_logs = match provider.get_logs(&failure_range_filter).await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    error!("Failed to get failure logs: {:?}", e);
+                    continue;
+                }
+            };
+
+            // info!(
+            //     "Found {} success and {} failure logs in blocks {} to {}", 
+            //     success_logs.len(),
+            //     failure_logs.len(),
+            //     from_block, 
+            //     current_block
+            // );
+
+            let mut success_events: Vec<EventUpdate> = Vec::new();
             let mut failure_events: Vec<EventUpdate> = Vec::new();
 
-            loop {
-                // Try to get next event with a timeout
-                match timeout(TokioDuration::from_secs(1), failure_stream.next()).await {
-                    Ok(Some(log)) => {
-                        let event = parse_batch_process_failed_event(&log);
-                        let mut event_update = EventUpdate::default();
-                        event_update.tx_hash = event.init_hash;
-                        event_update.status = EventStatus::TxProcessFail;
-                        event_update.tx_finished_at = Some(Utc::now());
-                        failure_events.push(event_update);
+            // Process success logs
+            for log in success_logs {
+                let event = parse_batch_process_success_event(&log);
+                let mut event_update = EventUpdate::default();
+                event_update.tx_hash = event.init_hash;
+                event_update.status = EventStatus::TxProcessSuccess;
+                event_update.tx_finished_at = Some(Utc::now());
+                success_events.push(event_update);
 
-                        error!(
-                            "Collected batch process failed on chain {}: init_hash={:?}, reason={:?}",
-                            chain_id, event.init_hash, event.reason
-                        );
-                    }
-                    Ok(None) => {
-                        // Stream ended
-                        error!("Failure event stream ended");
-                        break;
-                    }
-                    Err(_) => {
-                        // Timeout occurred, check if we should process events
-                        if !failure_events.is_empty() {
-                            info!(
-                                "Waiting 5 seconds before processing {} failure events on chain {}",
-                                failure_events.len(),
-                                chain_id
-                            );
-                            sleep(StdDuration::from_secs(5)).await;
+                // info!(
+                //     "Found batch process success on chain {}: init_hash={:?}",
+                //     self.config.chain_id, event.init_hash
+                // );
+            }
 
-                            info!(
-                                "Processing batch of {} failure events on chain {}",
-                                failure_events.len(),
-                                chain_id
-                            );
+            // Process failure logs
+            for log in failure_logs {
+                let event = parse_batch_process_failed_event(&log);
+                let mut event_update = EventUpdate::default();
+                event_update.tx_hash = event.init_hash;
+                event_update.status = EventStatus::TxProcessFail;
+                event_update.tx_finished_at = Some(Utc::now());
+                failure_events.push(event_update);
 
-                            if let Err(e) = db_failure.update_finished_events(&failure_events).await {
-                                error!("Failed to update failure events to finished_events: {:?}", e);
-                            }
-                            failure_events.clear();
-                        }
-                    }
+                error!(
+                    "Found batch process failed on chain {}: init_hash={:?}, reason={:?}",
+                    self.config.chain_id, event.init_hash, event.reason
+                );
+            }
+
+            // Update database with success events if any
+            if !success_events.is_empty() {
+                // info!(
+                //     "Processing batch of {} success events on chain {}",
+                //     success_events.len(),
+                //     self.config.chain_id
+                // );
+                
+                match self.db.update_finished_events(&success_events).await {
+                    Ok(_) => info!("Successfully wrote {} success events to database", success_events.len()),
+                    Err(e) => error!("Failed to update success events: {:?}", e),
                 }
             }
-        });
 
-        // Wait for both tasks to complete (they should run indefinitely)
-        tokio::try_join!(success_handle, failure_handle)
-            .map_err(|e| eyre::eyre!("Event listener task failed: {}", e))?;
+            // Update database with failure events if any
+            if !failure_events.is_empty() {
+                info!(
+                    "Processing batch of {} failure events on chain {}",
+                    failure_events.len(),
+                    self.config.chain_id
+                );
+                
+                match self.db.update_finished_events(&failure_events).await {
+                    Ok(_) => info!("Successfully wrote {} failure events to database", failure_events.len()),
+                    Err(e) => error!("Failed to update failure events: {:?}", e),
+                }
+            }
 
-        error!("Both event streams ended unexpectedly");
-        Ok(())
+            // Update last processed block
+            last_processed_block = current_block;
+        }
     }
 }
 

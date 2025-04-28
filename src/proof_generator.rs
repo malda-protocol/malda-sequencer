@@ -45,7 +45,7 @@ impl ProofGenerator {
             let processed_events = self.db.get_ready_to_request_proof_events(crate::constants::PROOF_REQUEST_DELAY as i64).await?;
             
             if processed_events.is_empty() {
-                info!("No processed events found, waiting for next check...");
+                // info!("No processed events found, waiting for next check...");
                 sleep(proof_delay).await;
                 continue;
             }
@@ -241,6 +241,7 @@ impl ProofGeneratorWorker {
         );
 
         loop {
+            let start_time = Instant::now();
             match get_proof_data_prove_sdk(
                 users.clone(),
                 markets.clone(),
@@ -251,6 +252,7 @@ impl ProofGeneratorWorker {
             .await
             {
                 Ok(proof_info) => {
+                    let duration = start_time.elapsed();
                     let receipt = proof_info.receipt;
                     let seal = match risc0_ethereum_contracts::encode_seal(&receipt) {
                         Ok(seal_data) => {
@@ -264,10 +266,11 @@ impl ProofGeneratorWorker {
                     };
                     let journal = Bytes::from(receipt.journal.bytes);
 
+                    let cycles = proof_info.stats.total_cycles;
+                    let tx_num = users.iter().flatten().count();
                     info!(
-                        "Generated proof - journal size: {}, seal size: {}",
-                        journal.len(),
-                        seal.len()
+                        "Generated proof for {} transactions with {} cycles in {:?}",
+                        tx_num, cycles, duration
                     );
                     debug!(
                         "Proof details - journal: 0x{}, seal: 0x{}",
