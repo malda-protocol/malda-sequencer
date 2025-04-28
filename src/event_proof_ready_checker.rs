@@ -3,7 +3,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     transports::http::reqwest::Url,
-    primitives::{Address, Bytes, U256},
+    primitives::{Address, Bytes, U256, TxHash},
 };
 use eyre::Result;
 use lazy_static::lazy_static;
@@ -46,10 +46,11 @@ const L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA: &str = "0x42000000000000000000000000000
 pub struct EventProofReadyChecker {
     db: Database,
     poll_interval: Duration,
+    block_update_interval: Duration,
 }
 
 impl EventProofReadyChecker {
-    pub fn new(db: Database, poll_interval: Duration) -> Self {
+    pub fn new(db: Database, poll_interval: Duration, block_update_interval: Duration) -> Self {
         // Initialize the block number map with default values for all supported chains
         let mut block_numbers = BLOCK_NUMBERS.lock().unwrap();
         
@@ -113,8 +114,9 @@ impl EventProofReadyChecker {
         
         // Start the background task to update block numbers
         let chain_configs_clone = chain_configs.clone();
+        let block_update_interval_clone = block_update_interval;
         tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(1));
+            let mut interval = interval(block_update_interval_clone);
             
             // Create provider for Optimism Sepolia
             let provider = create_provider(
@@ -223,6 +225,7 @@ impl EventProofReadyChecker {
         Self {
             db,
             poll_interval,
+            block_update_interval,
         }
     }
 
@@ -237,6 +240,8 @@ impl EventProofReadyChecker {
             // Get all processed events
             let events = self.db.get_processed_events().await?;
             
+            let mut ready_to_update_hashes: Vec<TxHash> = Vec::new();
+
             for event in events {
                 // Check if the event is ready to request a proof
                 if let Some(_received_at_block) = event.received_at_block {
@@ -252,22 +257,20 @@ impl EventProofReadyChecker {
                         // If we've reached or passed the block where we should request a proof
                         if current_block >= should_request_proof_at_block {
                             info!(
-                                "Event {} is ready to request proof. Current block: {}, Should request at block: {}",
+                                "Event {} is ready for proof request. Current block: {}, Target block: {}",
                                 event.tx_hash, current_block, should_request_proof_at_block
                             );
-                            
-                            // Update the event status to ReadyToRequestProof
-                            let update = EventUpdate {
-                                tx_hash: event.tx_hash,
-                                status: EventStatus::ReadyToRequestProof,
-                                ..Default::default()
-                            };
-                            
-                            if let Err(e) = self.db.update_event(update).await {
-                                error!("Failed to update event status to ReadyToRequestProof: {:?}", e);
-                            }
+                            ready_to_update_hashes.push(event.tx_hash);
                         }
                     }
+                }
+            }
+
+            // Batch update the status for ready events
+            if !ready_to_update_hashes.is_empty() {
+                let count = ready_to_update_hashes.len();
+                if let Err(e) = self.db.set_events_to_ready_to_request_proof(&ready_to_update_hashes).await {
+                    error!("Failed to batch update {} events to ReadyToRequestProof: {:?}", count, e);
                 }
             }
         }

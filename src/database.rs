@@ -964,6 +964,31 @@ impl Database {
 
         Ok(())
     }
+
+    pub async fn set_events_to_ready_to_request_proof(&self, tx_hashes: &Vec<TxHash>) -> Result<()> {
+        if tx_hashes.is_empty() {
+            return Ok(());
+        }
+
+        let tx_hash_strings: Vec<String> = tx_hashes.iter().map(|h| h.to_string()).collect();
+        let count = tx_hash_strings.len();
+
+        let rows_affected = query(
+            r#"
+            UPDATE events
+            SET status = 'ReadyToRequestProof'::event_status
+            WHERE tx_hash = ANY($1) AND status = 'Processed'::event_status
+            "#
+        )
+        .bind(&tx_hash_strings) // Bind as array
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        info!("Attempted to set {} events to ReadyToRequestProof, {} rows affected.", count, rows_affected);
+
+        Ok(())
+    }
 }
 
 

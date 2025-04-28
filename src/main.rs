@@ -279,7 +279,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the event proof ready checker
     let event_proof_ready_checker = EventProofReadyChecker::new(
         db.clone(),
-        Duration::from_secs(1), // Check every 10 seconds
+        Duration::from_secs(2), // Check every 10 seconds
+        Duration::from_secs(2), // Update block numbers every 1 second
     );
 
     // Spawn processors
