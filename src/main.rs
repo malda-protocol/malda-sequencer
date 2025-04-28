@@ -199,6 +199,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     market: *market,
                     event_signature: event.to_string(),
                     chain_id: *chain_id,
+                    max_retries: 10,
+                    retry_delay_secs: 1,
+                    poll_interval_secs: 2,
                 };
 
                 let db = db.clone();
@@ -254,17 +257,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (
                 ETHEREUM_SEPOLIA_CHAIN_ID as u32,
                 rpc_url_ethereum_sepolia().to_string(),
-                24, // 5 seconds delay for Ethereum Sepolia
+                12, // 5 seconds delay for Ethereum Sepolia
             ),
             (
                 OPTIMISM_SEPOLIA_CHAIN_ID as u32,
-                rpc_url_optimism_sepolia().to_string(),
-                5, // 5 seconds delay for Optimism Sepolia
+                "https://sepolia.optimism.io".to_string(),
+                2, // 5 seconds delay for Optimism Sepolia
             ),
             (
                 LINEA_SEPOLIA_CHAIN_ID as u32,
                 rpc_url_linea_sepolia().to_string(),
-                5, // 5 seconds delay for Linea Sepolia
+                2, // 5 seconds delay for Linea Sepolia
             ),
         ],
         poll_interval: Duration::from_secs(5), // Check for new events every 5 seconds

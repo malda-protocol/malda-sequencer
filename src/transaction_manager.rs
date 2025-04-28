@@ -69,7 +69,7 @@ impl TransactionManager {
 
         loop {
             let poll_start = Instant::now();
-            info!("Starting new poll cycle");
+            // info!("Starting new poll cycle");
 
             // Get all events with ProofReceived status from the database
             match self.db.get_proven_events(self.config.poll_interval.as_secs() as i64).await {
@@ -108,8 +108,8 @@ impl TransactionManager {
             debug!("Poll cycle completed in {:?}", poll_duration);
             
             // Wait before next poll
-            info!("Waiting {:?} before next poll cycle", self.config.poll_interval);
-            sleep(self.config.poll_interval).await;
+            // info!("Waiting {:?} before next poll cycle", self.config.poll_interval);
+            // sleep(self.config.poll_interval).await;
         }
     }
 
@@ -506,6 +506,7 @@ impl TransactionManager {
             let tx_send_result = action.gas(gas_limit)
                 .max_fee_per_gas(max_fee_per_gas)
                 .max_priority_fee_per_gas(max_priority_fee_per_gas)
+                .from(SEQUENCER_ADDRESS)
                 .send()
                 .await;
                 

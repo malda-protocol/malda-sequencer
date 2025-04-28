@@ -98,6 +98,53 @@ impl Database {
         Ok(Self { pool })
     }
 
+    pub async fn add_new_events(&self, events: &Vec<EventUpdate>) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        for event in events {
+            // Only insert fields relevant to a newly processed event
+            query(
+                r#"
+                INSERT INTO events (
+                    tx_hash, status, event_type, src_chain_id, dst_chain_id, 
+                    msg_sender, amount, target_function, market,
+                    received_at_block, should_request_proof_at_block,
+                    received_at, processed_at
+                )
+                VALUES (
+                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                )
+                ON CONFLICT (tx_hash) DO NOTHING
+                "#
+            )
+            .bind(event.tx_hash.to_string())
+            .bind(event.status.to_db_string()) // Always Processed from event_listener
+            .bind(event.event_type.as_ref())
+            .bind(event.src_chain_id.map(|id| id as i32))
+            .bind(event.dst_chain_id.map(|id| id as i32))
+            .bind(event.msg_sender.map(|addr| addr.to_string()))
+            .bind(event.amount.map(|amt| amt.to_string()))
+            .bind(event.target_function.as_ref())
+            .bind(event.market.map(|addr| addr.to_string()))
+            .bind(event.received_at_block)
+            .bind(event.should_request_proof_at_block)
+            .bind(event.received_at) // Set in event_listener
+            .bind(event.processed_at) // Set in event_listener
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        info!("Attempted to add batch of {} new events to database", events.len());
+
+        Ok(())
+    }
+
     pub async fn update_event(&self, update: EventUpdate) -> Result<()> {
         // Clone the values we need for logging before they're moved
         let batch_tx_hash = update.batch_tx_hash.clone();
