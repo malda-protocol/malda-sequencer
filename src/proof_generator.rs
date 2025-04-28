@@ -38,40 +38,26 @@ impl ProofGenerator {
         info!("Starting proof generator, reading processed events from database...");
 
         let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
-        let mut processed_tx_hashes = std::collections::HashSet::new();
 
         loop {
-            // Get processed events from database
-            let processed_events = self.db.get_ready_to_request_proof_events(crate::constants::PROOF_REQUEST_DELAY as i64).await?;
+            // Get processed events from database - they are claimed atomically now
+            let claimed_events = self.db.get_ready_to_request_proof_events(
+                proof_delay.as_secs() as i64, 
+                self.batch_size as i64
+            ).await?;
             
-            if processed_events.is_empty() {
-                // info!("No processed events found, waiting for next check...");
+            if claimed_events.is_empty() {
+                // info!("No events ready for proof request, waiting...");
                 sleep(proof_delay).await;
                 continue;
             }
 
-            // Filter out events that have already been processed
-            let new_events: Vec<EventUpdate> = processed_events
-                .into_iter()
-                .filter(|event| {
-                    if processed_tx_hashes.contains(&event.tx_hash) {
-                        false
-                    } else {
-                        processed_tx_hashes.insert(event.tx_hash);
-                        true
-                    }
-                })
-                .collect();
+            // Use claimed_events directly
+            let events_to_process = claimed_events;
 
-            if new_events.is_empty() {
-                info!("No new events to process, waiting for next check...");
-                sleep(proof_delay).await;
-                continue;
-            }
+            info!("Processing batch of {} events for proof generation", events_to_process.len());
 
-            info!("Found {} new events to process", new_events.len());
-
-            // Process all events in one batch
+            // Process the batch in a spawned task
             let max_retries = self.max_retries;
             let retry_delay = self.retry_delay;
             let db = self.db.clone();
@@ -83,7 +69,7 @@ impl ProofGenerator {
                     db,
                 };
 
-                if let Err(e) = proof_generator.process_batch(new_events).await {
+                if let Err(e) = proof_generator.process_batch(events_to_process).await { // Use events_to_process
                     error!("Failed to generate proofs for batch: {}", e);
                 }
             });
@@ -102,7 +88,8 @@ struct ProofGeneratorWorker {
 
 impl ProofGeneratorWorker {
     async fn process_batch(&self, events: Vec<EventUpdate>) -> Result<()> {
-        // Sort events by src_chain (Linea first) and dst_chain
+        // Input `events` already have status = ProofRequested
+        // Sort events by src_chain (Linea first) and dst_chain for consistent journal indexing
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
             let a_src = a.src_chain_id.unwrap_or(malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32) as u64;
@@ -116,25 +103,6 @@ impl ProofGeneratorWorker {
                 other => other,
             }
         });
-
-        // Create a new vector for events to update
-        let mut events_to_update = Vec::new();
-        
-        // Update status to ProofRequested for all events with their journal indices
-        for (idx, event) in sorted_events.iter().enumerate() {
-            let mut updated_event = event.clone();
-            updated_event.status = EventStatus::ProofRequested;
-            updated_event.proof_requested_at = Some(Utc::now());
-            updated_event.journal_index = Some(idx as i32);
-            events_to_update.push(updated_event);
-        }
-        
-        // Update all events at once
-        if !events_to_update.is_empty() {
-            if let Err(e) = self.db.update_events(&events_to_update).await {
-                error!("Failed to update events status to ProofRequested: {:?}", e);
-            }
-        }
 
         // Initialize vectors for proof generation
         let mut users: Vec<Vec<Address>> = Vec::new();
@@ -204,23 +172,22 @@ impl ProofGeneratorWorker {
         info!("Source chains included in the proof: {:?}", src_chain_ids);
         info!("Destination chains included in the proof: {:?}", dst_chain_ids);
 
-        // Create a new vector for events to update
-        let mut events_to_update = Vec::new();
+        // Create the mapping of TxHash to its final journal_index
+        let updates_with_index: Vec<(TxHash, i32)> = sorted_events
+            .iter()
+            .enumerate()
+            .map(|(idx, event)| (event.tx_hash, idx as i32))
+            .collect();
         
-        // Update database with proof data for each event
-        for event in sorted_events.iter() {
-            let mut updated_event = event.clone();
-            updated_event.status = EventStatus::ProofReceived;
-            updated_event.journal = Some(journal.clone());
-            updated_event.seal = Some(seal.clone());
-            updated_event.proof_received_at = Some(Utc::now());
-            events_to_update.push(updated_event);
-        }
-
-        // Update all events at once
-        if !events_to_update.is_empty() {
-            if let Err(e) = self.db.update_events(&events_to_update).await {
-                error!("Failed to update events with proof data: {:?}", e);
+        // Update database with proof data and journal indices using the specific function
+        if !updates_with_index.is_empty() {
+            if let Err(e) = self.db.set_events_proof_received_with_index(
+                &updates_with_index, 
+                &journal, 
+                &seal
+            ).await {
+                error!("Failed to update events with proof data and index: {:?}", e);
+                // Consider if we should return error here or just log
             }
         }
 

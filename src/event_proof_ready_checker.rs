@@ -3,16 +3,17 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     transports::http::reqwest::Url,
-    primitives::{Address, Bytes, U256, TxHash},
+    primitives::{Address, TxHash},
 };
 use eyre::Result;
+use futures::future::join_all;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use malda_rs::constants::*;
 use malda_rs::types::IL1Block;
@@ -43,10 +44,12 @@ struct ChainConfig {
 const L1_BLOCK_ADDRESS_OPTIMISM: &str = "0x4200000000000000000000000000000000000015";
 const L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA: &str = "0x4200000000000000000000000000000000000015";
 
+#[derive(Clone)]
 pub struct EventProofReadyChecker {
     db: Database,
     poll_interval: Duration,
     block_update_interval: Duration,
+    tracked_chain_ids: Vec<u64>,
 }
 
 impl EventProofReadyChecker {
@@ -111,6 +114,9 @@ impl EventProofReadyChecker {
             //     is_l2: true,
             // },
         ];
+        
+        // Store chain IDs for easy access later in the start loop
+        let tracked_chain_ids: Vec<u64> = chain_configs.iter().map(|c| c.chain_id).collect();
         
         // Start the background task to update block numbers
         let chain_configs_clone = chain_configs.clone();
@@ -226,64 +232,50 @@ impl EventProofReadyChecker {
             db,
             poll_interval,
             block_update_interval,
+            tracked_chain_ids,
         }
     }
 
     pub async fn start(&self) -> Result<()> {
-        info!("Starting event proof ready checker");
+        info!("Starting event proof ready checker with optimized DB query");
         
         let mut interval = interval(self.poll_interval);
         
         loop {
             interval.tick().await;
             
-            // Get all processed events
-            let events = self.db.get_processed_events().await?;
-            
-            let mut ready_to_update_hashes: Vec<TxHash> = Vec::new();
-
-            for event in events {
-                // Check if the event is ready to request a proof
-                if let Some(_received_at_block) = event.received_at_block {
-                    if let Some(should_request_proof_at_block) = event.should_request_proof_at_block {
-                        // Get the current block number for the event's chain
-                        let current_block = if let Some(chain_id) = event.src_chain_id {
-                            self.get_current_block_number(chain_id as u64).await?
-                        } else {
-                            // Default to Ethereum Sepolia if no chain ID is specified
-                            panic!("No chain ID specified for event: {:?}", event);
-                        };
-                        
-                        // If we've reached or passed the block where we should request a proof
-                        if current_block >= should_request_proof_at_block {
-                            info!(
-                                "Event {} is ready for proof request. Current block: {}, Target block: {}",
-                                event.tx_hash, current_block, should_request_proof_at_block
-                            );
-                            ready_to_update_hashes.push(event.tx_hash);
+            // 1. Get current block numbers for tracked chains
+            let mut current_block_map = HashMap::new();
+            {
+                let block_numbers_lock = BLOCK_NUMBERS.lock().unwrap();
+                for &chain_id in &self.tracked_chain_ids {
+                    if let Some(atomic_block) = block_numbers_lock.get(&chain_id) {
+                        let block_num = atomic_block.load(Ordering::SeqCst);
+                        if block_num > 0 { // Only include chains where we have a valid block number
+                           current_block_map.insert(chain_id, block_num);
                         }
+                    } else {
+                        warn!("No block number found in map for tracked chain ID: {}", chain_id);
                     }
                 }
-            }
+            } // Lock released here
 
-            // Batch update the status for ready events
-            if !ready_to_update_hashes.is_empty() {
-                let count = ready_to_update_hashes.len();
-                if let Err(e) = self.db.set_events_to_ready_to_request_proof(&ready_to_update_hashes).await {
-                    error!("Failed to batch update {} events to ReadyToRequestProof: {:?}", count, e);
+            if current_block_map.is_empty() {
+                debug!("No valid current block numbers available yet, skipping DB update.");
+                continue;
+            }
+            
+            // 2. Call the optimized database function
+            match self.db.update_events_to_ready_status(&current_block_map).await {
+                Ok(_) => { /* Success logged within the DB function */ }
+                Err(e) => {
+                    error!("Failed to update events to ready status: {:?}", e);
+                    // Decide on error handling: continue, break, retry?
                 }
             }
         }
-    }
-    
-    async fn get_current_block_number(&self, chain_id: u64) -> Result<i32> {
-        // Get the current block number from the shared state
-        if let Some(atomic) = BLOCK_NUMBERS.lock().unwrap().get(&chain_id) {
-            Ok(atomic.load(Ordering::SeqCst))
-        } else {
-            // If the chain ID is not in the map, return a default value
-            Ok(0)
-        }
+        // Note: The loop never exits in this structure, similar to before.
+        // Ok(()) // Unreachable
     }
     
     pub fn get_block_number(&self, chain_id: u64) -> i32 {
