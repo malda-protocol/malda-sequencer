@@ -15,7 +15,6 @@ pub const PROOF_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 pub const MAX_TX_RETRIES: u32 = 3;
 pub const TX_RETRY_DELAY: Duration = Duration::from_secs(1);
-pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 
 // Gas configurations
 pub const GAS_MULTIPLIER: f64 = 1.1;
@@ -42,6 +41,9 @@ pub const WS_URL_BASE_SEPOLIA: &str =
     "ws://localhost:8553";
 pub const WS_URL_LINEA_SEPOLIA: &str =
     "ws://localhost:8554";
+// pub const WS_URL_LINEA_SEPOLIA: &str =
+//     "wss://linea-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+
 
 // Sequencer configuration
 pub const SEQUENCER_ADDRESS: Address = address!("2693946791da99dA78Ac441abA6D5Ce2Bccd96D3");

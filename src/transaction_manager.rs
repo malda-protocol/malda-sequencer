@@ -21,7 +21,7 @@ type Bytes4 = FixedBytes<4>;
 use malda_rs::constants::*;
 
 use crate::{
-    constants::{BATCH_SUBMITTER, SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY, TX_TIMEOUT},
+    constants::{BATCH_SUBMITTER, SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY},
     create_provider,
     events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
@@ -35,11 +35,19 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone)]
-pub struct TransactionConfig {
+pub struct ChainConfig {
     pub max_retries: u128,
     pub retry_delay: Duration,
-    pub rpc_urls: Vec<(u32, String, u64)>, // (chain_id, url, submission_delay_seconds)
+    pub rpc_url: String,
+    pub submission_delay_seconds: u64,
     pub poll_interval: Duration,
+    pub max_tx: i64, // Maximum number of transactions to process per batch
+    pub tx_timeout: Duration, // Chain-specific transaction timeout
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionConfig {
+    pub chain_configs: HashMap<u32, ChainConfig>, // Map of chain_id to its config
 }
 
 pub struct TransactionManager {
@@ -57,7 +65,7 @@ impl std::fmt::Debug for TransactionManager {
 
 impl TransactionManager {
     pub fn new(config: TransactionConfig, db: Database) -> Self {
-        info!("Initializing TransactionManager with config: {:?}", config);
+        info!("Initializing TransactionManager with config for chains: {:?}", config.chain_configs.keys());
         Self {
             config,
             db,
@@ -65,297 +73,108 @@ impl TransactionManager {
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        info!("Starting transaction manager with poll interval: {:?}", self.config.poll_interval);
+        info!("Starting transaction manager with {} chains", self.config.chain_configs.len());
+
+        // Create a task for each chain
+        let mut chain_tasks = Vec::new();
+        for (chain_id, chain_config) in &self.config.chain_configs {
+            let config = self.config.clone();
+            let db = self.db.clone();
+            let chain_id = *chain_id;
+            
+            chain_tasks.push(tokio::spawn(async move {
+                info!("Starting chain processor for chain {}", chain_id);
+                Self::process_chain(chain_id, &config, &db).await
+            }));
+        }
+
+        // Wait for all chain processors to complete (they shouldn't unless there's an error)
+        futures::future::join_all(chain_tasks).await;
+        Ok(())
+    }
+
+    async fn process_chain(chain_id: u32, config: &TransactionConfig, db: &Database) -> Result<()> {
+        let chain_config = config.chain_configs.get(&chain_id)
+            .ok_or_else(|| eyre::eyre!("No config found for chain {}", chain_id))?;
 
         loop {
             let poll_start = Instant::now();
-            // info!("Starting new poll cycle");
-
-            // Get all events with ProofReceived status from the database
-            match self.db.get_proven_events(self.config.poll_interval.as_secs() as i64).await {
+            
+            // Get events for this specific chain
+            match db.get_proven_events_for_chain(
+                chain_config.submission_delay_seconds as i64,
+                chain_id,
+                chain_config.max_tx,
+            ).await {
                 Ok(events) => {
                     if !events.is_empty() {
-                        info!("Found {} proven events to process", events.len());
-                        // Log chain distribution of events
-                        let chain_counts: HashMap<u32, usize> = events.iter()
-                            .map(|e| (e.dst_chain_id.unwrap_or(0) as u32, 1))
-                            .fold(HashMap::new(), |mut acc, (chain, count)| {
-                                *acc.entry(chain).or_insert(0) += count;
-                                acc
-                            });
-                        info!("Event distribution by chain: {:?}", chain_counts);
-                        trace!("Proven events details: {:?}", events);
+                        info!("Found {} proven events to process for chain {}", events.len(), chain_id);
                         
-                        // Process the events and check the result
-                        match self.process_events(events).await {
-                            Ok(_) => {
-                                info!("Successfully processed batch of events");
+                        // Get start index from first event
+                        let start_idx = events[0].journal_index.unwrap_or(0) as u64;
+                        
+                        // Process the batch
+                        match Self::process_chain_batch(
+                            db,
+                            &events,
+                            start_idx,
+                            chain_id,
+                            chain_config,
+                        ).await {
+                            Ok(tx_hash) => {
+                                info!("Successfully processed batch for chain {}: hash={:?}", chain_id, tx_hash);
+                                // Update events to BatchIncluded status with the transaction hash
+                                if let Err(e) = db.update_batch_status(
+                                    &events.iter().map(|e| e.tx_hash).collect(),
+                                    Some(tx_hash.to_string()),
+                                    Some(Utc::now()),
+                                    None,
+                                    EventStatus::BatchIncluded,
+                                ).await {
+                                    error!("Failed to update batch status to BatchIncluded: {}", e);
+                                }
                             }
                             Err(e) => {
-                                error!("Failed to process events: {}", e);
+                                error!("Failed to process batch for chain {}: {}", chain_id, e);
+                                // Update events to BatchFailed status with the error message
+                                if let Err(e) = db.update_batch_status(
+                                    &events.iter().map(|e| e.tx_hash).collect(),
+                                    None,
+                                    None,
+                                    Some(e.to_string()),
+                                    EventStatus::BatchFailed { error: e.to_string() },
+                                ).await {
+                                    error!("Failed to update batch status to BatchFailed: {}", e);
+                                }
                             }
                         }
                     } else {
-                        debug!("No proven events found in this poll cycle");
+                        debug!("No proven events found for chain {} in this poll cycle", chain_id);
+                        sleep(chain_config.poll_interval).await;
                     }
                 }
                 Err(e) => {
-                    error!("Failed to get proven events from database: {}", e);
+                    error!("Failed to get proven events for chain {}: {}", chain_id, e);
                 }
             }
 
             let poll_duration = poll_start.elapsed();
-            debug!("Poll cycle completed in {:?}", poll_duration);
+            debug!("Poll cycle completed for chain {} in {:?}", chain_id, poll_duration);
             
-            // Wait before next poll
-            // info!("Waiting {:?} before next poll cycle", self.config.poll_interval);
-            // sleep(self.config.poll_interval).await;
-        }
-    }
-
-    async fn process_events(&self, events: Vec<EventUpdate>) -> Result<()> {
-        let process_start = Instant::now();
-        info!("Starting to process {} events", events.len());
-
-        // Sort events by journal_index to maintain the same order as in the proof generator
-        let mut sorted_events = events;
-        sorted_events.sort_by_key(|event| event.journal_index.unwrap_or(0));
-        
-        debug!("Events sorted by journal index");
-        trace!("Sorted events: {:?}", sorted_events);
-        
-        // Group events by destination chain ID and track both start and end indices
-        let mut chain_indices: HashMap<u32, (usize, usize)> = HashMap::new();
-        let mut current_chain_id = None;
-        let mut current_start_idx = 0;
-        
-        // Find the start and end indices for each chain
-        for (idx, event) in sorted_events.iter().enumerate() {
-            let dst_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
+            // Wait for the chain-specific poll interval
             
-            // Check if we're switching to a new chain
-            if current_chain_id != Some(dst_chain_id) {
-                // If we've seen this chain before, update its end index
-                if let Some(chain_id) = current_chain_id {
-                    chain_indices.insert(chain_id, (current_start_idx, idx));
-                    debug!("Chain {} events from index {} to {}", chain_id, current_start_idx, idx);
-                }
-                
-                current_chain_id = Some(dst_chain_id);
-                current_start_idx = idx;
-                info!("Found new chain {} starting at index {}", dst_chain_id, idx);
-            }
         }
-        
-        // Don't forget to add the last chain with the end index being the length of sorted_events
-        if let Some(chain_id) = current_chain_id {
-            chain_indices.insert(chain_id, (current_start_idx, sorted_events.len()));
-            debug!("Chain {} events from index {} to {}", chain_id, current_start_idx, sorted_events.len());
-        }
-        
-        info!("Events grouped by {} different chains", chain_indices.len());
-        info!("Chain indices: {:?}", chain_indices);
-        
-        // Verify that each event is assigned to the correct chain
-        for (chain_id, (start_idx, end_idx)) in &chain_indices {
-            for idx in *start_idx..*end_idx {
-                let event_chain_id = sorted_events[idx].dst_chain_id.unwrap_or(0) as u32;
-                if event_chain_id != *chain_id {
-                    error!("Event at index {} has chain ID {} but is in group for chain {}", 
-                           idx, event_chain_id, chain_id);
-                    return Err(eyre::eyre!("Event at index {} has chain ID {} but is in group for chain {}", 
-                                         idx, event_chain_id, chain_id));
-                }
-            }
-        }
-        
-        let mut chain_tasks = Vec::new();
-        let config = self.config.clone();
-        let db = self.db.clone();
-        
-        // Process one batch per chain
-        for (chain_id, (start_idx, end_idx)) in &chain_indices {
-            // Get the slice of events for this chain
-            let chain_events = &sorted_events[*start_idx..*end_idx];
-            
-            info!("Processing chain {} with {} events (indices {} to {})", 
-                  chain_id, chain_events.len(), start_idx, end_idx - 1);
-            
-            // Clone the values we need for the async task
-            let chain_id = *chain_id;
-            let start_idx = *start_idx;
-            let chain_events = chain_events.to_vec(); // Clone the slice to own it
-            let config = config.clone();
-            let db = db.clone();
-            
-            chain_tasks.push(tokio::spawn(async move {
-                let task_start = Instant::now();
-                info!("Starting batch processing task for chain {}", chain_id);
-                
-                match Self::process_chain_batch(
-                    &db,
-                    &chain_events,
-                    start_idx,
-                    chain_events.len(),
-                    chain_id,
-                    &config,
-                ).await {
-                    Ok(tx_hash) => {
-                        let duration = task_start.elapsed();
-                        info!(
-                            "Batch transaction completed for chain {}: hash={:?}, events={}, start_idx={}, duration={:?}",
-                            chain_id, tx_hash, chain_events.len(), start_idx, duration
-                        );
-                    }
-                    Err(e) => {
-                        let duration = task_start.elapsed();
-                        error!(
-                            "Batch processing failed for chain {} after {:?}: {}",
-                            chain_id, duration, e
-                        );
-                    }
-                }
-            }));
-        }
-
-        // Wait for all chain transactions to complete
-        if !chain_tasks.is_empty() {
-            info!("Waiting for {} chain batch tasks to complete", chain_tasks.len());
-            join_all(chain_tasks).await;
-            info!("All chain batch tasks completed");
-        } else {
-            warn!("No chain tasks were created despite having events to process");
-        }
-
-        let process_duration = process_start.elapsed();
-        info!("Completed processing all events in {:?}", process_duration);
-
-        Ok(())
-    }
-
-    async fn get_provider_for_chain(
-        chain_id: u32,
-        config: &TransactionConfig,
-    ) -> Result<ProviderType> {
-        debug!("Getting provider for chain {}", chain_id);
-        
-        // Log all configured RPC URLs for debugging
-        debug!("Configured RPC URLs: {:?}", config.rpc_urls);
-        
-        let rpc_url = config
-            .rpc_urls
-            .iter()
-            .find(|(id, _, _)| *id == chain_id)
-            .map(|(_, url, _)| url.clone())
-            .ok_or_else(|| eyre::eyre!("No RPC URL configured for chain {}", chain_id))?;
-
-        debug!("Found RPC URL for chain {}: {}", chain_id, rpc_url);
-        let url = Url::parse(&rpc_url)?;
-        
-        // Log the URL components for verification
-        debug!("Parsed URL for chain {}: scheme={}, host={}, path={}", 
-               chain_id, url.scheme(), url.host_str().unwrap_or("unknown"), url.path());
-        
-        let provider = create_provider(url, SEQUENCER_PRIVATE_KEY)
-            .await
-            .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))?;
-            
-        info!("Successfully created provider for chain {}", chain_id);
-        Ok(provider)
     }
 
     async fn process_chain_batch(
         db: &Database,
         events: &Vec<EventUpdate>,
-        start_idx: usize,
-        _end_idx: usize,
+        start_idx: u64,
         chain_id: u32,
-        config: &TransactionConfig,
+        chain_config: &ChainConfig,
     ) -> Result<TxHash> {
         let batch_start = Instant::now();
         info!("Starting batch processing for chain {} with {} events", chain_id, events.len());
-        
-        // Verify that all events have the correct destination chain ID
-        for (idx, event) in events.iter().enumerate() {
-            let event_chain_id = event.dst_chain_id.unwrap_or(0) as u32;
-            if event_chain_id != chain_id {
-                error!("Event at index {} has chain ID {} but is being processed for chain {}", 
-                       idx, event_chain_id, chain_id);
-                return Err(eyre::eyre!("Event at index {} has chain ID {} but is being processed for chain {}", 
-                                     idx, event_chain_id, chain_id));
-            }
-        }
-
-        // Get the submission delay for this chain
-        let submission_delay = config
-            .rpc_urls
-            .iter()
-            .find(|(id, _, _)| *id == chain_id)
-            .map(|(_, _, delay)| *delay)
-            .unwrap_or(5); // Default to 5 seconds if not configured
-
-        debug!("Using submission delay of {} seconds for chain {}", submission_delay, chain_id);
-
-        // Try to acquire the processing lock for this chain
-        let wait_time = {
-            let mut processing_locks = PROCESSING_LOCKS.lock().unwrap();
-            let now = Utc::now();
-
-            // Check if chain is currently being processed
-            if let Some(lock_time) = processing_locks.get(&chain_id) {
-                let elapsed = now.signed_duration_since(*lock_time);
-                if elapsed.num_seconds() < submission_delay as i64 {
-                    // Chain is being processed, wait another full delay
-                    info!("Chain {} is currently being processed, will wait {} seconds", chain_id, submission_delay);
-                    submission_delay as i64
-                } else {
-                    debug!("Previous lock for chain {} has expired", chain_id);
-                    0
-                }
-            } else {
-                debug!("No existing lock found for chain {}", chain_id);
-                0
-            }
-        };
-
-        // Wait if needed
-        if wait_time > 0 {
-            info!("Waiting {} seconds before submitting next batch on chain {}", wait_time, chain_id);
-            sleep(Duration::from_secs(wait_time as u64)).await;
-        }
-
-        // Acquire the lock before proceeding
-        {
-            let mut processing_locks = PROCESSING_LOCKS.lock().unwrap();
-            processing_locks.insert(chain_id, Utc::now());
-            debug!("Acquired processing lock for chain {}", chain_id);
-        }
-
-        // Detailed error handling for provider creation
-        let provider = match Self::get_provider_for_chain(chain_id, config).await {
-            Ok(p) => {
-                info!("Successfully created provider for chain {}", chain_id);
-                p
-            },
-            Err(e) => {
-                error!("Failed to create provider for chain {}: {}", chain_id, e);
-                // Update events to failed status due to provider creation error
-                let mut events_to_update = events.clone();
-                for update in &mut events_to_update {
-                    update.status = EventStatus::BatchFailed {
-                        error: format!("Failed to create provider: {}", e),
-                    };
-                    update.batch_submitted_at = Some(Utc::now());
-                }
-                if let Err(db_err) = db.update_finished_events(&events_to_update).await {
-                    error!("Failed to update events after provider error for chain {}: {:?}", chain_id, db_err);
-                }
-                return Err(e);
-            }
-        };
-
-        info!("Creating batch submitter for chain {}", chain_id);
-        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
 
         // Collect all data for the batch
         let mut receivers = Vec::new();
@@ -368,21 +187,12 @@ impl TransactionManager {
         let journal_data = events[0].journal.clone().unwrap_or_default();
         let seal = events[0].seal.clone().unwrap_or_default();
 
-        info!("Processing batch for chain {}: journal_size={}, seal_size={}", 
-              chain_id, journal_data.len(), seal.len());
-
         // Collect data for the batch
-        for (idx, event) in events.iter().enumerate() {
-            trace!("Processing batch on chain {}: index {} with target chain {}", chain_id, idx, event.dst_chain_id.unwrap_or(0));
-            if event.journal != Some(journal_data.clone()) || event.seal != Some(seal.clone()) {
-                error!("Event {} for chain {} has different journal or seal", idx, chain_id);
-                return Err(eyre::eyre!("Event {} for chain {} has different journal or seal", idx, chain_id));
-            }
+        for event in events {
             receivers.push(event.msg_sender.unwrap_or_default());
             markets.push(event.market.unwrap_or_default());
             amounts.push(event.amount.unwrap_or_default());
             selectors.push(match chain_id {
-                // For Linea chain, use the method-specific selector
                 chain_id if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 => {
                     match event.target_function.as_deref().unwrap_or("outHere") {
                         "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
@@ -394,12 +204,10 @@ impl TransactionManager {
                         }
                     }
                 }
-                // For all other chains, always use outHere
                 _ => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
             });
             init_hashes.push(event.tx_hash.into());
         }
-
 
         let min_amounts_out = vec![U256::from(0); amounts.len()];
 
@@ -412,7 +220,7 @@ impl TransactionManager {
             minAmountsOut: min_amounts_out,
             selectors: selectors.clone(),
             initHashes: init_hashes,
-            startIndex: U256::from(start_idx as u64),
+            startIndex: U256::from(start_idx),
         };
 
         info!("Selectors: {:?}", selectors.clone());
@@ -426,8 +234,6 @@ impl TransactionManager {
             msg.mTokens,
             events.len()
         );
-
-        let batch_submitted_at = Utc::now();
         
         // Retry loop for transaction submission
         let mut retry_count = 0u128;
@@ -435,34 +241,29 @@ impl TransactionManager {
         let mut last_error = None;
 
         let percent_increase_per_retry_numerator = 20u128;
+
+        let provider = Self::get_provider_for_chain(chain_id, chain_config).await?;
+        let nonce = provider.get_transaction_count(SEQUENCER_ADDRESS).await.unwrap();
+        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
+
+        let batch_submitted_at = Utc::now();
         
-        while retry_count < config.max_retries {
-            info!("Starting retry attempt {}/{} for chain {}", retry_count + 1, config.max_retries, chain_id);
+        while retry_count < chain_config.max_retries {
+            // Get the provider for this chain
+
+
+            info!("Starting retry attempt {}/{} for chain {}", retry_count + 1, chain_config.max_retries, chain_id);
             
             // Create the action for this attempt
             let action = batch_submitter.batchProcess(msg.clone()).from(SEQUENCER_ADDRESS);
             
             // Estimate gas for this attempt with proper error handling
-            info!("Estimating gas for chain {} (attempt {}/{})", chain_id, retry_count + 1, config.max_retries);
             let gas_estimation_result = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
-                info!("Using Linea gas estimation for chain {}", chain_id);
                 linea_estimate_gas(&provider, action.calldata().to_vec()).await
             } else {
                 // For non-Linea chains, estimate gas and get base fee
-                info!("Using standard gas estimation for chain {}", chain_id);
                 let gas_result = action.estimate_gas().await;
                 let base_fee_result = provider.get_gas_price().await;
-                
-                // Log gas estimation results
-                match &gas_result {
-                    Ok(gas) => info!("Gas estimation successful: {}", gas),
-                    Err(e) => warn!("Gas estimation failed: {}", e),
-                }
-                
-                match &base_fee_result {
-                    Ok(fee) => info!("Gas price query successful: {}", fee),
-                    Err(e) => warn!("Gas price query failed: {}", e),
-                }
                 
                 // Combine results with proper error handling
                 match (gas_result, base_fee_result) {
@@ -478,15 +279,14 @@ impl TransactionManager {
 
             let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match gas_estimation_result {
                 Ok(result) => {
-                    info!("Successfully estimated gas for chain {}", chain_id);
                     result
                 },
                 Err(e) => {
                     error!("Gas estimation failed for chain {}: {}", chain_id, e);
                     last_error = Some(e.to_string());
                     // Wait before retrying
-                    info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                    sleep(config.retry_delay).await;
+                    info!("Waiting {:?} before retry attempt {}/{}", chain_config.retry_delay, retry_count + 1, chain_config.max_retries);
+                    sleep(chain_config.retry_delay).await;
                     retry_count += 1;
                     continue;
                 }
@@ -494,80 +294,47 @@ impl TransactionManager {
             
             let max_fee_per_gas = max_fee_per_gas * (1 + retry_count) * (100 + percent_increase_per_retry_numerator) / 100;
             let max_priority_fee_per_gas = max_priority_fee_per_gas * (1 + retry_count) * (100 + percent_increase_per_retry_numerator) / 100;
-            info!(
-                "Gas estimation for chain {}: limit={}, max_fee={}, max_priority={}",
-                chain_id, gas_limit, max_fee_per_gas, max_priority_fee_per_gas
-            );
             
             // Send the transaction and get pending transaction with proper error handling
             info!("Attempting to send transaction for chain {} (attempt {}/{})", 
-                  chain_id, retry_count + 1, config.max_retries);
+                  chain_id, retry_count + 1, chain_config.max_retries);
             
-            let tx_send_result = action.gas(gas_limit)
+            let pending_tx = match action.gas(gas_limit)
                 .max_fee_per_gas(max_fee_per_gas)
                 .max_priority_fee_per_gas(max_priority_fee_per_gas)
                 .from(SEQUENCER_ADDRESS)
+                .nonce(nonce)
                 .send()
-                .await;
-                
-            let pending_tx = match tx_send_result {
-                Ok(tx) => {
-                    info!("Transaction successfully sent for chain {}", chain_id);
-                    tx
-                },
-                Err(e) => {
-                    error!("Transaction submission failed for chain {}: {}", chain_id, e);
-                    last_error = Some(e.to_string());
-                    // Wait before retrying
-                    info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                    sleep(config.retry_delay).await;
-                    retry_count += 1;
-                    continue;
-                }
-            };
+                .await {
+                    Ok(tx) => {
+                        info!("Transaction successfully sent for chain {}", chain_id);
+                        tx
+                    },
+                    Err(e) => {
+                        error!("Transaction submission failed for chain {}: {}", chain_id, e);
+                        last_error = Some(e.to_string());
+                        // Wait before retrying
+                        info!("Waiting {:?} before retry attempt {}/{}", chain_config.retry_delay, retry_count + 1, chain_config.max_retries);
+                        sleep(chain_config.retry_delay).await;
+                        retry_count += 1;
+                        continue;
+                    }
+                };
                 
             tx_hash = Some(pending_tx.tx_hash().clone());
 
             info!("Submitted batch transaction for chain {}: hash={:?} (attempt {}/{})", 
-                  chain_id, tx_hash, retry_count + 1, config.max_retries);
+                  chain_id, tx_hash, retry_count + 1, chain_config.max_retries);
 
             // Wait for transaction confirmation
-            info!("Watching transaction with timeout {:?} for chain {}: hash={:?}", 
-                  TX_TIMEOUT, chain_id, tx_hash);
-                  
-            let watch_result = pending_tx.with_timeout(Some(TX_TIMEOUT)).watch().await;
-            
-            match watch_result {
+            match pending_tx.with_timeout(Some(chain_config.tx_timeout)).watch().await {
                 Ok(hash) => {
                     info!("Batch transaction confirmed for chain {}: hash={:?}", chain_id, hash);
 
-                    info!("Getting receipt for confirmed transaction on chain {}", chain_id);
-                    let receipt_result = provider.get_transaction_receipt(hash).await;
-                    
-                    let receipt = match receipt_result {
-                        Ok(Some(r)) => {
-                            info!("Receipt obtained for transaction on chain {}", chain_id);
-                            r
-                        },
-                        Ok(None) => {
-                            error!("Transaction receipt not found for chain {}: hash={:?}", chain_id, hash);
-                            last_error = Some("Transaction receipt not found".to_string());
-                            // Wait before retrying
-                            info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                            sleep(config.retry_delay).await;
-                            retry_count += 1;
-                            continue;
-                        },
-                        Err(e) => {
-                            error!("Failed to get transaction receipt for chain {}: {}", chain_id, e);
-                            last_error = Some(format!("Failed to get receipt: {}", e));
-                            // Wait before retrying
-                            info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                            sleep(config.retry_delay).await;
-                            retry_count += 1;
-                            continue;
-                        }
-                    };
+                    let receipt = provider
+                        .get_transaction_receipt(hash)
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("Transaction receipt not found"))?;
 
                     // Check transaction status
                     if receipt.status() == true {
@@ -578,45 +345,11 @@ impl TransactionManager {
                             receipt.gas_used(),
                             batch_start.elapsed()
                         );
-                        
-                        // Create a mutable copy of the events to update
-                        let mut events_to_update = events.clone();
-                        for update in &mut events_to_update {
-                            update.status = EventStatus::BatchIncluded;
-                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
-                            update.batch_included_at = Some(Utc::now());
-                            update.batch_submitted_at = Some(batch_submitted_at);
-                        }
-        
-                        if let Err(e) = db.update_finished_events(&events_to_update).await {
-                            error!("Failed to update events for chain {}: {:?}", chain_id, e);
-                        } else {
-                            info!("Successfully updated {} events for chain {}", events.len(), chain_id);
-                        }
-                        
-                        // Success - break out of retry loop
+
                         break;
                     } else {
                         // Transaction reverted
                         error!("Transaction reverted for chain {}: hash={:?}", chain_id, hash);
-
-                        // Create a mutable copy of the events to update
-                        let mut events_to_update = events.clone();
-                        for update in &mut events_to_update {
-                            update.status = EventStatus::BatchFailed {
-                                error: "Transaction reverted".to_string(),
-                            };
-                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
-                            update.batch_submitted_at = Some(batch_submitted_at);
-                        }
-
-                        if let Err(e) = db.update_finished_events(&events_to_update).await {
-                            error!("Failed to update reverted events for chain {}: {:?}", chain_id, e);
-                        } else {
-                            info!("Updated {} reverted events for chain {}", events.len(), chain_id);
-                        }
-                        
-                        // Reverted - break out of retry loop
                         break;
                     }
                 }
@@ -626,26 +359,12 @@ impl TransactionManager {
                            chain_id, e, batch_start.elapsed(), tx_hash);
                     
                     // If we've reached max retries, update the events as failed
-                    if retry_count == config.max_retries - 1 {
-                        // Create a mutable copy of the events to update
-                        let mut events_to_update = events.clone();
-                        for update in &mut events_to_update {
-                            update.status = EventStatus::BatchFailed {
-                                error: format!("Transaction error after {} retries: {}", config.max_retries, e),
-                            };
-                            update.batch_tx_hash = Some(tx_hash.unwrap().to_string());
-                            update.batch_submitted_at = Some(batch_submitted_at);
-                        }
-
-                        if let Err(db_err) = db.update_finished_events(&events_to_update).await {
-                            error!("Failed to update failed events for chain {}: {:?}", chain_id, db_err);
-                        } else {
-                            info!("Updated {} failed events for chain {}", events.len(), chain_id);
-                        }
+                    if retry_count == chain_config.max_retries - 1 {
+                        break;
                     } else {
                         // Wait before retrying
-                        info!("Waiting {:?} before retry attempt {}/{}", config.retry_delay, retry_count + 2, config.max_retries);
-                        sleep(config.retry_delay).await;
+                        info!("Waiting {:?} before retry attempt {}/{}", chain_config.retry_delay, retry_count + 1, chain_config.max_retries);
+                        sleep(chain_config.retry_delay).await;
                     }
                 }
             }
@@ -662,13 +381,24 @@ impl TransactionManager {
                 let error_msg = format!(
                     "Failed to submit transaction for chain {} after {} retries: {}", 
                     chain_id, 
-                    config.max_retries,
+                    chain_config.max_retries,
                     last_error.unwrap_or_else(|| "Unknown error".to_string())
                 );
                 error!("{}", error_msg);
                 Err(eyre::eyre!(error_msg))
             }
         }
+    }
+
+    async fn get_provider_for_chain(
+        chain_id: u32,
+        chain_config: &ChainConfig,
+    ) -> Result<ProviderType> {
+        let url = Url::parse(&chain_config.rpc_url)?;
+        let provider = create_provider(url, SEQUENCER_PRIVATE_KEY)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))?;
+        Ok(provider)
     }
 }
 
@@ -769,5 +499,9 @@ mod tests {
             .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
             .ok_or_else(|| eyre::eyre!("Failed to parse priorityFeePerGas"))?;
 
-        Ok(( 150 * gas_limit / 100, base_fee_per_gas + priority_fee_per_gas, priority_fee_per_gas))
+        let default_increase_percentage: u128 = 20;
+        let increased_gas_limit = ((100 + default_increase_percentage) * gas_limit as u128 / 100) as u64;
+        let increased_base_fee_per_gas = (100 + default_increase_percentage) * (base_fee_per_gas + priority_fee_per_gas) / 100;
+        let increased_priority_fee_per_gas = (100 + default_increase_percentage) * priority_fee_per_gas / 100;
+        Ok((increased_gas_limit, increased_base_fee_per_gas, increased_priority_fee_per_gas))
     }
