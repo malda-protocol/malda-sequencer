@@ -39,8 +39,8 @@ use std::env;
 
 mod event_proof_ready_checker;
 use event_proof_ready_checker::EventProofReadyChecker;
+use crate::transaction_manager::ChainConfig;
 
-pub const TX_TIMEOUT: Duration = Duration::from_secs(30);
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
 type ProviderType = alloy::providers::fillers::FillProvider<
@@ -142,10 +142,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             chain_id, BATCH_SUBMITTER
         );
 
+        let block_delay = if ws_url == WS_URL_LINEA_SEPOLIA || ws_url == WS_URL_ETH_SEPOLIA {
+            2
+        } else {
+            5
+        };
+
         let config = BatchEventConfig {
             ws_url: ws_url.to_string(),
             batch_submitter: BATCH_SUBMITTER,
             chain_id,
+            block_delay,  // Process events with 2 block delay
         };
 
         let db = db.clone();
@@ -250,32 +257,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         batch_limit_per_dst,
     );
 
-    // Add the config before creating TransactionManager
-    let tx_config = TransactionConfig {
-        max_retries: 3,
-        retry_delay: Duration::from_secs(1),
-        rpc_urls: vec![
-            (
-                ETHEREUM_SEPOLIA_CHAIN_ID as u32,
-                rpc_url_ethereum_sepolia().to_string(),
-                12, // 5 seconds delay for Ethereum Sepolia
-            ),
-            (
-                OPTIMISM_SEPOLIA_CHAIN_ID as u32,
-                "https://sepolia.optimism.io".to_string(),
-                2, // 5 seconds delay for Optimism Sepolia
-            ),
-            (
-                LINEA_SEPOLIA_CHAIN_ID as u32,
-                rpc_url_linea_sepolia().to_string(),
-                2, // 5 seconds delay for Linea Sepolia
-            ),
-        ],
-        poll_interval: Duration::from_secs(5), // Check for new events every 5 seconds
+    // Create transaction manager configuration
+    let mut chain_configs = HashMap::new();
+    
+    // Configure each chain with its specific settings
+    chain_configs.insert(
+        ETHEREUM_SEPOLIA_CHAIN_ID as u32,
+        ChainConfig {
+            max_retries: 3,
+            retry_delay: Duration::from_secs(2),
+            rpc_url: rpc_url_ethereum_sepolia().to_string(),
+            submission_delay_seconds: 10,
+            poll_interval: Duration::from_secs(5),
+            max_tx: 50,
+            tx_timeout: Duration::from_secs(15),
+        },
+    );
+
+    chain_configs.insert(
+        OPTIMISM_SEPOLIA_CHAIN_ID as u32,
+        ChainConfig {
+            max_retries: 3,
+            retry_delay: Duration::from_secs(1),
+            rpc_url: "https://sepolia.optimism.io".to_string(),
+            submission_delay_seconds: 2,
+            poll_interval: Duration::from_secs(2),
+            max_tx: 50,
+            tx_timeout: Duration::from_secs(10),
+        },
+    );
+
+    chain_configs.insert(
+        LINEA_SEPOLIA_CHAIN_ID as u32,
+        ChainConfig {
+            max_retries: 3,
+            retry_delay: Duration::from_secs(1),
+            rpc_url: rpc_url_linea_sepolia().to_string(),
+            submission_delay_seconds: 2,
+            poll_interval: Duration::from_secs(2),
+            max_tx: 50,
+            tx_timeout: Duration::from_secs(10),
+        },
+    );
+
+    let transaction_config = TransactionConfig {
+        chain_configs: chain_configs.clone(),
     };
 
     // Create transaction manager
-    let mut transaction_manager = TransactionManager::new(tx_config, db.clone());
+    let mut transaction_manager = TransactionManager::new(transaction_config, db.clone());
 
     // Create the event proof ready checker
     let event_proof_ready_checker = EventProofReadyChecker::new(
@@ -349,9 +379,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         database_url.replace("postgres://", "postgres://*****:*****@")
     );
     info!("Markets: {}", markets.len());
-    info!("Chains: {}", chain_configs.len());
+    info!("Chains: {}", chain_configs.clone().len());
     info!("Max proof retries: {}", MAX_PROOF_RETRIES);
-    info!("Transaction timeout: {:?}", TX_TIMEOUT);
     info!("Socket path: {}", UNIX_SOCKET_PATH);
     info!("----------------------------------------------------------");
     info!("All components initialized and running");

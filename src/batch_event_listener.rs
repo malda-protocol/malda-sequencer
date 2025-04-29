@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::Address,
+    primitives::{Address, TxHash},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::Filter,
     transports::http::reqwest::Url,
@@ -23,6 +23,7 @@ pub struct BatchEventConfig {
     pub ws_url: String,
     pub batch_submitter: Address,
     pub chain_id: u64,
+    pub block_delay: u64,  // Number of blocks to delay processing
 }
 
 #[derive(Clone)]
@@ -120,33 +121,47 @@ impl BatchEventListener {
                 }
             };
 
-            // Don't query if we're already up to date
-            if last_processed_block >= current_block {
-                debug!("No new blocks since last poll (block: {})", current_block);
+            // For first run, start from current_block - block_delay
+            if last_processed_block == 0 {
+                last_processed_block = if current_block > self.config.block_delay {
+                    current_block - self.config.block_delay
+                } else {
+                    0
+                };
+                info!("Initializing last_processed_block to {} (current: {}, delay: {})", 
+                      last_processed_block, current_block, self.config.block_delay);
                 continue;
             }
 
-            // Set the from_block to the next block after the last processed one
-            // If this is the first poll, start from current block
-            let from_block = if last_processed_block > 0 {
-                last_processed_block + 1
+            // Don't query if we're already up to date (current_block - block_delay)
+            let target_block = if current_block > self.config.block_delay {
+                current_block - self.config.block_delay
             } else {
                 current_block
             };
 
+            if last_processed_block >= target_block {
+                debug!("No new blocks to process. Last processed: {}, Target: {}, Current: {}, Delay: {}", 
+                       last_processed_block, target_block, current_block, self.config.block_delay);
+                continue;
+            }
+
+            // Set the from_block to the next block after the last processed one
+            let from_block = last_processed_block + 1;
+
             debug!(
-                "Polling for batch events from block {} to {}",
-                from_block, current_block
+                "Processing blocks {} to {} (current: {}, delay: {})",
+                from_block, target_block, current_block, self.config.block_delay
             );
 
             // Update filters to include block range
             let success_range_filter = success_filter.clone()
                 .from_block(from_block)
-                .to_block(current_block);
+                .to_block(target_block);
 
             let failure_range_filter = failure_filter.clone()
                 .from_block(from_block)
-                .to_block(current_block);
+                .to_block(target_block);
 
             // Get success logs for the block range
             let success_logs = match provider.get_logs(&success_range_filter).await {
@@ -171,72 +186,54 @@ impl BatchEventListener {
             //     success_logs.len(),
             //     failure_logs.len(),
             //     from_block, 
-            //     current_block
+            //     target_block
             // );
 
-            let mut success_events: Vec<EventUpdate> = Vec::new();
-            let mut failure_events: Vec<EventUpdate> = Vec::new();
-
             // Process success logs
-            for log in success_logs {
-                let event = parse_batch_process_success_event(&log);
-                let mut event_update = EventUpdate::default();
-                event_update.tx_hash = event.init_hash;
-                event_update.status = EventStatus::TxProcessSuccess;
-                event_update.tx_finished_at = Some(Utc::now());
-                success_events.push(event_update);
-
-                // info!(
-                //     "Found batch process success on chain {}: init_hash={:?}",
-                //     self.config.chain_id, event.init_hash
-                // );
-            }
+            let success_hashes: Vec<TxHash> = success_logs
+                .iter()
+                .map(|log| parse_batch_process_success_event(log).init_hash)
+                .collect();
 
             // Process failure logs
-            for log in failure_logs {
-                let event = parse_batch_process_failed_event(&log);
-                let mut event_update = EventUpdate::default();
-                event_update.tx_hash = event.init_hash;
-                event_update.status = EventStatus::TxProcessFail;
-                event_update.tx_finished_at = Some(Utc::now());
-                failure_events.push(event_update);
-
-                error!(
-                    "Found batch process failed on chain {}: init_hash={:?}, reason={:?}",
-                    self.config.chain_id, event.init_hash, event.reason
-                );
-            }
+            let failure_hashes: Vec<TxHash> = failure_logs
+                .iter()
+                .map(|log| parse_batch_process_failed_event(log).init_hash)
+                .collect();
 
             // Update database with success events if any
-            if !success_events.is_empty() {
-                // info!(
-                //     "Processing batch of {} success events on chain {}",
-                //     success_events.len(),
-                //     self.config.chain_id
-                // );
+            if !success_hashes.is_empty() {
+                info!(
+                    "Processing batch of {} success events on chain {}",
+                    success_hashes.len(),
+                    self.config.chain_id
+                );
                 
-                match self.db.update_finished_events(&success_events).await {
-                    Ok(_) => info!("Successfully wrote {} success events to database", success_events.len()),
-                    Err(e) => error!("Failed to update success events: {:?}", e),
+                if let Err(e) = self.db.update_finished_events(&success_hashes, EventStatus::TxProcessSuccess).await {
+                    error!("Failed to update success events: {:?}", e);
+                } else {
+                    info!("Successfully migrated {} success events to finished_events", success_hashes.len());
                 }
             }
 
             // Update database with failure events if any
-            if !failure_events.is_empty() {
+            if !failure_hashes.is_empty() {
                 info!(
                     "Processing batch of {} failure events on chain {}",
-                    failure_events.len(),
+                    failure_hashes.len(),
                     self.config.chain_id
                 );
                 
-                match self.db.update_finished_events(&failure_events).await {
-                    Ok(_) => info!("Successfully wrote {} failure events to database", failure_events.len()),
-                    Err(e) => error!("Failed to update failure events: {:?}", e),
+                if let Err(e) = self.db.update_finished_events(&failure_hashes, EventStatus::TxProcessFail).await {
+                    error!("Failed to update failure events: {:?}", e);
+                } else {
+                    info!("Successfully migrated {} failure events to finished_events", failure_hashes.len());
                 }
             }
 
             // Update last processed block
-            last_processed_block = current_block;
+            last_processed_block = target_block;
+            // info!("Updated last_processed_block to {}", last_processed_block);
         }
     }
 }
@@ -252,6 +249,7 @@ mod tests {
             ws_url: TEST_WS_URL.to_string(),
             batch_submitter: Address::ZERO,
             chain_id: TEST_CHAIN_ID,
+            block_delay: 2,  // Default test delay
         };
 
         let db = Database::new("postgresql://localhost:5432/test").await?;
