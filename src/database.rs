@@ -10,7 +10,13 @@ use tracing::{debug, warn};
 use hex; // Ensure hex is imported if used in logs
 use std::time::Duration;
 
-use crate::lane_manager::ChainParams;
+#[derive(Clone)]
+pub struct ChainParams {
+    pub max_volume: i32,
+    pub time_interval: Duration,
+    pub block_delay: u64,
+    pub reorg_protection: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
@@ -790,117 +796,125 @@ impl Database {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // First, reset any chains that have exceeded their time interval
-        let rows_affected = query(
+        // Convert market prices to a format usable in SQL
+        let market_price_pairs: Vec<(String, f64)> = market_prices
+            .iter()
+            .map(|(addr, price)| (addr.to_string(), *price))
+            .collect();
+
+        // Convert chain params to a format usable in SQL
+        let chain_param_pairs: Vec<(i32, i32, i64, i32, i32)> = chain_params
+            .iter()
+            .map(|(chain_id, params)| (
+                *chain_id as i32,
+                params.max_volume,
+                params.time_interval.as_secs() as i64,
+                params.block_delay as i32,
+                params.reorg_protection as i32
+            ))
+            .collect();
+
+        // Single atomic query that:
+        // 1. Resets volumes if time interval exceeded
+        // 2. Calculates dollar amounts using market prices
+        // 3. Updates events and volumes based on thresholds
+        query(
             r#"
-            UPDATE volume_flow
-            SET 
-                dollar_value = 0,
-                last_reset = NOW()
-            WHERE 
-                EXTRACT(EPOCH FROM (NOW() - last_reset)) > $1
+            WITH RECURSIVE
+            -- Convert market prices to a table
+            market_prices(market, price) AS (
+                SELECT * FROM UNNEST($1::text[], $2::float8[])
+            ),
+            -- Convert chain params to a table
+            chain_params(chain_id, max_volume, time_interval, block_delay, reorg_protection) AS (
+                SELECT * FROM UNNEST($3::int[], $4::int[], $5::int8[], $6::int[], $7::int[])
+            ),
+            -- Reset volumes if time interval exceeded
+            reset_volumes AS (
+                UPDATE volume_flow vf
+                SET 
+                    dollar_value = 0,
+                    last_reset = NOW()
+                FROM chain_params cp
+                WHERE vf.chain_id = cp.chain_id
+                  AND EXTRACT(EPOCH FROM (NOW() - vf.last_reset)) > cp.time_interval
+            ),
+            -- Get events with their calculated dollar amounts
+            events_with_dollars AS (
+                SELECT 
+                    e.tx_hash,
+                    e.src_chain_id,
+                    e.received_at_block,
+                    COALESCE(
+                        CASE 
+                            WHEN e.amount IS NOT NULL AND mp.price IS NOT NULL 
+                            THEN e.amount::float8 * mp.price
+                            ELSE 0
+                        END,
+                        0
+                    ) as dollar_amount,
+                    vf.dollar_value as current_volume,
+                    cp.max_volume,
+                    cp.block_delay,
+                    cp.reorg_protection
+                FROM events e
+                LEFT JOIN market_prices mp ON e.market = mp.market
+                LEFT JOIN volume_flow vf ON e.src_chain_id = vf.chain_id
+                LEFT JOIN chain_params cp ON e.src_chain_id = cp.chain_id
+                WHERE e.status = 'Received'::event_status
+                ORDER BY e.src_chain_id, e.received_at ASC
+            ),
+            -- Calculate cumulative volume and determine block delays
+            events_with_volume AS (
+                SELECT 
+                    tx_hash,
+                    src_chain_id,
+                    received_at_block,
+                    dollar_amount,
+                    current_volume,
+                    max_volume,
+                    block_delay,
+                    reorg_protection,
+                    SUM(dollar_amount) OVER (
+                        PARTITION BY src_chain_id 
+                        ORDER BY received_at_block ASC
+                    ) + current_volume as running_volume
+                FROM events_with_dollars
+            ),
+            -- Update events and volumes
+            update_events AS (
+                UPDATE events e
+                SET 
+                    status = 'ReorgSecurityDelay'::event_status,
+                    should_request_proof_at_block = CASE 
+                        WHEN ewv.running_volume > ewv.max_volume 
+                        THEN ewv.received_at_block + ewv.block_delay
+                        ELSE ewv.received_at_block + ewv.reorg_protection
+                    END,
+                    processed_at = NOW()
+                FROM events_with_volume ewv
+                WHERE e.tx_hash = ewv.tx_hash
+            ),
+            -- Update volumes for events that didn't exceed max_volume
+            update_volumes AS (
+                UPDATE volume_flow vf
+                SET dollar_value = ewv.running_volume
+                FROM events_with_volume ewv
+                WHERE vf.chain_id = ewv.src_chain_id
+                  AND ewv.running_volume <= ewv.max_volume
+            )
+            SELECT 1
             "#
         )
-        .bind(chain_params.values().next().map(|params| params.time_interval.as_secs() as i64).unwrap_or(0))
+        .bind(market_price_pairs.iter().map(|(addr, _)| addr.as_str()).collect::<Vec<_>>())
+        .bind(market_price_pairs.iter().map(|(_, price)| *price).collect::<Vec<_>>())
+        .bind(chain_param_pairs.iter().map(|(id, _, _, _, _)| *id).collect::<Vec<_>>())
+        .bind(chain_param_pairs.iter().map(|(_, max, _, _, _)| *max).collect::<Vec<_>>())
+        .bind(chain_param_pairs.iter().map(|(_, _, interval, _, _)| *interval).collect::<Vec<_>>())
+        .bind(chain_param_pairs.iter().map(|(_, _, _, delay, _)| *delay).collect::<Vec<_>>())
+        .bind(chain_param_pairs.iter().map(|(_, _, _, _, protection)| *protection).collect::<Vec<_>>())
         .execute(&mut *tx)
-        .await?
-        .rows_affected();
-
-        if rows_affected > 0 {
-            info!("Reset {} chains' volume due to time interval expiration", rows_affected);
-        }
-
-        // Get all Received events grouped by src_chain_id and ordered by received_at
-        let events = query(
-            r#"
-            SELECT 
-                e.tx_hash,
-                e.src_chain_id,
-                e.amount,
-                e.received_at_block,
-                e.market,
-                v.dollar_value as current_volume
-            FROM events e
-            LEFT JOIN volume_flow v ON e.src_chain_id = v.chain_id
-            WHERE e.status = 'Received'::event_status
-            ORDER BY e.src_chain_id, e.received_at ASC
-            "#
-        )
-        .fetch_all(&mut *tx)
         .await?;
-
-        // Process each event
-        for row in events {
-            let tx_hash: String = row.try_get("tx_hash")?;
-            let src_chain_id: i32 = row.try_get("src_chain_id")?;
-            let amount_str: Option<String> = row.try_get("amount")?;
-            let received_at_block: i32 = row.try_get("received_at_block")?;
-            let current_volume: i32 = row.try_get("current_volume")?;
-            let market_str: Option<String> = row.try_get("market")?;
-
-            // Parse amount if it exists
-            let amount = if let Some(amt_str) = amount_str {
-                amt_str.parse::<f64>().unwrap_or(0.0)
-            } else {
-                0.0
-            };
-
-            // Get market price and calculate dollar amount
-            let dollar_amount = if let Some(market) = market_str.and_then(|m| m.parse::<Address>().ok()) {
-                if let Some(price) = market_prices.get(&market) {
-                    amount * price
-                } else {
-                    warn!("No price found for market {:?}, using amount as is", market);
-                    amount
-                }
-            } else {
-                warn!("Invalid market address, using amount as is");
-                amount
-            };
-
-            // Get chain parameters
-            if let Some(params) = chain_params.get(&(src_chain_id as u32)) {
-                let new_volume = current_volume + dollar_amount as i32;
-                let should_request_proof_at_block = if new_volume > params.max_volume {
-                    // If volume exceeds max, use block_delay
-                    received_at_block + params.block_delay as i32
-                } else {
-                    // Otherwise use reorg_protection
-                    received_at_block + params.reorg_protection as i32
-                };
-
-                // Update the event status and block number
-                query(
-                    r#"
-                    UPDATE events
-                    SET 
-                        status = 'ReorgSecurityDelay'::event_status,
-                        should_request_proof_at_block = $1,
-                        processed_at = NOW()
-                    WHERE tx_hash = $2
-                    "#
-                )
-                .bind(should_request_proof_at_block)
-                .bind(tx_hash)
-                .execute(&mut *tx)
-                .await?;
-
-                // Only update volume if we didn't exceed max_volume
-                if new_volume <= params.max_volume {
-                    query(
-                        r#"
-                        UPDATE volume_flow
-                        SET dollar_value = $1
-                        WHERE chain_id = $2
-                        "#
-                    )
-                    .bind(new_volume)
-                    .bind(src_chain_id)
-                    .execute(&mut *tx)
-                    .await?;
-                }
-            }
-        }
 
         tx.commit().await?;
         Ok(())

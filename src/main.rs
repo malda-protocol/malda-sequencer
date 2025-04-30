@@ -31,8 +31,11 @@ use transaction_manager::{TransactionConfig, TransactionManager};
 mod batch_event_listener;
 use batch_event_listener::{BatchEventConfig, BatchEventListener};
 
+mod lane_manager;
+use lane_manager::{LaneManager, LaneManagerConfig};
+
 use alloy::primitives::TxHash;
-use sequencer::database::{Database, EventStatus, EventUpdate};
+use sequencer::database::{Database, EventStatus, EventUpdate, ChainParams};
 
 use std::collections::HashMap;
 use std::env;
@@ -314,6 +317,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_secs(2), // Update block numbers every 1 second
     );
 
+    // Initialize LaneManager
+    let lane_manager_config = LaneManagerConfig {
+        max_retries: 5,
+        retry_delay_secs: 1,
+        poll_interval_secs: 2,
+        chain_params: {
+            let mut map = HashMap::new();
+            map.insert(
+                LINEA_SEPOLIA_CHAIN_ID as u32,
+                ChainParams {
+                    max_volume: 1000000000,
+                    time_interval: Duration::from_secs(10),
+                    block_delay: 10,
+                    reorg_protection: REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+                }
+            );
+            map.insert(
+                ETHEREUM_SEPOLIA_CHAIN_ID as u32,
+                ChainParams {
+                    max_volume: 1000000000,
+                    time_interval: Duration::from_secs(10),
+                    block_delay: 2,
+                    reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+                }
+            );
+            map.insert(
+                OPTIMISM_SEPOLIA_CHAIN_ID as u32,
+                ChainParams {
+                    max_volume: 1000000000,
+                    time_interval: Duration::from_secs(10),
+                    block_delay: 10,
+                    reorg_protection: REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+                }
+            );
+            map
+        },
+        market_addresses: markets.clone(),
+    };
+
+    let lane_manager = LaneManager::new(lane_manager_config, db.clone());
+    let lane_manager_handle = tokio::spawn(async move {
+        if let Err(e) = lane_manager.start().await {
+            error!("Lane manager error: {:?}", e);
+        }
+    });
+
     // Spawn processors
     let proof_generator_handle = tokio::spawn(async move {
         if let Err(e) = proof_generator.start().await {
@@ -343,7 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Starting new event proof ready checker instance");
 
             // Spawn the checker's start method in its own task
-            let checker_task_handle = tokio::spawn({
+            let _checker_task_handle = tokio::spawn({
                 let checker_to_start = new_checker.clone(); // Clone instance for the task
                 async move {
                     if let Err(e) = checker_to_start.start().await {
@@ -358,8 +407,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Drop the old checker instance (if it exists)
             if let Some(checker) = current_checker.take() {
                 drop(checker);
-                // Optional: Abort the previous checker's task if needed
-                // checker_task_handle.abort(); // Consider if aborting is necessary/safe
             }
 
             // Store the new checker instance
@@ -370,27 +417,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Restarting event proof ready checker...");
         }
     });
-    handles.push(event_proof_ready_checker_handle); // Add the handle for the loop task
-
-    // Log configuration summary
-    info!("----------------- SEQUENCER CONFIGURATION -----------------");
-    info!(
-        "Database: {}",
-        database_url.replace("postgres://", "postgres://*****:*****@")
-    );
-    info!("Markets: {}", markets.len());
-    info!("Chains: {}", chain_configs.clone().len());
-    info!("Max proof retries: {}", MAX_PROOF_RETRIES);
-    info!("Socket path: {}", UNIX_SOCKET_PATH);
-    info!("----------------------------------------------------------");
-    info!("All components initialized and running");
 
     // Wait for all tasks to complete
-    for handle in handles {
-        if let Err(e) = handle.await {
-            error!("Task failed: {:?}", e);
-        }
-    }
+    tokio::try_join!(
+        event_proof_ready_checker_handle,
+        lane_manager_handle,
+    )?;
 
     warn!("Sequencer shutting down");
     Ok(())
