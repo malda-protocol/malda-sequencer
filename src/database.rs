@@ -409,7 +409,7 @@ impl Database {
                 WHERE status = 'ProofReceived'::event_status 
                   AND dst_chain_id = $1 -- Filter by target chain
                   AND journal IS NOT NULL 
-                ORDER BY proof_received_at ASC 
+                ORDER BY received_at ASC 
                 LIMIT 1
             "#)
             .bind(target_dst_chain_id as i32)

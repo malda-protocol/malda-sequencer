@@ -248,7 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All event listeners started");
 
-    let batch_limit_per_dst = 100;
+    let batch_limit = 300;
     // Create proof generator
     let mut proof_generator = ProofGenerator::new(
         MAX_PROOF_RETRIES,
