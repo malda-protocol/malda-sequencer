@@ -253,7 +253,7 @@ impl EventListener {
             market: Some(self.config.market),
             received_at_block: Some(current_block),
             should_request_proof_at_block,
-            status: EventStatus::Processed, // Set to Processed immediately
+            status: EventStatus::Received, // Set to Processed immediately
             received_at: Some(Utc::now()),
             processed_at: Some(Utc::now()),
             ..Default::default()

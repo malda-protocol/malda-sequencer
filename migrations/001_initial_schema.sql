@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS finished_events;
 DROP TABLE IF EXISTS chain_batch_sync;
 DROP TABLE IF EXISTS sync_timestamps;
+DROP TABLE IF EXISTS volume_flow;
 
 DROP TYPE IF EXISTS event_status;
 
@@ -10,6 +11,7 @@ CREATE TYPE event_status AS ENUM (
     'Received',
     'Processed',
     'IncludedInBatch',
+    'ReorgSecurityDelay',
     'ReadyToRequestProof',
     'ProofRequested',
     'ProofReceived',
@@ -36,6 +38,10 @@ CREATE TABLE events (
     journal_index INTEGER,
     journal BYTEA,
     seal BYTEA,
+    bonsai_uuid TEXT,
+    stark_time INTEGER,
+    snark_time INTEGER,
+    total_cycles INTEGER,
     batch_tx_hash TEXT,
     received_at TIMESTAMP WITH TIME ZONE,
     processed_at TIMESTAMP WITH TIME ZONE,
@@ -61,6 +67,10 @@ CREATE TABLE IF NOT EXISTS finished_events (
     received_at_block INTEGER,
     should_request_proof_at_block INTEGER,
     journal_index INTEGER,
+    bonsai_uuid TEXT,
+    stark_time INTEGER,
+    snark_time INTEGER,
+    total_cycles INTEGER,
     batch_tx_hash TEXT,
     received_at TIMESTAMP WITH TIME ZONE,
     processed_at TIMESTAMP WITH TIME ZONE,
@@ -89,6 +99,12 @@ CREATE TABLE chain_batch_sync (
     last_batch_submitted_at TIMESTAMP WITH TIME ZONE
 );
 
+CREATE TABLE volume_flow (
+    chain_id INTEGER PRIMARY KEY,
+    last_reset TIMESTAMP WITH TIME ZONE,
+    dollar_value INTEGER
+);
+
 CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX finished_events_status_idx ON finished_events(status);
 CREATE INDEX idx_events_dst_chain_id ON events(dst_chain_id);
@@ -96,3 +112,6 @@ CREATE INDEX idx_events_dst_chain_id ON events(dst_chain_id);
 -- Grant SELECT permissions to frontend user
 GRANT SELECT ON events TO "Frontend";
 GRANT SELECT ON finished_events TO "Frontend";
+
+GRANT SELECT ON events TO "Analytics";
+GRANT SELECT ON finished_events TO "Analytics";

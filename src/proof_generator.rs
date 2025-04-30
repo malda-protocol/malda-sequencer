@@ -10,6 +10,16 @@ use chrono::Utc;
 
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 
+#[derive(Debug)]
+pub struct ProofInfo {
+    pub journal: Bytes,
+    pub seal: Bytes,
+    pub uuid: String,
+    pub stark_time: i32,
+    pub snark_time: i32,
+    pub total_cycles: i64,
+}
+
 pub struct ProofGenerator {
     max_retries: u32,
     retry_delay: Duration,
@@ -159,7 +169,7 @@ impl ProofGeneratorWorker {
         );
 
         // Generate single proof for all events
-        let (journal, seal) = self.generate_proof_with_retry(
+        let proof_info = self.generate_proof_with_retry(
             users.clone(),
             markets.clone(),
             dst_chain_ids.clone(),
@@ -183,8 +193,12 @@ impl ProofGeneratorWorker {
         if !updates_with_index.is_empty() {
             if let Err(e) = self.db.set_events_proof_received_with_index(
                 &updates_with_index, 
-                &journal, 
-                &seal
+                &proof_info.journal, 
+                &proof_info.seal,
+                &proof_info.uuid,
+                proof_info.stark_time,
+                proof_info.snark_time,
+                proof_info.total_cycles,
             ).await {
                 error!("Failed to update events with proof data and index: {:?}", e);
                 // Consider if we should return error here or just log
@@ -200,7 +214,7 @@ impl ProofGeneratorWorker {
         markets: Vec<Vec<Address>>,
         dst_chain_ids: Vec<Vec<u64>>,
         src_chain_ids: Vec<u64>,
-    ) -> Result<(Bytes, Bytes)> {
+    ) -> Result<ProofInfo> {
         let mut attempts = 0;
         debug!(
             "Starting proof generation attempt for markets={:?}, src_chains={:?}, dst_chains={:?}",
@@ -245,7 +259,14 @@ impl ProofGeneratorWorker {
                         hex::encode(&seal)
                     );
 
-                    return Ok((journal, seal));
+                    return Ok(ProofInfo {
+                        journal,
+                        seal,
+                        uuid: proof_info.uuid,
+                        stark_time: proof_info.stark_time as i32,
+                        snark_time: proof_info.snark_time as i32,
+                        total_cycles: cycles as i64,
+                    });
                 }
                 Err(e) if attempts < self.max_retries => {
                     attempts += 1;

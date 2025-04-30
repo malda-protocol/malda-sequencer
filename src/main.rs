@@ -248,13 +248,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All event listeners started");
 
-    let batch_limit = 300;
+    let batch_limit = 200;
     // Create proof generator
     let mut proof_generator = ProofGenerator::new(
         MAX_PROOF_RETRIES,
         PROOF_RETRY_DELAY,
         db.clone(),
-        batch_limit_per_dst,
+        batch_limit,
     );
 
     // Create transaction manager configuration

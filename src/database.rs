@@ -13,6 +13,7 @@ use hex; // Ensure hex is imported if used in logs
 pub enum EventStatus {
     Received,
     Processed,
+    ReorgSecurityDelay,
     IncludedInBatch,
     ReadyToRequestProof,
     ProofRequested,
@@ -268,7 +269,7 @@ impl Database {
     pub async fn get_ready_to_request_proof_events(
         &self, 
         delay_seconds: i64, 
-        batch_limit_per_dst: i64
+        batch_limit: i64
     ) -> Result<Vec<EventUpdate>> { 
         // Re-added rate limiting check using sync_timestamps
         let should_proceed = query(
@@ -316,15 +317,36 @@ impl Database {
                 FROM events 
                 WHERE status = 'ReadyToRequestProof'::event_status
             ),
+            chain_counts AS (
+                SELECT 
+                    dst_chain_id,
+                    COUNT(*) as chain_total,
+                    COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () as chain_percentage
+                FROM ready_events
+                GROUP BY dst_chain_id
+            ),
             ranked_events AS (
-                SELECT tx_hash, 
-                       ROW_NUMBER() OVER (PARTITION BY dst_chain_id ORDER BY received_at ASC, tx_hash ASC) as row_num -- Order by received time first
+                SELECT 
+                    tx_hash,
+                    dst_chain_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY dst_chain_id 
+                        ORDER BY received_at ASC, tx_hash ASC
+                    ) as row_num
                 FROM ready_events
             ),
             claim_targets AS (
                 SELECT tx_hash
-                FROM ranked_events
-                WHERE row_num <= $1 -- Use parameter for batch size limit
+                FROM ranked_events r
+                JOIN chain_counts c ON r.dst_chain_id = c.dst_chain_id
+                WHERE 
+                    -- If chain has more than its fair share, limit to fair share
+                    CASE 
+                        WHEN c.chain_total > ($1 * c.chain_percentage / 100) THEN
+                            r.row_num <= ($1 * c.chain_percentage / 100)
+                        -- Otherwise take all available events from this chain
+                        ELSE TRUE
+                    END
             ),
             claimed_events AS (
                 UPDATE events 
@@ -337,7 +359,7 @@ impl Database {
             SELECT * FROM claimed_events
             "#
         )
-        .bind(batch_limit_per_dst) // Bind the batch limit parameter
+        .bind(batch_limit) // Bind the batch limit parameter
         .fetch_all(tx.as_mut())
         .await?;
 
@@ -558,6 +580,10 @@ impl Database {
         updates: &Vec<(TxHash, i32)>, // Vec of (tx_hash, journal_index)
         journal: &Bytes,
         seal: &Bytes,
+        uuid: &str,
+        stark_time: i32,
+        snark_time: i32,
+        total_cycles: i64,
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
@@ -579,7 +605,11 @@ impl Database {
                 journal = $3,
                 seal = $4,
                 proof_received_at = NOW(),
-                journal_index = id.journal_idx
+                journal_index = id.journal_idx,
+                bonsai_uuid = $5,
+                stark_time = $6,
+                snark_time = $7,
+                total_cycles = $8
             FROM index_data id
             WHERE e.tx_hash = id.tx_hash_text
               AND e.status = 'ProofRequested'::event_status; -- Ensure we only update events we claimed
@@ -588,7 +618,11 @@ impl Database {
         .bind(&tx_hashes)
         .bind(&journal_indices)
         .bind(journal.to_vec()) // Bind journal bytes
-        .bind(seal.to_vec())     // Bind seal bytes
+        .bind(seal.to_vec())    // Bind seal bytes
+        .bind(uuid)            // Bind uuid
+        .bind(stark_time)      // Bind stark_time
+        .bind(snark_time)      // Bind snark_time
+        .bind(total_cycles)    // Bind total_cycles
         .execute(&self.pool)
         .await?
         .rows_affected();
@@ -687,8 +721,8 @@ impl Database {
             INSERT INTO finished_events (
                 tx_hash, status, event_type, src_chain_id, dst_chain_id,
                 msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
-                journal_index, batch_tx_hash, received_at, processed_at, proof_requested_at, proof_received_at,
-                batch_submitted_at, batch_included_at, tx_finished_at,
+                journal_index, bonsai_uuid, stark_time, snark_time, total_cycles, batch_tx_hash, received_at, processed_at, 
+                proof_requested_at, proof_received_at, batch_submitted_at, batch_included_at, tx_finished_at,
                 resubmitted, error
             )
             SELECT 
@@ -703,7 +737,11 @@ impl Database {
                 market, 
                 received_at_block, 
                 should_request_proof_at_block,
-                journal_index, 
+                journal_index,
+                bonsai_uuid,
+                stark_time,
+                snark_time,
+                total_cycles,
                 batch_tx_hash, 
                 received_at, 
                 processed_at, 
