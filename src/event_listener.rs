@@ -230,21 +230,6 @@ impl EventListener {
 
         // Get the current block number
         let current_block = log.block_number.unwrap_or_default() as i32;
-        
-        // Calculate the block number when proof should be requested
-        let reorg_protection_depth = match self.config.chain_id {
-            ETHEREUM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
-            LINEA_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
-            OPTIMISM_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
-            BASE_SEPOLIA_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
-            ETHEREUM_CHAIN_ID => REORG_PROTECTION_DEPTH_ETHEREUM,
-            OPTIMISM_CHAIN_ID => REORG_PROTECTION_DEPTH_OPTIMISM,
-            BASE_CHAIN_ID => REORG_PROTECTION_DEPTH_BASE,
-            LINEA_CHAIN_ID => REORG_PROTECTION_DEPTH_LINEA,
-            _ => panic!("Unsupported chain ID: {}", self.config.chain_id),
-        };
-
-        let should_request_proof_at_block = Some(current_block + reorg_protection_depth as i32);
 
         // Create event update with initial data
         let mut event_update = EventUpdate {
@@ -252,7 +237,6 @@ impl EventListener {
             src_chain_id: Some(self.config.chain_id.try_into().unwrap()),
             market: Some(self.config.market),
             received_at_block: Some(current_block),
-            should_request_proof_at_block,
             status: EventStatus::Received, // Set to Processed immediately
             received_at: Some(Utc::now()),
             processed_at: Some(Utc::now()),

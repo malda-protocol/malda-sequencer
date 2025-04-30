@@ -8,6 +8,9 @@ use std::str::FromStr;
 use std::collections::HashMap;
 use tracing::{debug, warn};
 use hex; // Ensure hex is imported if used in logs
+use std::time::Duration;
+
+use crate::lane_manager::ChainParams;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventStatus {
@@ -32,6 +35,7 @@ impl EventStatus {
         match self {
             EventStatus::Received => "Received",
             EventStatus::Processed => "Processed",
+            EventStatus::ReorgSecurityDelay => "ReorgSecurityDelay",
             EventStatus::IncludedInBatch => "IncludedInBatch",
             EventStatus::ReadyToRequestProof => "ReadyToRequestProof",
             EventStatus::ProofRequested => "ProofRequested",
@@ -554,7 +558,7 @@ impl Database {
             UPDATE events e
             SET status = 'ReadyToRequestProof'::event_status
             FROM current_blocks cb
-            WHERE e.status = 'Processed'::event_status                -- Only consider 'Processed' events
+            WHERE e.status = 'ReorgSecurityDelay'::event_status                -- Only consider 'Processed' events
               AND e.src_chain_id = cb.chain_id                     -- Match event's chain ID (assuming src_chain_id is BIGINT or compatible)
               AND e.should_request_proof_at_block <= cb.block_num; -- Check if the block number condition is met
             "#
@@ -776,6 +780,129 @@ impl Database {
             );
         }
 
+        Ok(())
+    }
+
+    pub async fn update_lane_status(
+        &self,
+        chain_params: &HashMap<u32, ChainParams>,
+        market_prices: &HashMap<Address, f64>,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // First, reset any chains that have exceeded their time interval
+        let rows_affected = query(
+            r#"
+            UPDATE volume_flow
+            SET 
+                dollar_value = 0,
+                last_reset = NOW()
+            WHERE 
+                EXTRACT(EPOCH FROM (NOW() - last_reset)) > $1
+            "#
+        )
+        .bind(chain_params.values().next().map(|params| params.time_interval.as_secs() as i64).unwrap_or(0))
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            info!("Reset {} chains' volume due to time interval expiration", rows_affected);
+        }
+
+        // Get all Received events grouped by src_chain_id and ordered by received_at
+        let events = query(
+            r#"
+            SELECT 
+                e.tx_hash,
+                e.src_chain_id,
+                e.amount,
+                e.received_at_block,
+                e.market,
+                v.dollar_value as current_volume
+            FROM events e
+            LEFT JOIN volume_flow v ON e.src_chain_id = v.chain_id
+            WHERE e.status = 'Received'::event_status
+            ORDER BY e.src_chain_id, e.received_at ASC
+            "#
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // Process each event
+        for row in events {
+            let tx_hash: String = row.try_get("tx_hash")?;
+            let src_chain_id: i32 = row.try_get("src_chain_id")?;
+            let amount_str: Option<String> = row.try_get("amount")?;
+            let received_at_block: i32 = row.try_get("received_at_block")?;
+            let current_volume: i32 = row.try_get("current_volume")?;
+            let market_str: Option<String> = row.try_get("market")?;
+
+            // Parse amount if it exists
+            let amount = if let Some(amt_str) = amount_str {
+                amt_str.parse::<f64>().unwrap_or(0.0)
+            } else {
+                0.0
+            };
+
+            // Get market price and calculate dollar amount
+            let dollar_amount = if let Some(market) = market_str.and_then(|m| m.parse::<Address>().ok()) {
+                if let Some(price) = market_prices.get(&market) {
+                    amount * price
+                } else {
+                    warn!("No price found for market {:?}, using amount as is", market);
+                    amount
+                }
+            } else {
+                warn!("Invalid market address, using amount as is");
+                amount
+            };
+
+            // Get chain parameters
+            if let Some(params) = chain_params.get(&(src_chain_id as u32)) {
+                let new_volume = current_volume + dollar_amount as i32;
+                let should_request_proof_at_block = if new_volume > params.max_volume {
+                    // If volume exceeds max, use block_delay
+                    received_at_block + params.block_delay as i32
+                } else {
+                    // Otherwise use reorg_protection
+                    received_at_block + params.reorg_protection as i32
+                };
+
+                // Update the event status and block number
+                query(
+                    r#"
+                    UPDATE events
+                    SET 
+                        status = 'ReorgSecurityDelay'::event_status,
+                        should_request_proof_at_block = $1,
+                        processed_at = NOW()
+                    WHERE tx_hash = $2
+                    "#
+                )
+                .bind(should_request_proof_at_block)
+                .bind(tx_hash)
+                .execute(&mut *tx)
+                .await?;
+
+                // Only update volume if we didn't exceed max_volume
+                if new_volume <= params.max_volume {
+                    query(
+                        r#"
+                        UPDATE volume_flow
+                        SET dollar_value = $1
+                        WHERE chain_id = $2
+                        "#
+                    )
+                    .bind(new_volume)
+                    .bind(src_chain_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 }
