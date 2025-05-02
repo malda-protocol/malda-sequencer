@@ -3,6 +3,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
+    eips::BlockNumberOrTag,
 };
 use eyre::{Result, WrapErr};
 use futures_util::StreamExt;
@@ -18,6 +19,7 @@ use tokio::time::interval;
 use tokio::time::sleep;
 use chrono::Utc;
 use std::cmp::max;
+use std::collections::HashMap;
 
 use malda_rs::constants::*;
 use crate::{
@@ -162,6 +164,17 @@ impl EventListener {
                 from_block, current_block
             );
 
+            let mut block_timestamps = HashMap::new();
+
+            for block_number in from_block..=current_block {
+                let block = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await?
+                    .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
+            
+                let timestamp = block.header.inner.timestamp;
+                block_timestamps.insert(block_number, timestamp);
+            }
+
+
             // Update filter to include block range
             let range_filter = filter.clone().from_block(from_block).to_block(current_block);
 
@@ -173,6 +186,8 @@ impl EventListener {
                     continue;
                 }
             };
+
+
 
             // info!("Found {} logs in blocks {} to {}", logs.len(), from_block, current_block);
 
@@ -186,9 +201,10 @@ impl EventListener {
             let mut handles = Vec::new();
             
             for log in logs {
+                let curr_timestamp = block_timestamps[&log.block_number.unwrap_or_default()];
                 let self_clone = self.clone();
                 let handle = tokio::spawn(async move {
-                    match self_clone.process_event(log).await {
+                    match self_clone.process_event(log, curr_timestamp).await {
                         Ok(event_update) => Some(event_update),
                         Err(e) => {
                             error!("Failed to process event: {:?}", e);
@@ -223,7 +239,7 @@ impl EventListener {
         }
     }
 
-    async fn process_event(&self, log: Log) -> Result<EventUpdate> {
+    async fn process_event(&self, log: Log, timestamp: u64) -> Result<EventUpdate> {
         let tx_hash = log
             .transaction_hash
             .ok_or_else(|| eyre!("No transaction hash"))?;
@@ -237,9 +253,9 @@ impl EventListener {
             src_chain_id: Some(self.config.chain_id.try_into().unwrap()),
             market: Some(self.config.market),
             received_at_block: Some(current_block),
+            received_block_timestamp: Some(timestamp as i64),
             status: EventStatus::Received, // Set to Processed immediately
             received_at: Some(Utc::now()),
-            processed_at: Some(Utc::now()),
             ..Default::default()
         };
 

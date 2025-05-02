@@ -3,6 +3,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::Filter,
     transports::http::reqwest::Url,
+    eips::BlockNumberOrTag,
 };
 use chrono::{DateTime, Duration, Utc};
 use eyre::{Result, WrapErr};
@@ -11,10 +12,11 @@ use tokio::time::{interval, sleep, Duration as TokioDuration};
 use tracing::{debug, error, info, warn};
 use std::time::Duration as StdDuration;
 use std::vec::Vec;
+use std::collections::HashMap;
 
 use crate::events::{
-    parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG,
-    BATCH_PROCESS_SUCCESS_SIG,
+    parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG, BatchProcessFailedEvent,
+    BATCH_PROCESS_SUCCESS_SIG, BatchProcessSuccessEvent,
 };
 use sequencer::database::{Database, EventStatus, EventUpdate};
 
@@ -181,6 +183,16 @@ impl BatchEventListener {
                 }
             };
 
+            let mut block_timestamps = HashMap::new();
+
+            for block_number in from_block..=target_block {
+                let block = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await?
+                    .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
+            
+                let timestamp = block.header.inner.timestamp;
+                block_timestamps.insert(block_number, timestamp);
+            }
+
             // info!(
             //     "Found {} success and {} failure logs in blocks {} to {}", 
             //     success_logs.len(),
@@ -190,15 +202,25 @@ impl BatchEventListener {
             // );
 
             // Process success logs
-            let success_hashes: Vec<TxHash> = success_logs
+            let success_events: Vec<BatchProcessSuccessEvent> = success_logs
                 .iter()
-                .map(|log| parse_batch_process_success_event(log).init_hash)
+                .map(|log| parse_batch_process_success_event(log))
+                .collect();
+            let success_hashes: Vec<TxHash> = success_events.iter().map(|e| e.init_hash).collect();
+            let success_timestamps: Vec<i64> = success_events
+                .iter()
+                .map(|e| *block_timestamps.get(&e.block_number).unwrap_or(&0) as i64)
                 .collect();
 
             // Process failure logs
-            let failure_hashes: Vec<TxHash> = failure_logs
+            let failure_events: Vec<BatchProcessFailedEvent> = failure_logs
                 .iter()
-                .map(|log| parse_batch_process_failed_event(log).init_hash)
+                .map(|log| parse_batch_process_failed_event(log))
+                .collect();
+            let failure_hashes: Vec<TxHash> = failure_events.iter().map(|e| e.init_hash).collect();
+            let failure_timestamps: Vec<i64> = failure_events
+                .iter()
+                .map(|e| *block_timestamps.get(&e.block_number).unwrap_or(&0) as i64)
                 .collect();
 
             // Update database with success events if any
@@ -209,7 +231,7 @@ impl BatchEventListener {
                     self.config.chain_id
                 );
                 
-                if let Err(e) = self.db.update_finished_events(&success_hashes, EventStatus::TxProcessSuccess).await {
+                if let Err(e) = self.db.update_finished_events(&success_hashes, EventStatus::TxProcessSuccess, &success_timestamps).await {
                     error!("Failed to update success events: {:?}", e);
                 } else {
                     info!("Successfully migrated {} success events to finished_events", success_hashes.len());
@@ -224,7 +246,7 @@ impl BatchEventListener {
                     self.config.chain_id
                 );
                 
-                if let Err(e) = self.db.update_finished_events(&failure_hashes, EventStatus::TxProcessFail).await {
+                if let Err(e) = self.db.update_finished_events(&failure_hashes, EventStatus::TxProcessFail, &failure_timestamps).await {
                     error!("Failed to update failure events: {:?}", e);
                 } else {
                     info!("Successfully migrated {} failure events to finished_events", failure_hashes.len());
