@@ -33,6 +33,7 @@ CREATE TABLE events (
     amount TEXT,
     target_function TEXT,
     market TEXT,
+    received_block_timestamp INTEGER,
     received_at_block INTEGER,
     should_request_proof_at_block INTEGER,
     journal_index INTEGER,
@@ -44,12 +45,12 @@ CREATE TABLE events (
     total_cycles INTEGER,
     batch_tx_hash TEXT,
     received_at TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE,
     proof_requested_at TIMESTAMP WITH TIME ZONE,
     proof_received_at TIMESTAMP WITH TIME ZONE,
     batch_submitted_at TIMESTAMP WITH TIME ZONE,
     batch_included_at TIMESTAMP WITH TIME ZONE,
     tx_finished_at TIMESTAMP WITH TIME ZONE,
+    finished_block_timestamp INTEGER,
     resubmitted INTEGER,
     error TEXT
 );
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS finished_events (
     amount TEXT,
     target_function TEXT,
     market TEXT,
+    received_block_timestamp INTEGER,
     received_at_block INTEGER,
     should_request_proof_at_block INTEGER,
     journal_index INTEGER,
@@ -73,12 +75,12 @@ CREATE TABLE IF NOT EXISTS finished_events (
     total_cycles INTEGER,
     batch_tx_hash TEXT,
     received_at TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE,
     proof_requested_at TIMESTAMP WITH TIME ZONE,
     proof_received_at TIMESTAMP WITH TIME ZONE,
     batch_submitted_at TIMESTAMP WITH TIME ZONE,
     batch_included_at TIMESTAMP WITH TIME ZONE,
     tx_finished_at TIMESTAMP WITH TIME ZONE,
+    finished_block_timestamp INTEGER,
     resubmitted INTEGER,
     error TEXT
 );
@@ -104,6 +106,14 @@ CREATE TABLE volume_flow (
     last_reset TIMESTAMP WITH TIME ZONE,
     dollar_value INTEGER
 );
+
+-- Insert initial rows for each chain
+INSERT INTO volume_flow (chain_id, last_reset, dollar_value)
+VALUES 
+    (59141, NOW(), 0),  -- Linea Sepolia
+    (11155111, NOW(), 0),  -- Ethereum Sepolia
+    (11155420, NOW(), 0)  -- Optimism Sepolia
+ON CONFLICT (chain_id) DO NOTHING;
 
 CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX finished_events_status_idx ON finished_events(status);

@@ -149,6 +149,7 @@ pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32,address
 pub struct BatchProcessFailedEvent {
     pub init_hash: Bytes32,
     pub reason: Bytes,
+    pub block_number: u64,
 }
 
 pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
@@ -158,16 +159,19 @@ pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
     BatchProcessFailedEvent {
         init_hash: Bytes32::from_slice(data[0..32].into()),
         reason: Bytes::from(data[32..].to_vec()),
+        block_number: log.block_number.unwrap_or_default(),
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessSuccessEvent {
     pub init_hash: Bytes32,
+    pub block_number: u64,
 }
 
 pub fn parse_batch_process_success_event(log: &Log) -> BatchProcessSuccessEvent {
     BatchProcessSuccessEvent {
         init_hash: Bytes32::from_slice(log.data().data[0..32].into()),
+        block_number: log.block_number.unwrap_or_default(),
     }
 }

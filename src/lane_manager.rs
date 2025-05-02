@@ -2,7 +2,7 @@ use std::time::Duration;
 use eyre::Result;
 use sequencer::database::{Database, ChainParams};
 use std::collections::HashMap;
-use alloy::primitives::Address;
+use alloy::primitives::{Address, address};
 use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -30,10 +30,16 @@ impl LaneManager {
         }
     }
 
-    fn get_price(&self, _market: &Address) -> f64 {
+    fn get_price(&self, market: &Address) -> f64 {
         // For now, just return 1.0 for all markets
         // TODO: Implement actual price fetching
-        0.00000000000000001
+        if *market == address!("c15EF00790b987ce4B82eB9e25e1233a89589510") {
+            return 1.0;
+        }
+        else {
+            return 1.0;
+        }
+        
     }
 
     pub async fn start(&self) -> Result<()> {

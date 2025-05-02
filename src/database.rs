@@ -75,6 +75,7 @@ pub struct EventUpdate {
     pub amount: Option<U256>,
     pub target_function: Option<String>,
     pub market: Option<Address>,
+    pub received_block_timestamp: Option<i64>,
     pub received_at_block: Option<i32>,
     pub should_request_proof_at_block: Option<i32>,
     pub journal_index: Option<i32>,
@@ -82,12 +83,12 @@ pub struct EventUpdate {
     pub seal: Option<Bytes>,
     pub batch_tx_hash: Option<String>,
     pub received_at: Option<DateTime<Utc>>,
-    pub processed_at: Option<DateTime<Utc>>,
     pub proof_requested_at: Option<DateTime<Utc>>,
     pub proof_received_at: Option<DateTime<Utc>>,
     pub batch_submitted_at: Option<DateTime<Utc>>,
     pub batch_included_at: Option<DateTime<Utc>>,
     pub tx_finished_at: Option<DateTime<Utc>>,
+    pub finished_block_timestamp: Option<i64>,
     pub resubmitted: Option<i32>,
     pub error: Option<String>,
 }
@@ -126,8 +127,8 @@ impl Database {
                 INSERT INTO events (
                     tx_hash, status, event_type, src_chain_id, dst_chain_id, 
                     msg_sender, amount, target_function, market,
-                    received_at_block, should_request_proof_at_block,
-                    received_at, processed_at
+                    received_at_block, received_block_timestamp, should_request_proof_at_block,
+                    received_at
                 )
                 VALUES (
                     $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
@@ -145,9 +146,9 @@ impl Database {
             .bind(event.target_function.as_ref())
             .bind(event.market.map(|addr| addr.to_string()))
             .bind(event.received_at_block)
+            .bind(event.received_block_timestamp.map(|ts| ts as i32)) // Convert i64 to i32 for database
             .bind(event.should_request_proof_at_block)
             .bind(event.received_at) // Set in event_listener
-            .bind(event.processed_at) // Set in event_listener
             .execute(&mut *tx)
             .await?;
         }
@@ -157,123 +158,6 @@ impl Database {
         info!("Attempted to add batch of {} new events to database", events.len());
 
         Ok(())
-    }
-
-    pub async fn get_event_status(&self, tx_hash: &TxHash) -> Result<Option<EventStatus>> {
-        // Use query_as to handle the event_status enum type
-        let record =
-            sqlx::query_as::<_, (String,)>("SELECT status::text FROM events WHERE tx_hash = $1")
-                .bind(tx_hash.to_string())
-                .fetch_optional(&self.pool)
-                .await?;
-
-        match record {
-            Some((status,)) => match status.as_str() {
-                "Received" => Ok(Some(EventStatus::Received)),
-                "Processed" => Ok(Some(EventStatus::Processed)),
-                "IncludedInBatch" => Ok(Some(EventStatus::IncludedInBatch)),
-                "ReadyToRequestProof" => Ok(Some(EventStatus::ReadyToRequestProof)),
-                "ProofRequested" => Ok(Some(EventStatus::ProofRequested)),
-                "ProofReceived" => Ok(Some(EventStatus::ProofReceived)),
-                "BatchSubmitted" => Ok(Some(EventStatus::BatchSubmitted)),
-                "BatchIncluded" => Ok(Some(EventStatus::BatchIncluded)),
-                "BatchFailed" => {
-                    let error = sqlx::query_scalar::<_, String>(
-                        "SELECT error FROM events WHERE tx_hash = $1",
-                    )
-                    .bind(tx_hash.to_string())
-                    .fetch_optional(&self.pool)
-                    .await?
-                    .unwrap_or_else(|| "Unknown batch failure".to_string());
-                    Ok(Some(EventStatus::BatchFailed { error }))
-                }
-                "TxProcessSuccess" => Ok(Some(EventStatus::TxProcessSuccess)),
-                "TxProcessFail" => Ok(Some(EventStatus::TxProcessFail)),
-                "Failed" => {
-                    let error = sqlx::query_scalar::<_, String>(
-                        "SELECT error FROM events WHERE tx_hash = $1",
-                    )
-                    .bind(tx_hash.to_string())
-                    .fetch_optional(&self.pool)
-                    .await?
-                    .unwrap_or_else(|| "Unknown error".to_string());
-                    Ok(Some(EventStatus::Failed { error }))
-                }
-                _ => Err(eyre::eyre!("Unknown status: {}", status)),
-            },
-            None => Ok(None),
-        }
-    }
-
-    pub async fn get_event(&self, tx_hash: &TxHash) -> Result<Option<EventUpdate>> {
-        let record = query(
-            r#"
-            SELECT 
-                status::text, event_type, src_chain_id, dst_chain_id, msg_sender,
-                amount, target_function, market, journal_index, journal,
-                seal, batch_tx_hash, received_at, processed_at,
-                proof_requested_at, proof_received_at, batch_submitted_at,
-                batch_included_at, tx_finished_at, resubmitted, error
-            FROM events 
-            WHERE tx_hash = $1
-            "#
-        )
-        .bind(tx_hash.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
-
-        match record {
-            Some(row) => {
-                let status_str: String = row.try_get("status")?;
-                let status = match status_str.as_str() {
-                    "Received" => EventStatus::Received,
-                    "Processed" => EventStatus::Processed,
-                    "IncludedInBatch" => EventStatus::IncludedInBatch,
-                    "ReadyToRequestProof" => EventStatus::ReadyToRequestProof,
-                    "ProofRequested" => EventStatus::ProofRequested,
-                    "ProofReceived" => EventStatus::ProofReceived,
-                    "BatchSubmitted" => EventStatus::BatchSubmitted,
-                    "BatchIncluded" => EventStatus::BatchIncluded,
-                    "BatchFailed" => EventStatus::BatchFailed {
-                        error: row.try_get("error")?,
-                    },
-                    "TxProcessSuccess" => EventStatus::TxProcessSuccess,
-                    "TxProcessFail" => EventStatus::TxProcessFail,
-                    "Failed" => EventStatus::Failed {
-                        error: row.try_get("error")?,
-                    },
-                    _ => return Err(eyre::eyre!("Unknown status: {}", status_str)),
-                };
-
-                Ok(Some(EventUpdate {
-                    tx_hash: *tx_hash,
-                    status,
-                    event_type: row.try_get("event_type")?,
-                    src_chain_id: row.try_get::<Option<i32>, _>("src_chain_id")?.map(|id| id as u32),
-                    dst_chain_id: row.try_get::<Option<i32>, _>("dst_chain_id")?.map(|id| id as u32),
-                    msg_sender: row.try_get::<Option<String>, _>("msg_sender")?.map(|addr| addr.parse().unwrap()),
-                    amount: row.try_get::<Option<String>, _>("amount")?.map(|amt| amt.parse().unwrap()),
-                    target_function: row.try_get("target_function")?,
-                    market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
-                    received_at_block: row.try_get("received_at_block")?,
-                    should_request_proof_at_block: row.try_get("should_request_proof_at_block")?,
-                    journal_index: row.try_get("journal_index")?,
-                    journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
-                    seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
-                    batch_tx_hash: row.try_get("batch_tx_hash")?,
-                    received_at: row.try_get("received_at")?,
-                    processed_at: row.try_get("processed_at")?,
-                    proof_requested_at: row.try_get("proof_requested_at")?,
-                    proof_received_at: row.try_get("proof_received_at")?,
-                    batch_submitted_at: row.try_get("batch_submitted_at")?,
-                    batch_included_at: row.try_get("batch_included_at")?,
-                    tx_finished_at: row.try_get("tx_finished_at")?,
-                    resubmitted: row.try_get("resubmitted")?,
-                    error: row.try_get("error")?,
-                }))
-            }
-            None => Ok(None),
-        }
     }
 
     pub async fn get_ready_to_request_proof_events(
@@ -707,6 +591,7 @@ impl Database {
         &self,
         tx_hashes: &Vec<TxHash>,
         status: EventStatus,
+        finished_block_timestamps: &Vec<i64>,
     ) -> Result<()> {
         if tx_hashes.is_empty() {
             return Ok(());
@@ -727,48 +612,54 @@ impl Database {
                 DELETE FROM events 
                 WHERE tx_hash = ANY($1::text[])
                 RETURNING *
+            ),
+            timestamp_data (tx_hash_text, finished_timestamp) AS (
+                SELECT * FROM UNNEST($1::text[], $4::bigint[])
             )
             INSERT INTO finished_events (
                 tx_hash, status, event_type, src_chain_id, dst_chain_id,
-                msg_sender, amount, target_function, market, received_at_block, should_request_proof_at_block,
-                journal_index, bonsai_uuid, stark_time, snark_time, total_cycles, batch_tx_hash, received_at, processed_at, 
+                msg_sender, amount, target_function, market, received_at_block, received_block_timestamp, should_request_proof_at_block,
+                journal_index, bonsai_uuid, stark_time, snark_time, total_cycles, batch_tx_hash, received_at, 
                 proof_requested_at, proof_received_at, batch_submitted_at, batch_included_at, tx_finished_at,
-                resubmitted, error
+                finished_block_timestamp, resubmitted, error
             )
             SELECT 
-                tx_hash, 
+                me.tx_hash, 
                 $2::event_status,  -- New status
-                event_type, 
-                src_chain_id, 
-                dst_chain_id,
-                msg_sender, 
-                amount, 
-                target_function, 
-                market, 
-                received_at_block, 
-                should_request_proof_at_block,
-                journal_index,
-                bonsai_uuid,
-                stark_time,
-                snark_time,
-                total_cycles,
-                batch_tx_hash, 
-                received_at, 
-                processed_at, 
-                proof_requested_at, 
-                proof_received_at,
-                batch_submitted_at, 
-                batch_included_at, 
+                me.event_type, 
+                me.src_chain_id, 
+                me.dst_chain_id,
+                me.msg_sender, 
+                me.amount, 
+                me.target_function, 
+                me.market, 
+                me.received_at_block,
+                me.received_block_timestamp,
+                me.should_request_proof_at_block,
+                me.journal_index,
+                me.bonsai_uuid,
+                me.stark_time,
+                me.snark_time,
+                me.total_cycles,
+                me.batch_tx_hash, 
+                me.received_at, 
+                me.proof_requested_at, 
+                me.proof_received_at,
+                me.batch_submitted_at, 
+                me.batch_included_at, 
                 $3,  -- tx_finished_at
-                resubmitted, 
-                error
-            FROM moved_events
+                td.finished_timestamp,  -- finished_block_timestamp from input
+                me.resubmitted, 
+                me.error
+            FROM moved_events me
+            JOIN timestamp_data td ON me.tx_hash = td.tx_hash_text
             ON CONFLICT (tx_hash) DO NOTHING
             "#
         )
         .bind(&tx_hashes_str)
         .bind(&status_str)
         .bind(now)
+        .bind(finished_block_timestamps)
         .execute(&mut *tx)
         .await?;
 
@@ -890,8 +781,7 @@ impl Database {
                         WHEN ewv.running_volume > ewv.max_volume 
                         THEN ewv.received_at_block + ewv.block_delay
                         ELSE ewv.received_at_block + ewv.reorg_protection
-                    END,
-                    processed_at = NOW()
+                    END
                 FROM events_with_volume ewv
                 WHERE e.tx_hash = ewv.tx_hash
             ),
