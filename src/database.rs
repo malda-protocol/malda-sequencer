@@ -739,7 +739,7 @@ impl Database {
                     COALESCE(
                         CASE 
                             WHEN e.amount IS NOT NULL AND mp.price IS NOT NULL 
-                            THEN e.amount::float8 * mp.price
+                            THEN (e.amount::numeric * mp.price::numeric)::integer
                             ELSE 0
                         END,
                         0
@@ -807,6 +807,173 @@ impl Database {
         .await?;
 
         tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn reset_stuck_events(&self, finished_sample_size: i64, multiplier: f64, batch_limit: i64) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Check if we have enough historical data first
+        let has_sufficient_data = query_scalar::<_, bool>(
+            r#"
+            SELECT COUNT(*) >= $1
+            FROM finished_events
+            WHERE status = 'TxProcessSuccess'::event_status
+            "#
+        )
+        .bind(finished_sample_size)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if !has_sufficient_data {
+            info!("Insufficient historical data (less than {} successful events) to calculate timeouts. No events will be reset this cycle.", finished_sample_size);
+            return Ok(());
+        }
+
+        // Calculate timeouts only if we have enough data
+        let timeouts = query(
+            r#"
+            WITH recent_successes AS (
+                SELECT 
+                    AVG(EXTRACT(EPOCH FROM ( proof_received_at - proof_requested_at))) as avg_proof_request_time,
+                    AVG(EXTRACT(EPOCH FROM (batch_submitted_at - proof_received_at))) as avg_proof_generation_time,
+                    AVG(EXTRACT(EPOCH FROM (batch_included_at - batch_submitted_at))) as avg_batch_submission_time,
+                    AVG(EXTRACT(EPOCH FROM (tx_finished_at - batch_included_at))) as avg_batch_inclusion_time
+                FROM finished_events
+                WHERE status = 'TxProcessSuccess'::event_status
+                GROUP BY tx_hash
+                ORDER BY received_at DESC
+                LIMIT $1
+            )
+            SELECT 
+                CEIL(avg_proof_request_time * $2)::INT8 as proof_request_timeout,
+                CEIL(avg_proof_generation_time * $2)::INT8 as proof_generation_timeout,
+                CEIL(avg_batch_submission_time * $2)::INT8 as batch_submission_timeout,
+                CEIL(avg_batch_inclusion_time * $2)::INT8 as batch_inclusion_timeout
+            FROM recent_successes
+            "#
+        )
+        .bind(finished_sample_size)
+        .bind(multiplier)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // Extract timeout values with proper type conversion
+        let proof_request_timeout: i64 = timeouts.try_get("proof_request_timeout")?;
+        let proof_generation_timeout: i64 = timeouts.try_get("proof_generation_timeout")?;
+        let batch_submission_timeout: i64 = timeouts.try_get("batch_submission_timeout")?;
+        let batch_inclusion_timeout: i64 = timeouts.try_get("batch_inclusion_timeout")?;
+
+        // Combined stuck events query with batch limit
+        let rows_affected = query(
+            r#"
+            WITH stuck_events AS (
+                SELECT 
+                    tx_hash,
+                    status,
+                    resubmitted,
+                    CASE 
+                        WHEN status = 'ProofRequested'::event_status AND proof_requested_at < NOW() - ($1::bigint || ' seconds')::interval THEN 'proof_requested'
+                        WHEN status = 'ProofReceived'::event_status AND proof_received_at < NOW() - ($2::bigint || ' seconds')::interval THEN 'proof_received'
+                        WHEN status = 'BatchSubmitted'::event_status AND batch_submitted_at < NOW() - ($3::bigint || ' seconds')::interval THEN 'batch_submitted'
+                        WHEN status = 'BatchFailed'::event_status AND batch_submitted_at < NOW() - ($4::bigint || ' seconds')::interval THEN 'batch_failed'
+                        ELSE NULL
+                    END as stuck_type
+                FROM events
+                WHERE status IN ('ProofRequested', 'ProofReceived', 'BatchSubmitted', 'BatchFailed')
+                LIMIT $5
+            )
+            UPDATE events e
+            SET 
+                status = CASE 
+                    WHEN se.resubmitted IS NULL OR se.resubmitted = 0 THEN 'Received'::event_status
+                    ELSE 'Failed'::event_status
+                END,
+                proof_requested_at = CASE 
+                    WHEN se.stuck_type = 'proof_requested' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE proof_requested_at 
+                END,
+                proof_received_at = CASE 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE proof_received_at 
+                END,
+                batch_submitted_at = CASE 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE batch_submitted_at 
+                END,
+                batch_included_at = CASE 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE batch_included_at 
+                END,
+                tx_finished_at = CASE 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE tx_finished_at 
+                END,
+                journal = CASE 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE journal 
+                END,
+                seal = CASE 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE seal 
+                END,
+                journal_index = CASE 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    ELSE journal_index 
+                END,
+                error = CASE 
+                    WHEN se.resubmitted > 0 THEN 
+                        CASE se.stuck_type
+                            WHEN 'proof_requested' THEN 'Proof request timeout after retry'
+                            WHEN 'proof_received' THEN 'Proof generation timeout after retry'
+                            WHEN 'batch_submitted' THEN 'Batch submission timeout after retry'
+                            WHEN 'batch_failed' THEN 'Batch failed timeout after retry'
+                        END
+                    ELSE NULL
+                END,
+                resubmitted = CASE 
+                    WHEN se.resubmitted IS NULL THEN 1
+                    WHEN se.resubmitted = 0 THEN 1
+                    ELSE se.resubmitted
+                END
+            FROM stuck_events se
+            WHERE e.tx_hash = se.tx_hash
+              AND se.stuck_type IS NOT NULL
+            "#
+        )
+        .bind(proof_request_timeout)
+        .bind(proof_generation_timeout)
+        .bind(batch_submission_timeout)
+        .bind(batch_inclusion_timeout)
+        .bind(batch_limit)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        // Delete BatchFailed events that are in finished_events
+        let deleted_batch_failed_rows = query(
+            r#"
+            DELETE FROM events e
+            USING finished_events fe
+            WHERE e.tx_hash = fe.tx_hash
+              AND e.status = 'BatchFailed'::event_status
+              AND e.batch_submitted_at < NOW() - ($1::bigint || ' seconds')::interval
+            "#
+        )
+        .bind(batch_inclusion_timeout)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        tx.commit().await?;
+
+        if rows_affected > 0 || deleted_batch_failed_rows > 0 {
+            info!(
+                "Reset {} stuck events and deleted {} batch failed events from finished_events",
+                rows_affected, deleted_batch_failed_rows
+            );
+        }
+
         Ok(())
     }
 }

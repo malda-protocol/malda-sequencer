@@ -32,14 +32,19 @@ pub struct BatchEventConfig {
 pub struct BatchEventListener {
     config: BatchEventConfig,
     db: Database,
+    ws_connection: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
 }
 
 impl BatchEventListener {
     pub fn new(config: BatchEventConfig, db: Database) -> Self {
-        Self { config, db }
+        Self { 
+            config, 
+            db,
+            ws_connection: None,
+        }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!(
             "Starting batch event listener for submitter={:?} chain={}",
             self.config.batch_submitter, self.config.chain_id
@@ -77,7 +82,7 @@ impl BatchEventListener {
         }
     }
 
-    async fn run_event_listener(&self) -> Result<()> {
+    async fn run_event_listener(&mut self) -> Result<()> {
         let ws_url: Url = self
             .config
             .ws_url
@@ -90,6 +95,9 @@ impl BatchEventListener {
             .on_ws(ws)
             .await
             .wrap_err("Failed to connect to WebSocket")?;
+
+        // Store the connection
+        self.ws_connection = Some(provider.clone());
 
         // Create base filters for success and failure events
         let success_filter = Filter::new()
@@ -256,6 +264,15 @@ impl BatchEventListener {
             // Update last processed block
             last_processed_block = target_block;
             // info!("Updated last_processed_block to {}", last_processed_block);
+        }
+    }
+}
+
+impl Drop for BatchEventListener {
+    fn drop(&mut self) {
+        if let Some(_provider) = self.ws_connection.take() {
+            info!("Cleaning up WebSocket connection for chain {}", self.config.chain_id);
+            // The provider will be dropped here, which should close the WebSocket connection
         }
     }
 }
