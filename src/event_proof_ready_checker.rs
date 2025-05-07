@@ -44,82 +44,33 @@ struct ChainConfig {
 const L1_BLOCK_ADDRESS_OPTIMISM: &str = "0x4200000000000000000000000000000000000015";
 const L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA: &str = "0x4200000000000000000000000000000000000015";
 
-#[derive(Clone)]
 pub struct EventProofReadyChecker {
     db: Database,
     poll_interval: Duration,
     block_update_interval: Duration,
+    task_handle: Option<tokio::task::JoinHandle<()>>,
     tracked_chain_ids: Vec<u64>,
 }
 
 impl EventProofReadyChecker {
     pub fn new(db: Database, poll_interval: Duration, block_update_interval: Duration) -> Self {
+        // Initialize tracked chain IDs
+        let tracked_chain_ids = vec![
+            ETHEREUM_SEPOLIA_CHAIN_ID,
+            OPTIMISM_SEPOLIA_CHAIN_ID,
+            LINEA_SEPOLIA_CHAIN_ID,
+        ];
+
         // Initialize the block number map with default values for all supported chains
         let mut block_numbers = BLOCK_NUMBERS.lock().unwrap();
         
-        // Mainnet chains
-        block_numbers.insert(ETHEREUM_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(OPTIMISM_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(LINEA_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(BASE_CHAIN_ID, AtomicI32::new(0));
-        
-        // Testnet chains
-        block_numbers.insert(ETHEREUM_SEPOLIA_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(OPTIMISM_SEPOLIA_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(LINEA_SEPOLIA_CHAIN_ID, AtomicI32::new(0));
-        block_numbers.insert(BASE_SEPOLIA_CHAIN_ID, AtomicI32::new(0));
-        
-        // Define chain configurations
-        let chain_configs = vec![
-            // Mainnet chains
-            // ChainConfig {
-            //     chain_id: ETHEREUM_CHAIN_ID,
-            //     rpc_url: rpc_url_ethereum().to_string(),
-            //     is_l2: false,
-            // },
-            // ChainConfig {
-            //     chain_id: OPTIMISM_CHAIN_ID,
-            //     rpc_url: rpc_url_optimism().to_string(),
-            //     is_l2: true,
-            // },
-            // ChainConfig {
-            //     chain_id: LINEA_CHAIN_ID,
-            //     rpc_url: rpc_url_linea().to_string(),
-            //     is_l2: true,
-            // },
-            // ChainConfig {
-            //     chain_id: BASE_CHAIN_ID,
-            //     rpc_url: rpc_url_base().to_string(),
-            //     is_l2: true,
-            // },
-            // Testnet chains
-            ChainConfig {
-                chain_id: ETHEREUM_SEPOLIA_CHAIN_ID,
-                rpc_url: rpc_url_ethereum_sepolia().to_string(),
-                is_l2: false,
-            },
-            ChainConfig {
-                chain_id: OPTIMISM_SEPOLIA_CHAIN_ID,
-                rpc_url: rpc_url_optimism_sepolia().to_string(),
-                is_l2: true,
-            },
-            ChainConfig {
-                chain_id: LINEA_SEPOLIA_CHAIN_ID,
-                rpc_url: rpc_url_linea_sepolia().to_string(),
-                is_l2: true,
-            },
-            // ChainConfig {
-            //     chain_id: BASE_SEPOLIA_CHAIN_ID,
-            //     rpc_url: rpc_url_base_sepolia().to_string(),
-            //     is_l2: true,
-            // },
-        ];
-        
-        // Store chain IDs for easy access later in the start loop
-        let tracked_chain_ids: Vec<u64> = chain_configs.iter().map(|c| c.chain_id).collect();
-        
+        // Initialize block numbers for all tracked chains
+        for &chain_id in &tracked_chain_ids {
+            block_numbers.insert(chain_id, AtomicI32::new(0));
+        }
+
         // Start the background task to update block numbers
-        let chain_configs_clone = chain_configs.clone();
+        let tracked_chain_ids_clone = tracked_chain_ids.clone();
         let block_update_interval_clone = block_update_interval;
         tokio::spawn(async move {
             let mut interval = interval(block_update_interval_clone);
@@ -133,31 +84,11 @@ impl EventProofReadyChecker {
             .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
             .unwrap();
             
-            // Create L1 block contract instance
-            let l1_block_contract = new(L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), provider);
+            // Clone provider for L1 block contract
+            let provider_clone = provider.clone();
             
-            // Create a map to store providers for each chain to avoid recreating them on every iteration
-            let mut chain_providers: HashMap<u64, alloy::providers::fillers::FillProvider<
-                alloy::providers::fillers::JoinFill<
-                    alloy::providers::fillers::JoinFill<
-                        alloy::providers::Identity,
-                        alloy::providers::fillers::JoinFill<
-                            alloy::providers::fillers::GasFiller,
-                            alloy::providers::fillers::JoinFill<
-                                alloy::providers::fillers::BlobGasFiller,
-                                alloy::providers::fillers::JoinFill<
-                                    alloy::providers::fillers::NonceFiller,
-                                    alloy::providers::fillers::ChainIdFiller
-                                >
-                            >
-                        >
-                    >,
-                    alloy::providers::fillers::WalletFiller<alloy::network::EthereumWallet>
-                >,
-                alloy::providers::RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
-                alloy::transports::http::Http<alloy::transports::http::Client>,
-                alloy::network::Ethereum
-            >> = HashMap::new();
+            // Create L1 block contract instance
+            let l1_block_contract = new(L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), provider_clone);
             
             loop {
                 interval.tick().await;
@@ -168,7 +99,6 @@ impl EventProofReadyChecker {
                         let block_number = number_return._0;
                         let block_numbers = BLOCK_NUMBERS.lock().unwrap();
                         if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
-                            // Convert u64 to i32, handling potential overflow
                             let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
                             atomic.store(block_number_i32, Ordering::SeqCst);
                             debug!("Updated Ethereum Sepolia block number: {}", block_number_i32);
@@ -180,33 +110,11 @@ impl EventProofReadyChecker {
                 }
                 
                 // Update other chain block numbers
-                for config in &chain_configs_clone {
+                for &chain_id in &tracked_chain_ids_clone {
                     // Skip Ethereum Sepolia as it's handled above
-                    if config.chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+                    if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                         continue;
                     }
-                    
-                    // Get or create a provider for this chain
-                    let provider = if let Some(existing_provider) = chain_providers.get(&config.chain_id) {
-                        existing_provider.clone()
-                    } else {
-                        match create_provider(
-                            Url::parse(&config.rpc_url).unwrap(),
-                            "0xbd0974bec39a17e36ba2a6b4d238ff944bacb481cbed5efcae784d7bf4a2ff80",
-                        )
-                        .await
-                        {
-                            Ok(p) => {
-                                let provider_clone = p.clone();
-                                chain_providers.insert(config.chain_id, p);
-                                provider_clone
-                            }
-                            Err(e) => {
-                                error!("Failed to create provider for chain {}: {}", config.chain_id, e);
-                                continue;
-                            }
-                        }
-                    };
                     
                     // Get the current block number
                     match provider.get_block_number().await {
@@ -214,29 +122,61 @@ impl EventProofReadyChecker {
                             let block_number_i32 = block_number as i32;
                             {
                                 let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                                if let Some(atomic) = block_numbers.get(&config.chain_id) {
+                                if let Some(atomic) = block_numbers.get(&chain_id) {
                                     atomic.store(block_number_i32, Ordering::SeqCst);
-                                    debug!("Updated block number for chain {}: {}", config.chain_id, block_number_i32);
+                                    debug!("Updated block number for chain {}: {}", chain_id, block_number_i32);
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("Failed to fetch block number for chain {}: {}", config.chain_id, e);
+                            error!("Failed to fetch block number for chain {}: {}", chain_id, e);
                         }
                     }
                 }
             }
         });
-        
-        Self {
-            db,
-            poll_interval,
+
+        Self { 
+            db, 
+            poll_interval, 
             block_update_interval,
+            task_handle: None,
             tracked_chain_ids,
         }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
+        // Cancel any existing task
+        if let Some(handle) = self.task_handle.take() {
+            handle.abort();
+            let _ = handle.await; // Wait for the task to finish
+        }
+
+        // Spawn new task
+        let db = self.db.clone();
+        let poll_interval = self.poll_interval;
+        let block_update_interval = self.block_update_interval;
+        let tracked_chain_ids = self.tracked_chain_ids.clone();
+        
+        let handle = tokio::spawn(async move {
+            let checker = EventProofReadyChecker {
+                db,
+                poll_interval,
+                block_update_interval,
+                task_handle: None,
+                tracked_chain_ids,
+            };
+            
+            if let Err(e) = checker.run().await {
+                error!("Event proof ready checker failed: {:?}", e);
+            }
+        });
+
+        self.task_handle = Some(handle);
+        Ok(())
+    }
+
+    async fn run(&self) -> Result<()> {
         info!("Starting event proof ready checker with optimized DB query");
         
         let mut interval = interval(self.poll_interval);
@@ -284,6 +224,16 @@ impl EventProofReadyChecker {
             atomic.load(Ordering::SeqCst)
         } else {
             0
+        }
+    }
+}
+
+impl Drop for EventProofReadyChecker {
+    fn drop(&mut self) {
+        if let Some(handle) = self.task_handle.take() {
+            info!("Cleaning up event proof ready checker task");
+            handle.abort();
+            // Note: We don't await here as it's not possible in drop
         }
     }
 }

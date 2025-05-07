@@ -34,6 +34,9 @@ use batch_event_listener::{BatchEventConfig, BatchEventListener};
 mod lane_manager;
 use lane_manager::{LaneManager, LaneManagerConfig};
 
+mod reset_tx_manager;
+use reset_tx_manager::{ResetTxManager, ResetTxManagerConfig};
+
 use alloy::primitives::TxHash;
 use sequencer::database::{Database, EventStatus, EventUpdate, ChainParams};
 
@@ -162,27 +165,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = tokio::spawn(async move {
             let mut current_listener = None;
             loop {
-                // Create new listener
-                let new_listener = BatchEventListener::new(config.clone(), db.clone());
+                let mut new_listener = BatchEventListener::new(config.clone(), db.clone());
                 info!("Starting new batch event listener instance");
                 
-                // Start the new listener
                 if let Err(e) = new_listener.start().await {
                     error!("Batch event listener failed: {:?}", e);
                 }
                 
-                // Wait 2 seconds before dropping the old listener
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                // Reduce delay to 1 second
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 
-                // Now drop the old listener if it exists
                 if let Some(listener) = current_listener.take() {
                     drop(listener);
                 }
                 
-                // Store the new listener
                 current_listener = Some(new_listener);
-
-                // Wait 10 minutes before creating a new instance
                 tokio::time::sleep(Duration::from_secs(600)).await;
             }
         });
@@ -218,27 +215,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let handle = tokio::spawn(async move {
                     let mut current_listener = None;
                     loop {
-                        // Create new listener
-                        let new_listener = EventListener::new(config.clone(), db.clone());
+                        let mut new_listener = EventListener::new(config.clone(), db.clone());
                         info!("Starting new event listener instance");
                         
-                        // Start the new listener
                         if let Err(e) = new_listener.start().await {
                             error!("Event listener failed: {:?}", e);
                         }
                         
-                        // Wait 2 seconds before dropping the old listener
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        // Reduce delay to 1 second
+                        tokio::time::sleep(Duration::from_secs(1)).await;
                         
-                        // Now drop the old listener if it exists
                         if let Some(listener) = current_listener.take() {
                             drop(listener);
                         }
                         
-                        // Store the new listener
                         current_listener = Some(new_listener);
-
-                        // Wait 10 minutes before creating a new instance
                         tokio::time::sleep(Duration::from_secs(600)).await;
                     }
                 });
@@ -363,6 +354,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let reset_tx_manager_config = ResetTxManagerConfig {
+        sample_size: 10,
+        multiplier: 5.0,
+        max_retries: 5,
+        retry_delay_secs: 1,
+        poll_interval_secs: 30,
+        batch_limit: 500,
+    };
+    
+    let db_clone_reset = db.clone(); // Clone db for reset tx manager
+    let reset_tx_manager_handle = tokio::spawn(async move {
+        let mut current_manager = None;
+        loop {
+            let mut new_manager = ResetTxManager::new(reset_tx_manager_config.clone(), db_clone_reset.clone());
+            info!("Starting new reset tx manager instance");
+            
+            if let Err(e) = new_manager.start().await {
+                error!("Reset tx manager failed: {:?}", e);
+            }
+            
+            // Reduce delay to 1 second
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            
+            if let Some(manager) = current_manager.take() {
+                drop(manager);
+            }
+            
+            current_manager = Some(new_manager);
+            tokio::time::sleep(Duration::from_secs(600)).await;
+        }
+    });
+
     // Spawn processors
     let proof_generator_handle = tokio::spawn(async move {
         if let Err(e) = proof_generator.start().await {
@@ -383,38 +406,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_proof_ready_checker_handle = tokio::spawn(async move {
         let mut current_checker = None;
         loop {
-            // Create new checker instance
-            let new_checker = EventProofReadyChecker::new(
-                db_clone_checker.clone(),      // Use the cloned db
-                Duration::from_secs(2),  // Poll interval
-                Duration::from_secs(2),  // Block update interval
+            let mut new_checker = EventProofReadyChecker::new(
+                db_clone_checker.clone(),
+                Duration::from_secs(2),
+                Duration::from_secs(2),
             );
             info!("Starting new event proof ready checker instance");
-
-            // Spawn the checker's start method in its own task
-            let _checker_task_handle = tokio::spawn({
-                let checker_to_start = new_checker.clone(); // Clone instance for the task
-                async move {
-                    if let Err(e) = checker_to_start.start().await {
-                        error!("Event proof ready checker instance failed: {:?}", e);
-                    }
-                }
-            });
-
-            // Wait a moment for the new checker to initialize
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            // Drop the old checker instance (if it exists)
+            
+            if let Err(e) = new_checker.start().await {
+                error!("Event proof ready checker failed: {:?}", e);
+            }
+            
+            // Reduce delay to 1 second
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            
             if let Some(checker) = current_checker.take() {
                 drop(checker);
             }
-
-            // Store the new checker instance
+            
             current_checker = Some(new_checker);
-
-            // Wait 10 minutes before creating the next instance
             tokio::time::sleep(Duration::from_secs(600)).await;
-            info!("Restarting event proof ready checker...");
         }
     });
 
@@ -422,6 +433,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::try_join!(
         event_proof_ready_checker_handle,
         lane_manager_handle,
+        reset_tx_manager_handle,
     )?;
 
     warn!("Sequencer shutting down");

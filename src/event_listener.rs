@@ -58,6 +58,7 @@ pub struct EventConfig {
 pub struct EventListener {
     config: EventConfig,
     db: Database,
+    ws_connection: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
 }
 
 impl EventListener {
@@ -65,10 +66,11 @@ impl EventListener {
         Self {
             config,
             db,
+            ws_connection: None,
         }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!(
             "Starting event listener for market={:?} chain={} event={}",
             self.config.market, self.config.chain_id, self.config.event_signature
@@ -104,7 +106,7 @@ impl EventListener {
         }
     }
 
-    async fn run_event_listener(&self) -> Result<()> {
+    async fn run_event_listener(&mut self) -> Result<()> {
         let ws_url: Url = self
             .config
             .ws_url
@@ -117,6 +119,9 @@ impl EventListener {
             .on_ws(ws)
             .await
             .wrap_err("Failed to connect to WebSocket")?;
+
+        // Store the connection
+        self.ws_connection = Some(provider.clone());
 
         let filter = Filter::new()
             .event(&self.config.event_signature)
@@ -313,5 +318,14 @@ impl EventListener {
 
         // Don't update database here - return the event update for batch processing
         Ok(event_update)
+    }
+}
+
+impl Drop for EventListener {
+    fn drop(&mut self) {
+        if let Some(_provider) = self.ws_connection.take() {
+            info!("Cleaning up WebSocket connection for chain {} and event {}", 
+                  self.config.chain_id, self.config.event_signature);
+        }
     }
 }

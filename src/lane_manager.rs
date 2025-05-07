@@ -34,10 +34,10 @@ impl LaneManager {
         // For now, just return 1.0 for all markets
         // TODO: Implement actual price fetching
         if *market == address!("c15EF00790b987ce4B82eB9e25e1233a89589510") {
-            return 1.0;
+            return 1.0 / 1000000.0;
         }
         else {
-            return 1.0;
+            return 2000.0 / 1000000000000000000.0;
         }
         
     }
