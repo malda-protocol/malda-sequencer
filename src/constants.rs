@@ -41,8 +41,21 @@ pub const WS_URL_BASE_SEPOLIA: &str =
     "ws://localhost:8553";
 pub const WS_URL_LINEA_SEPOLIA: &str =
     "ws://localhost:8554";
-// pub const WS_URL_LINEA_SEPOLIA: &str =
-//     "wss://linea-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+
+
+pub const WS_URL_LINEA_SEPOLIA_BACKUP: &str =
+    "wss://linea-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+pub const WS_URL_OPT_SEPOLIA_BACKUP: &str =
+    "wss://opt-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+pub const WS_URL_ETH_SEPOLIA_BACKUP: &str =
+    "wss://eth-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+
+pub const RPC_URL_LINEA_SEPOLIA_BACKUP: &str =
+    "https://linea-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+pub const RPC_URL_OPT_SEPOLIA_BACKUP: &str =
+    "https://opt-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
+pub const RPC_URL_ETH_SEPOLIA_BACKUP: &str =
+    "https://eth-sepolia.g.alchemy.com/v2/xaLwh_pW3EIPXyTzwLQ-hIRiwtQO-egi";
 
 
 // Sequencer configuration
