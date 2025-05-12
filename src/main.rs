@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chain_configs = vec![
         (
             WS_URL_LINEA_SEPOLIA,
+            WS_URL_LINEA_SEPOLIA_BACKUP,
             LINEA_SEPOLIA_CHAIN_ID,
             vec![
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
@@ -112,11 +113,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         (
             WS_URL_OPT_SEPOLIA,
+            WS_URL_OPT_SEPOLIA_BACKUP,
             OPTIMISM_SEPOLIA_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
         (
             WS_URL_ETH_SEPOLIA,
+            WS_URL_ETH_SEPOLIA_BACKUP,
             ETHEREUM_SEPOLIA_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
@@ -125,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Configured chains: {:?}",
         chain_configs
             .iter()
-            .map(|(_, id, _)| id)
+            .map(|(_, _, id, _)| id)
             .collect::<Vec<_>>()
     );
 
@@ -194,7 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut handles = vec![];
 
     for market in &markets {
-        for (ws_url, chain_id, events) in chain_configs.iter() {
+        for (ws_url, ws_url_backup, chain_id, events) in chain_configs.iter() {
             for event in events {
                 info!(
                     "Starting listener for market={:?}, chain={}, event={}",
@@ -202,13 +205,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 let config = EventConfig {
-                    ws_url: ws_url.to_string(),
+                    primary_ws_url: ws_url.to_string(),
+                    fallback_ws_url: ws_url_backup.to_string(),
                     market: *market,
                     event_signature: event.to_string(),
                     chain_id: *chain_id,
-                    max_retries: 10,
-                    retry_delay_secs: 1,
-                    poll_interval_secs: 2,
+                    max_retries: 3,
+                    retry_delay_secs: 5,
+                    poll_interval_secs: 1,
                 };
 
                 let db = db.clone();
@@ -223,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         
                         // Reduce delay to 1 second
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(Duration::from_secs(5)).await;
                         
                         if let Some(listener) = current_listener.take() {
                             drop(listener);

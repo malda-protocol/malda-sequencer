@@ -45,7 +45,8 @@ lazy_static! {
 
 #[derive(Debug, Clone)]
 pub struct EventConfig {
-    pub ws_url: String,
+    pub primary_ws_url: String,
+    pub fallback_ws_url: String,
     pub market: Address,
     pub event_signature: String,
     pub chain_id: u64,
@@ -58,7 +59,8 @@ pub struct EventConfig {
 pub struct EventListener {
     config: EventConfig,
     db: Database,
-    ws_connection: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
+    primary_provider: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
+    fallback_provider: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
 }
 
 impl EventListener {
@@ -66,7 +68,8 @@ impl EventListener {
         Self {
             config,
             db,
-            ws_connection: None,
+            primary_provider: None,
+            fallback_provider: None,
         }
     }
 
@@ -107,21 +110,37 @@ impl EventListener {
     }
 
     async fn run_event_listener(&mut self) -> Result<()> {
-        let ws_url: Url = self
+        // Connect to primary provider
+        let primary_ws_url: Url = self
             .config
-            .ws_url
+            .primary_ws_url
             .parse()
-            .wrap_err_with(|| format!("Invalid WSS URL: {}", self.config.ws_url))?;
+            .wrap_err_with(|| format!("Invalid primary WSS URL: {}", self.config.primary_ws_url))?;
 
-        debug!("Connecting to provider at {}", ws_url);
-        let ws = WsConnect::new(ws_url);
-        let provider = ProviderBuilder::new()
-            .on_ws(ws)
+        debug!("Connecting to primary provider at {}", primary_ws_url);
+        let primary_ws = WsConnect::new(primary_ws_url);
+        let primary_provider = ProviderBuilder::new()
+            .on_ws(primary_ws)
             .await
-            .wrap_err("Failed to connect to WebSocket")?;
+            .wrap_err("Failed to connect to primary WebSocket")?;
 
-        // Store the connection
-        self.ws_connection = Some(provider.clone());
+        // Connect to fallback provider
+        let fallback_ws_url: Url = self
+            .config
+            .fallback_ws_url
+            .parse()
+            .wrap_err_with(|| format!("Invalid fallback WSS URL: {}", self.config.fallback_ws_url))?;
+
+        debug!("Connecting to fallback provider at {}", fallback_ws_url);
+        let fallback_ws = WsConnect::new(fallback_ws_url);
+        let fallback_provider = ProviderBuilder::new()
+            .on_ws(fallback_ws)
+            .await
+            .wrap_err("Failed to connect to fallback WebSocket")?;
+
+        // Store the connections
+        self.primary_provider = Some(primary_provider.clone());
+        self.fallback_provider = Some(fallback_provider.clone());
 
         let filter = Filter::new()
             .event(&self.config.event_signature)
@@ -141,12 +160,20 @@ impl EventListener {
         loop {
             interval.tick().await;
 
-            // Get current block number
-            let current_block = match provider.get_block_number().await {
+            // Get current block number with fallback
+            let current_block = match primary_provider.get_block_number().await {
                 Ok(block) => block,
                 Err(e) => {
-                    error!("Failed to get current block number: {:?}", e);
-                    continue;
+                    warn!("Primary provider failed to get block number: {:?}, trying fallback", e);
+                    info!("FALLBACK PROVIDER USED: chain={}, market={:?}, event={}", 
+                        self.config.chain_id, self.config.market, self.config.event_signature);
+                    match fallback_provider.get_block_number().await {
+                        Ok(block) => block,
+                        Err(e) => {
+                            error!("Both providers failed to get block number: {:?}", e);
+                            continue;
+                        }
+                    }
                 }
             };
 
@@ -157,7 +184,6 @@ impl EventListener {
             }
 
             // Set the from_block to the next block after the last processed one
-            // If this is the first poll, start from current block
             let from_block = if last_processed_block > 0 {
                 last_processed_block + 1
             } else {
@@ -171,30 +197,55 @@ impl EventListener {
 
             let mut block_timestamps = HashMap::new();
 
+            // Get block timestamps with fallback
             for block_number in from_block..=current_block {
-                let block = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await?
-                    .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
+                let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        warn!("Block {} not found in primary provider, trying fallback", block_number);
+                        info!("FALLBACK PROVIDER USED: chain={}, market={:?}, event={}", 
+                            self.config.chain_id, self.config.market, self.config.event_signature);
+                        match fallback_provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
+                            Ok(Some(block)) => block,
+                            Ok(None) => return Err(eyre::eyre!("Block {} not found in either provider", block_number)),
+                            Err(e) => return Err(eyre::eyre!("Failed to get block from fallback provider: {:?}", e)),
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Primary provider failed to get block {}: {:?}, trying fallback", block_number, e);
+                        info!("FALLBACK PROVIDER USED: chain={}, market={:?}, event={}", 
+                            self.config.chain_id, self.config.market, self.config.event_signature);
+                        match fallback_provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
+                            Ok(Some(block)) => block,
+                            Ok(None) => return Err(eyre::eyre!("Block {} not found in fallback provider", block_number)),
+                            Err(e) => return Err(eyre::eyre!("Failed to get block from fallback provider: {:?}", e)),
+                        }
+                    }
+                };
             
                 let timestamp = block.header.inner.timestamp;
                 block_timestamps.insert(block_number, timestamp);
             }
 
-
             // Update filter to include block range
             let range_filter = filter.clone().from_block(from_block).to_block(current_block);
 
-            // Get logs for the block range
-            let logs = match provider.get_logs(&range_filter).await {
+            // Get logs with fallback
+            let logs = match primary_provider.get_logs(&range_filter).await {
                 Ok(logs) => logs,
                 Err(e) => {
-                    error!("Failed to get logs: {:?}", e);
-                    continue;
+                    warn!("Primary provider failed to get logs: {:?}, trying fallback", e);
+                    info!("FALLBACK PROVIDER USED: chain={}, market={:?}, event={}", 
+                        self.config.chain_id, self.config.market, self.config.event_signature);
+                    match fallback_provider.get_logs(&range_filter).await {
+                        Ok(logs) => logs,
+                        Err(e) => {
+                            error!("Both providers failed to get logs: {:?}", e);
+                            continue;
+                        }
+                    }
                 }
             };
-
-
-
-            // info!("Found {} logs in blocks {} to {}", logs.len(), from_block, current_block);
 
             if logs.is_empty() {
                 debug!("No new events found in blocks {} to {}", from_block, current_block);
@@ -206,7 +257,7 @@ impl EventListener {
             let mut handles = Vec::new();
             
             for log in logs {
-                let curr_timestamp = block_timestamps[&log.block_number.unwrap_or_default()];
+                let curr_timestamp = *block_timestamps.get(&log.block_number.unwrap_or_default()).unwrap_or(&0);
                 let self_clone = self.clone();
                 let handle = tokio::spawn(async move {
                     match self_clone.process_event(log, curr_timestamp).await {
@@ -231,8 +282,6 @@ impl EventListener {
             // Write updates to database if any
             if !pending_updates.is_empty() {
                 let count = pending_updates.len();
-                // info!("Writing batch of {} events to database", count);
-                
                 match self.db.add_new_events(&pending_updates).await {
                     Ok(_) => info!("Successfully added batch of {} new events to database", count),
                     Err(e) => error!("Failed to write events to database: {:?}", e),
@@ -323,8 +372,12 @@ impl EventListener {
 
 impl Drop for EventListener {
     fn drop(&mut self) {
-        if let Some(_provider) = self.ws_connection.take() {
-            info!("Cleaning up WebSocket connection for chain {} and event {}", 
+        if let Some(_provider) = self.primary_provider.take() {
+            info!("Cleaning up primary WebSocket connection for chain {} and event {}", 
+                  self.config.chain_id, self.config.event_signature);
+        }
+        if let Some(_provider) = self.fallback_provider.take() {
+            info!("Cleaning up fallback WebSocket connection for chain {} and event {}", 
                   self.config.chain_id, self.config.event_signature);
         }
     }
