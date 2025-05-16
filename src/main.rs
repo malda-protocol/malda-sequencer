@@ -216,18 +216,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             rpc_url: rpc_url_ethereum_sepolia().to_string(),
             fallback_rpc_url: RPC_URL_ETH_SEPOLIA_BACKUP.to_string(),
             is_l2: false,
+            max_block_delay_secs: 24,
         },
         event_proof_ready_checker::ChainConfig {
             chain_id: OPTIMISM_SEPOLIA_CHAIN_ID,
             rpc_url: rpc_url_optimism_sepolia().to_string(),
             fallback_rpc_url: RPC_URL_OPT_SEPOLIA_BACKUP.to_string(),
             is_l2: true,
+            max_block_delay_secs: 6,
         },
         event_proof_ready_checker::ChainConfig {
             chain_id: LINEA_SEPOLIA_CHAIN_ID,
             rpc_url: rpc_url_linea_sepolia().to_string(),
             fallback_rpc_url: RPC_URL_LINEA_SEPOLIA_BACKUP.to_string(),
             is_l2: true,
+            max_block_delay_secs: 6,
         },
     ];
 
@@ -310,6 +313,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         PROOF_RETRY_DELAY,
         db.clone(),
         batch_limit,
+        24, // ethereum_max_block_delay_secs - 24 seconds for Ethereum chains
+        6,  // l2_max_block_delay_secs - 6 seconds for L2 chains
     );
 
     // Create transaction manager configuration

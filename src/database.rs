@@ -999,6 +999,31 @@ impl Database {
 
         Ok(())
     }
+
+    // Add a new record to the node_status table
+    pub async fn add_to_node_status(
+        &self,
+        chain_id: u64,
+        primary_url: &str,
+        fallback_url: &str,
+        reason: &str
+    ) -> Result<()> {
+        query(
+            r#"
+            INSERT INTO node_status (chain_id, primary_url, fallback_url, reason)
+            VALUES ($1, $2, $3, $4)
+            "#
+        )
+        .bind(chain_id as i32)
+        .bind(primary_url)
+        .bind(fallback_url)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Recorded node failure for chain {}: {}", chain_id, reason);
+        Ok(())
+    }
 }
 
 

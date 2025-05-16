@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS chain_batch_sync;
 DROP TABLE IF EXISTS sync_timestamps;
 DROP TABLE IF EXISTS volume_flow;
 DROP TABLE IF EXISTS rpc_monitor;
+DROP TABLE IF EXISTS node_status;
 
 DROP TYPE IF EXISTS event_status;
 
@@ -146,9 +147,20 @@ VALUES
     (11155420, NOW(), 0)  -- Optimism Sepolia
 ON CONFLICT (chain_id) DO NOTHING;
 
+-- Create table to track node status and failures
+CREATE TABLE node_status (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    chain_id INTEGER NOT NULL,
+    primary_url TEXT NOT NULL,
+    fallback_url TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+
 CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX finished_events_status_idx ON finished_events(status);
 CREATE INDEX idx_events_dst_chain_id ON events(dst_chain_id);
+CREATE INDEX idx_node_status_timestamp ON node_status(timestamp);
 
 -- Grant SELECT permissions to frontend user
 GRANT SELECT ON events TO "Frontend";
@@ -157,3 +169,4 @@ GRANT SELECT ON finished_events TO "Frontend";
 GRANT SELECT ON events TO "Analytics";
 GRANT SELECT ON finished_events TO "Analytics";
 GRANT SELECT ON archive_events TO "Analytics";
+GRANT SELECT ON node_status TO "Analytics";
