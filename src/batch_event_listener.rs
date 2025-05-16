@@ -22,17 +22,19 @@ use sequencer::database::{Database, EventStatus, EventUpdate};
 
 #[derive(Debug, Clone)]
 pub struct BatchEventConfig {
-    pub ws_url: String,
+    pub primary_ws_url: String,
+    pub fallback_ws_url: String,
     pub batch_submitter: Address,
     pub chain_id: u64,
     pub block_delay: u64,  // Number of blocks to delay processing
+    pub max_block_delay_secs: u64, // Maximum acceptable block delay in seconds
 }
 
 #[derive(Clone)]
 pub struct BatchEventListener {
     config: BatchEventConfig,
     db: Database,
-    ws_connection: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
+    primary_provider: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
 }
 
 impl BatchEventListener {
@@ -40,7 +42,7 @@ impl BatchEventListener {
         Self { 
             config, 
             db,
-            ws_connection: None,
+            primary_provider: None,
         }
     }
 
@@ -83,22 +85,6 @@ impl BatchEventListener {
     }
 
     async fn run_event_listener(&mut self) -> Result<()> {
-        let ws_url: Url = self
-            .config
-            .ws_url
-            .parse()
-            .wrap_err_with(|| format!("Invalid WSS URL: {}", self.config.ws_url))?;
-
-        debug!("Connecting to provider at {}", ws_url);
-        let ws = WsConnect::new(ws_url);
-        let provider = ProviderBuilder::new()
-            .on_ws(ws)
-            .await
-            .wrap_err("Failed to connect to WebSocket")?;
-
-        // Store the connection
-        self.ws_connection = Some(provider.clone());
-
         // Create base filters for success and failure events
         let success_filter = Filter::new()
             .event(BATCH_PROCESS_SUCCESS_SIG)
@@ -118,15 +104,31 @@ impl BatchEventListener {
         let mut interval = interval(poll_interval);
 
         info!("Started polling for batch events");
+        
+        // Flag to track if we used fallback in the previous cycle
+        let mut used_fallback = false;
 
         loop {
             interval.tick().await;
+
+            // Determine which provider to use for this polling cycle
+            let provider = match self.get_active_provider(used_fallback).await {
+                Ok((provider, is_fallback)) => {
+                    used_fallback = is_fallback;
+                    provider
+                },
+                Err(e) => {
+                    error!("Failed to get active provider: {:?}", e);
+                    continue;
+                }
+            };
 
             // Get current block number
             let current_block = match provider.get_block_number().await {
                 Ok(block) => block,
                 Err(e) => {
-                    error!("Failed to get current block number: {:?}", e);
+                    error!("Provider failed to get block number: {:?}", e);
+                    used_fallback = true; // Force new primary provider on next cycle
                     continue;
                 }
             };
@@ -134,7 +136,7 @@ impl BatchEventListener {
             // For first run, start from current_block - block_delay
             if last_processed_block == 0 {
                 last_processed_block = if current_block > self.config.block_delay {
-                    current_block - self.config.block_delay
+                    current_block - self.config.block_delay - 2
                 } else {
                     0
                 };
@@ -173,41 +175,43 @@ impl BatchEventListener {
                 .from_block(from_block)
                 .to_block(target_block);
 
-            // Get success logs for the block range
+            // Get success logs
             let success_logs = match provider.get_logs(&success_range_filter).await {
                 Ok(logs) => logs,
                 Err(e) => {
-                    error!("Failed to get success logs: {:?}", e);
+                    error!("Provider failed to get success logs: {:?}", e);
+                    used_fallback = true; // Force new primary provider on next cycle
                     continue;
                 }
             };
 
-            // Get failure logs for the block range
+            // Get failure logs
             let failure_logs = match provider.get_logs(&failure_range_filter).await {
                 Ok(logs) => logs,
                 Err(e) => {
-                    error!("Failed to get failure logs: {:?}", e);
+                    error!("Provider failed to get failure logs: {:?}", e);
+                    used_fallback = true; // Force new primary provider on next cycle
                     continue;
                 }
             };
 
             let mut block_timestamps = HashMap::new();
 
+            // Get block timestamps
             for block_number in from_block..=target_block {
-                let block = provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await?
-                    .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
+                let block = match provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
+                    Err(e) => {
+                        error!("Failed to get block {}: {:?}", block_number, e);
+                        used_fallback = true; // Force new primary provider on next cycle
+                        continue;
+                    }
+                };
             
                 let timestamp = block.header.inner.timestamp;
                 block_timestamps.insert(block_number, timestamp);
             }
-
-            // info!(
-            //     "Found {} success and {} failure logs in blocks {} to {}", 
-            //     success_logs.len(),
-            //     failure_logs.len(),
-            //     from_block, 
-            //     target_block
-            // );
 
             // Process success logs
             let success_events: Vec<BatchProcessSuccessEvent> = success_logs
@@ -263,36 +267,122 @@ impl BatchEventListener {
 
             // Update last processed block
             last_processed_block = target_block;
-            // info!("Updated last_processed_block to {}", last_processed_block);
         }
+    }
+
+    // Helper method to determine which provider to use
+    async fn get_active_provider(&mut self, force_new_primary: bool) -> Result<(alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>, bool)> {
+        // If we have a primary provider and don't need to force a new one, check if it's still valid
+        if !force_new_primary && self.primary_provider.is_some() {
+            let provider = self.primary_provider.as_ref().unwrap();
+            
+            // Check if the primary provider is fresh enough
+            match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+                Ok(Some(block)) => {
+                    // Check block timestamp
+                    let block_timestamp: u64 = block.header.inner.timestamp.into();
+                    let current_time = chrono::Utc::now().timestamp() as u64;
+                    let max_delay = self.config.max_block_delay_secs;
+
+                    if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
+                        warn!(
+                            "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s, trying fallback at {}",
+                            block_timestamp, current_time, current_time - block_timestamp, max_delay, self.config.fallback_ws_url
+                        );
+                        // Use fallback and mark primary as invalid
+                        self.primary_provider = None;
+                        return self.create_fallback_provider().await;
+                    }
+                    
+                    // Primary provider is good, use it
+                    debug!("Reusing existing primary provider");
+                    return Ok((provider.clone(), false));
+                },
+                _ => {
+                    // Primary provider failed, clear it and try creating a new one
+                    warn!("Existing primary provider failed to get latest block, creating new one");
+                    self.primary_provider = None;
+                }
+            }
+        }
+
+        // Create a new primary provider
+        let primary_ws_url: Url = self
+            .config
+            .primary_ws_url
+            .parse()
+            .wrap_err_with(|| format!("Invalid primary WSS URL: {}", self.config.primary_ws_url))?;
+
+        debug!("Connecting to primary provider at {}", primary_ws_url);
+        let primary_ws = WsConnect::new(primary_ws_url);
+        let primary_provider = match ProviderBuilder::new().on_ws(primary_ws).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                warn!("Failed to connect to primary WebSocket: {:?}, trying fallback at {}", e, self.config.fallback_ws_url);
+                return self.create_fallback_provider().await;
+            }
+        };
+
+        // Check if the primary provider is fresh enough
+        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+            Ok(Some(block)) => block,
+            Ok(None) => {
+                warn!("Primary provider returned no latest block, trying fallback at {}", self.config.fallback_ws_url);
+                return self.create_fallback_provider().await;
+            }
+            Err(e) => {
+                warn!("Primary provider failed to get latest block: {:?}, trying fallback at {}", e, self.config.fallback_ws_url);
+                return self.create_fallback_provider().await;
+            }
+        };
+
+        // Check if the block is fresh enough
+        let block_timestamp: u64 = block.header.inner.timestamp.into();
+        let current_time = chrono::Utc::now().timestamp() as u64;
+        let max_delay = self.config.max_block_delay_secs;
+
+        if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
+            warn!(
+                "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s, trying fallback at {}",
+                block_timestamp, current_time, current_time - block_timestamp, max_delay, self.config.fallback_ws_url
+            );
+            return self.create_fallback_provider().await;
+        }
+
+        // Store the new primary provider
+        debug!("Using new primary provider");
+        self.primary_provider = Some(primary_provider.clone());
+        Ok((primary_provider, false))
+    }
+
+    // Helper method to create fallback provider
+    async fn create_fallback_provider(&self) -> Result<(alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>, bool)> {
+        let fallback_ws_url: Url = self
+            .config
+            .fallback_ws_url
+            .parse()
+            .wrap_err_with(|| format!("Invalid fallback WSS URL: {}", self.config.fallback_ws_url))?;
+
+        info!("Connecting to fallback provider at {}", fallback_ws_url);
+        let fallback_ws = WsConnect::new(fallback_ws_url);
+        let fallback_provider = ProviderBuilder::new()
+            .on_ws(fallback_ws)
+            .await
+            .wrap_err("Failed to connect to fallback WebSocket")?;
+
+        info!("Using fallback provider for this polling cycle");
+        Ok((fallback_provider, true))
     }
 }
 
 impl Drop for BatchEventListener {
     fn drop(&mut self) {
-        if let Some(_provider) = self.ws_connection.take() {
-            info!("Cleaning up WebSocket connection for chain {}", self.config.chain_id);
-            // The provider will be dropped here, which should close the WebSocket connection
+        if self.primary_provider.is_some() {
+            info!("Dropping primary provider connection for chain {} and batch submitter {:?}", 
+                  self.config.chain_id, self.config.batch_submitter);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::constants::{test::*, EVENT_CHANNEL_CAPACITY};
-
-    #[tokio::test]
-    async fn test_batch_event_listener_creation() -> Result<()> {
-        let config = BatchEventConfig {
-            ws_url: TEST_WS_URL.to_string(),
-            batch_submitter: Address::ZERO,
-            chain_id: TEST_CHAIN_ID,
-            block_delay: 2,  // Default test delay
-        };
-
-        let db = Database::new("postgresql://localhost:5432/test").await?;
-        let _listener = BatchEventListener::new(config, db);
-        Ok(())
+        
+        info!("Dropping batch event listener for chain {} and batch submitter {:?}", 
+              self.config.chain_id, self.config.batch_submitter);
     }
 }

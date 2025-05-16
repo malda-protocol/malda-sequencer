@@ -311,8 +311,29 @@ impl TransactionManager {
                         tx
                     },
                     Err(e) => {
+                        let error_str = e.to_string();
+                        // Check if error is "nonce too low" which indicates previous transaction was included
+                        if error_str.contains("nonce too low") {
+                            info!("Received 'nonce too low' error for chain {}, indicating previous transaction was included", chain_id);
+                            // Get the receipt of the previous transaction
+                            if let Some(prev_hash) = tx_hash {
+                                if let Ok(Some(receipt)) = provider.get_transaction_receipt(prev_hash).await {
+                                    if receipt.status() == true {
+                                        info!(
+                                            "Previous transaction was successful for chain {}: hash={:?}, gas_used={}, duration={:?}",
+                                            chain_id,
+                                            receipt.transaction_hash,
+                                            receipt.gas_used(),
+                                            batch_start.elapsed()
+                                        );
+                                        return Ok(prev_hash);
+                                    }
+                                }
+                            }
+                        }
+                        
                         error!("Transaction submission failed for chain {}: {}", chain_id, e);
-                        last_error = Some(e.to_string());
+                        last_error = Some(error_str);
                         // Wait before retrying
                         info!("Waiting {:?} before retry attempt {}/{}", chain_config.retry_delay, retry_count + 1, chain_config.max_retries);
                         sleep(chain_config.retry_delay).await;
@@ -357,6 +378,26 @@ impl TransactionManager {
                     // Transaction failed or timed out
                     error!("Transaction failed for chain {}: error={}, duration={:?}, hash={:?}", 
                            chain_id, e, batch_start.elapsed(), tx_hash);
+                    
+                    // Check if the transaction was actually included despite the timeout
+                    if let Some(hash) = tx_hash {
+                        if let Ok(Some(receipt)) = provider.get_transaction_receipt(hash).await {
+                            info!("Transaction was actually included despite timeout for chain {}: hash={:?}", chain_id, hash);
+                            if receipt.status() == true {
+                                info!(
+                                    "Batch transaction successful for chain {}: hash={:?}, gas_used={}, duration={:?}",
+                                    chain_id,
+                                    receipt.transaction_hash,
+                                    receipt.gas_used(),
+                                    batch_start.elapsed()
+                                );
+                                break;
+                            } else {
+                                error!("Transaction was included but reverted for chain {}: hash={:?}", chain_id, hash);
+                                break;
+                            }
+                        }
+                    }
                     
                     // If we've reached max retries, update the events as failed
                     if retry_count == chain_config.max_retries - 1 {

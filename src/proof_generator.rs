@@ -223,12 +223,19 @@ impl ProofGeneratorWorker {
 
         loop {
             let start_time = Instant::now();
+            let fallback = attempts >= self.max_retries / 2;
+            
+            if fallback {
+                info!("Using fallback mode for proof generation after {} failed attempts", attempts);
+            }
+            
             match get_proof_data_prove_sdk(
                 users.clone(),
                 markets.clone(),
                 dst_chain_ids.clone(),
                 src_chain_ids.clone(),
                 false,
+                fallback
             )
             .await
             {

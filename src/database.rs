@@ -739,7 +739,7 @@ impl Database {
                     COALESCE(
                         CASE 
                             WHEN e.amount IS NOT NULL AND mp.price IS NOT NULL 
-                            THEN (e.amount::numeric * mp.price::numeric)::integer
+                            THEN (e.amount::numeric(78,0) * mp.price::numeric(78,0))::numeric(78,0)::bigint
                             ELSE 0
                         END,
                         0
@@ -835,10 +835,10 @@ impl Database {
             r#"
             WITH recent_successes AS (
                 SELECT 
-                    AVG(EXTRACT(EPOCH FROM ( proof_received_at - proof_requested_at))) as avg_proof_request_time,
-                    AVG(EXTRACT(EPOCH FROM (batch_submitted_at - proof_received_at))) as avg_proof_generation_time,
-                    AVG(EXTRACT(EPOCH FROM (batch_included_at - batch_submitted_at))) as avg_batch_submission_time,
-                    AVG(EXTRACT(EPOCH FROM (tx_finished_at - batch_included_at))) as avg_batch_inclusion_time
+                    GREATEST(AVG(EXTRACT(EPOCH FROM ( proof_received_at - proof_requested_at))), 20) as avg_proof_request_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (batch_submitted_at - proof_received_at))), 10) as avg_proof_generation_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (batch_included_at - batch_submitted_at))), 10) as avg_batch_submission_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (tx_finished_at - batch_included_at))), 20) as avg_batch_inclusion_time
                 FROM finished_events
                 WHERE status = 'TxProcessSuccess'::event_status
                 GROUP BY tx_hash
@@ -972,6 +972,29 @@ impl Database {
                 "Reset {} stuck events and deleted {} batch failed events from finished_events",
                 rows_affected, deleted_batch_failed_rows
             );
+        }
+
+        Ok(())
+    }
+
+    pub async fn sequencer_start_events_reset(&self) -> Result<()> {
+        let rows_affected = query(
+            r#"
+            UPDATE events
+            SET 
+                status = 'ReadyToRequestProof'::event_status,
+                proof_requested_at = NULL
+            WHERE status = 'ProofRequested'::event_status
+            "#
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            info!("Reset {} events from ProofRequested back to ReadyToRequestProof", rows_affected);
+        } else {
+            debug!("No events were reset from ProofRequested status");
         }
 
         Ok(())
