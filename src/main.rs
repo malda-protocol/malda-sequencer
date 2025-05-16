@@ -1,4 +1,5 @@
 use alloy::{
+    primitives::{Address, address},
     network::EthereumWallet,
     providers::{
         fillers::{BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller},
@@ -44,7 +45,7 @@ use std::collections::HashMap;
 use std::env;
 
 mod event_proof_ready_checker;
-use event_proof_ready_checker::EventProofReadyChecker;
+use event_proof_ready_checker::{EventProofReadyChecker};
 use crate::transaction_manager::ChainConfig;
 
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
@@ -64,8 +65,13 @@ type ProviderType = alloy::providers::fillers::FillProvider<
 
 type RpcUrls = HashMap<u32, String>;
 
+pub const USDC_MOCK_MARKET_SEPOLIA: Address = address!("c15EF00790b987ce4B82eB9e25e1233a89589510");
+pub const WSTETH_MOCK_MARKET_SEPOLIA: Address = address!("B84644c24B4D0823A0770ED698f7C20B88Bcf824");
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    
     // Initialize tracing subscriber for console output
     // Log level can be controlled via RUST_LOG environment variable:
     // - RUST_LOG=debug for debug logs
@@ -92,6 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         database_url.replace("postgres://", "postgres://*****:*****@")
     );
     let db = Database::new(&database_url).await?;
+
+    db.sequencer_start_events_reset().await?;
 
     // Markets
     let markets = vec![
@@ -137,15 +145,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Batch submitter configurations for each chain
     let batch_configs = vec![
-        (WS_URL_LINEA_SEPOLIA, LINEA_SEPOLIA_CHAIN_ID),
-        (WS_URL_OPT_SEPOLIA, OPTIMISM_SEPOLIA_CHAIN_ID),
-        (WS_URL_ETH_SEPOLIA, ETHEREUM_SEPOLIA_CHAIN_ID),
+        (WS_URL_LINEA_SEPOLIA, WS_URL_LINEA_SEPOLIA_BACKUP, LINEA_SEPOLIA_CHAIN_ID),
+        (WS_URL_OPT_SEPOLIA, WS_URL_OPT_SEPOLIA_BACKUP, OPTIMISM_SEPOLIA_CHAIN_ID),
+        (WS_URL_ETH_SEPOLIA, WS_URL_ETH_SEPOLIA_BACKUP, ETHEREUM_SEPOLIA_CHAIN_ID),
     ];
 
     // Spawn batch event listeners
     let mut handles = vec![];
 
-    for (ws_url, chain_id) in batch_configs {
+    for (ws_url, ws_url_backup, chain_id) in batch_configs {
         info!(
             "Starting batch event listener for chain={}, submitter={:?}",
             chain_id, BATCH_SUBMITTER
@@ -157,11 +165,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             5
         };
 
+        let max_block_delay_secs = if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID || chain_id == ETHEREUM_CHAIN_ID {
+            24
+        } else {
+            6
+        };
+
         let config = BatchEventConfig {
-            ws_url: ws_url.to_string(),
+            primary_ws_url: ws_url.to_string(),
+            fallback_ws_url: ws_url_backup.to_string(),
             batch_submitter: BATCH_SUBMITTER,
             chain_id,
             block_delay,  // Process events with 2 block delay
+            max_block_delay_secs,
         };
 
         let db = db.clone();
@@ -193,6 +209,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("All batch event listeners started");
 
+    // Initialize chain configurations for EventProofReadyChecker
+    let proof_checker_chain_configs = vec![
+        event_proof_ready_checker::ChainConfig {
+            chain_id: ETHEREUM_SEPOLIA_CHAIN_ID,
+            rpc_url: rpc_url_ethereum_sepolia().to_string(),
+            fallback_rpc_url: RPC_URL_ETH_SEPOLIA_BACKUP.to_string(),
+            is_l2: false,
+        },
+        event_proof_ready_checker::ChainConfig {
+            chain_id: OPTIMISM_SEPOLIA_CHAIN_ID,
+            rpc_url: rpc_url_optimism_sepolia().to_string(),
+            fallback_rpc_url: RPC_URL_OPT_SEPOLIA_BACKUP.to_string(),
+            is_l2: true,
+        },
+        event_proof_ready_checker::ChainConfig {
+            chain_id: LINEA_SEPOLIA_CHAIN_ID,
+            rpc_url: rpc_url_linea_sepolia().to_string(),
+            fallback_rpc_url: RPC_URL_LINEA_SEPOLIA_BACKUP.to_string(),
+            is_l2: true,
+        },
+    ];
+
+    // Initialize and start EventProofReadyChecker
+    let mut proof_checker = EventProofReadyChecker::new(
+        db.clone(),
+        Duration::from_secs(1),  // poll_interval
+        Duration::from_secs(2),  // block_update_interval
+        proof_checker_chain_configs,
+    );
+
+    if let Err(e) = proof_checker.start().await {
+        error!("Failed to start event proof ready checker: {:?}", e);
+    }
+
     // Spawn event listeners
     let mut handles = vec![];
 
@@ -204,6 +254,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     market, chain_id, event
                 );
 
+                let max_block_delay_secs = if *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID || *chain_id == ETHEREUM_CHAIN_ID {
+                    24
+                } else {
+                    6
+                };
+
                 let config = EventConfig {
                     primary_ws_url: ws_url.to_string(),
                     fallback_ws_url: ws_url_backup.to_string(),
@@ -213,6 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_retries: 3,
                     retry_delay_secs: 5,
                     poll_interval_secs: 1,
+                    max_block_delay_secs,
                 };
 
                 let db = db.clone();
@@ -264,8 +321,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ChainConfig {
             max_retries: 3,
             retry_delay: Duration::from_secs(2),
-            rpc_url: rpc_url_ethereum_sepolia().to_string(),
-            submission_delay_seconds: 10,
+            rpc_url: rpc_url_ethereum_sepolia_fallback().to_string(),
+            submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(5),
             max_tx: 50,
             tx_timeout: Duration::from_secs(15),
@@ -275,26 +332,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     chain_configs.insert(
         OPTIMISM_SEPOLIA_CHAIN_ID as u32,
         ChainConfig {
-            max_retries: 3,
+            max_retries: 10,
             retry_delay: Duration::from_secs(1),
-            rpc_url: "https://sepolia.optimism.io".to_string(),
-            submission_delay_seconds: 2,
+            rpc_url: rpc_url_optimism_sepolia_fallback().to_string(),
+            submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(2),
             max_tx: 50,
-            tx_timeout: Duration::from_secs(10),
+            tx_timeout: Duration::from_secs(4),
         },
     );
 
     chain_configs.insert(
         LINEA_SEPOLIA_CHAIN_ID as u32,
         ChainConfig {
-            max_retries: 3,
+            max_retries: 10,
             retry_delay: Duration::from_secs(1),
-            rpc_url: rpc_url_linea_sepolia().to_string(),
-            submission_delay_seconds: 2,
+            rpc_url: rpc_url_linea_sepolia_fallback().to_string(),
+            submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(2),
             max_tx: 50,
-            tx_timeout: Duration::from_secs(10),
+            tx_timeout: Duration::from_secs(4),
         },
     );
 
@@ -304,13 +361,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create transaction manager
     let mut transaction_manager = TransactionManager::new(transaction_config, db.clone());
-
-    // Create the event proof ready checker
-    let event_proof_ready_checker = EventProofReadyChecker::new(
-        db.clone(),
-        Duration::from_secs(2), // Check every 10 seconds
-        Duration::from_secs(2), // Update block numbers every 1 second
-    );
 
     // Initialize LaneManager
     let lane_manager_config = LaneManagerConfig {
@@ -405,37 +455,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     handles.push(tx_manager_handle);
 
-    // Spawn the event proof ready checker loop
-    let db_clone_checker = db.clone(); // Clone db for the checker loop task
-    let event_proof_ready_checker_handle = tokio::spawn(async move {
-        let mut current_checker = None;
-        loop {
-            let mut new_checker = EventProofReadyChecker::new(
-                db_clone_checker.clone(),
-                Duration::from_secs(2),
-                Duration::from_secs(2),
-            );
-            info!("Starting new event proof ready checker instance");
-            
-            if let Err(e) = new_checker.start().await {
-                error!("Event proof ready checker failed: {:?}", e);
-            }
-            
-            // Reduce delay to 1 second
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            
-            if let Some(checker) = current_checker.take() {
-                drop(checker);
-            }
-            
-            current_checker = Some(new_checker);
-            tokio::time::sleep(Duration::from_secs(600)).await;
-        }
-    });
-
     // Wait for all tasks to complete
     tokio::try_join!(
-        event_proof_ready_checker_handle,
         lane_manager_handle,
         reset_tx_manager_handle,
     )?;

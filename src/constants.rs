@@ -10,7 +10,7 @@ pub const PROOF_CHANNEL_CAPACITY: usize = 1000;
 pub const BATCH_SIZE: usize = 10; // Number of events to process in each batch
 
 // Retry configurations
-pub const MAX_PROOF_RETRIES: u32 = 3;
+pub const MAX_PROOF_RETRIES: u32 = 6;
 pub const PROOF_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 pub const MAX_TX_RETRIES: u32 = 3;
@@ -28,8 +28,7 @@ pub use malda_rs::constants::{
     LINEA_SEPOLIA_CHAIN_ID,
     OPTIMISM_SEPOLIA_CHAIN_ID,
     // Markets (non-chain specific)
-    USDC_MOCK_MARKET_SEPOLIA,
-    WSTETH_MOCK_MARKET_SEPOLIA,
+
 };
 
 // WebSocket URLs

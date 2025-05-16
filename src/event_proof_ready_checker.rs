@@ -34,10 +34,11 @@ lazy_static! {
 
 // Define chain configurations
 #[derive(Clone)]
-struct ChainConfig {
-    chain_id: u64,
-    rpc_url: String,
-    is_l2: bool,
+pub struct ChainConfig {
+    pub chain_id: u64,
+    pub rpc_url: String,
+    pub fallback_rpc_url: String,
+    pub is_l2: bool,
 }
 
 // Define L1 block contract addresses
@@ -49,51 +50,92 @@ pub struct EventProofReadyChecker {
     poll_interval: Duration,
     block_update_interval: Duration,
     task_handle: Option<tokio::task::JoinHandle<()>>,
-    tracked_chain_ids: Vec<u64>,
+    chain_configs: Vec<ChainConfig>,
 }
 
 impl EventProofReadyChecker {
-    pub fn new(db: Database, poll_interval: Duration, block_update_interval: Duration) -> Self {
-        // Initialize tracked chain IDs
-        let tracked_chain_ids = vec![
-            ETHEREUM_SEPOLIA_CHAIN_ID,
-            OPTIMISM_SEPOLIA_CHAIN_ID,
-            LINEA_SEPOLIA_CHAIN_ID,
-        ];
-
+    pub fn new(
+        db: Database, 
+        poll_interval: Duration, 
+        block_update_interval: Duration,
+        chain_configs: Vec<ChainConfig>,
+    ) -> Self {
         // Initialize the block number map with default values for all supported chains
         let mut block_numbers = BLOCK_NUMBERS.lock().unwrap();
         
         // Initialize block numbers for all tracked chains
-        for &chain_id in &tracked_chain_ids {
-            block_numbers.insert(chain_id, AtomicI32::new(0));
+        for config in &chain_configs {
+            block_numbers.insert(config.chain_id, AtomicI32::new(0));
         }
 
         // Start the background task to update block numbers
-        let tracked_chain_ids_clone = tracked_chain_ids.clone();
+        let chain_configs_clone = chain_configs.clone();
         let block_update_interval_clone = block_update_interval;
         tokio::spawn(async move {
             let mut interval = interval(block_update_interval_clone);
             
-            // Create provider for Optimism Sepolia
-            let provider = create_provider(
-                Url::parse(&rpc_url_optimism_sepolia()).unwrap(),
-                "0xbd0974bec39a17e36ba2a6b4d238ff944bacb481cbed5efcae784d7bf4a2ff80",
-            )
-            .await
-            .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))
-            .unwrap();
+            // Create providers for each chain
+            let mut providers = HashMap::new();
+            let mut fallback_providers = HashMap::new();
+            for config in &chain_configs_clone {
+                // Create primary provider
+                match create_provider(
+                    Url::parse(&config.rpc_url).unwrap(),
+                ).await {
+                    Ok(provider) => {
+                        providers.insert(config.chain_id, provider);
+                    }
+                    Err(e) => {
+                        error!("Failed to create primary provider for chain {}: {}", config.chain_id, e);
+                    }
+                }
+
+                // Create fallback provider
+                match create_provider(
+                    Url::parse(&config.fallback_rpc_url).unwrap(),
+                ).await {
+                    Ok(provider) => {
+                        fallback_providers.insert(config.chain_id, provider);
+                    }
+                    Err(e) => {
+                        error!("Failed to create fallback provider for chain {}: {}", config.chain_id, e);
+                    }
+                }
+            }
+
+            // Get Optimism provider for L1 block contract
+            let optimism_provider = match providers.get(&OPTIMISM_SEPOLIA_CHAIN_ID) {
+                Some(provider) => provider.clone(),
+                None => {
+                    error!("Optimism provider not found, cannot get L1 block numbers");
+                    return;
+                }
+            };
+
+            // Get Optimism fallback provider for L1 block contract
+            let optimism_fallback_provider = match fallback_providers.get(&OPTIMISM_SEPOLIA_CHAIN_ID) {
+                Some(provider) => provider.clone(),
+                None => {
+                    error!("Optimism fallback provider not found");
+                    return;
+                }
+            };
             
-            // Clone provider for L1 block contract
-            let provider_clone = provider.clone();
-            
-            // Create L1 block contract instance
-            let l1_block_contract = new(L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), provider_clone);
+            // Create L1 block contract instances
+            let l1_block_contract = new(
+                L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
+                optimism_provider
+            );
+
+            let l1_block_fallback_contract = new(
+                L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
+                optimism_fallback_provider
+            );
             
             loop {
                 interval.tick().await;
                 
-                // Get Ethereum Sepolia block number via Optimism Sepolia
+                // Get Ethereum Sepolia block number via Optimism Sepolia with fallback
                 match l1_block_contract.number().call().await {
                     Ok(number_return) => {
                         let block_number = number_return._0;
@@ -105,31 +147,66 @@ impl EventProofReadyChecker {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to fetch Ethereum Sepolia block number: {}", e);
+                        warn!("Primary L1 block contract failed: {:?}, trying fallback", e);
+                        match l1_block_fallback_contract.number().call().await {
+                            Ok(number_return) => {
+                                let block_number = number_return._0;
+                                let block_numbers = BLOCK_NUMBERS.lock().unwrap();
+                                if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
+                                    let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
+                                    atomic.store(block_number_i32, Ordering::SeqCst);
+                                    debug!("Updated Ethereum Sepolia block number from fallback: {}", block_number_i32);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Both L1 block contracts failed: {:?}", e);
+                            }
+                        }
                     }
                 }
                 
                 // Update other chain block numbers
-                for &chain_id in &tracked_chain_ids_clone {
+                for config in &chain_configs_clone {
                     // Skip Ethereum Sepolia as it's handled above
-                    if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+                    if config.chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                         continue;
                     }
                     
-                    // Get the current block number
-                    match provider.get_block_number().await {
-                        Ok(block_number) => {
-                            let block_number_i32 = block_number as i32;
-                            {
-                                let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                                if let Some(atomic) = block_numbers.get(&chain_id) {
-                                    atomic.store(block_number_i32, Ordering::SeqCst);
-                                    debug!("Updated block number for chain {}: {}", chain_id, block_number_i32);
+                    // Get the providers for this chain
+                    if let (Some(provider), Some(fallback_provider)) = (
+                        providers.get(&config.chain_id),
+                        fallback_providers.get(&config.chain_id)
+                    ) {
+                        // Get the current block number with fallback
+                        match provider.get_block_number().await {
+                            Ok(block_number) => {
+                                let block_number_i32 = block_number as i32;
+                                {
+                                    let block_numbers = BLOCK_NUMBERS.lock().unwrap();
+                                    if let Some(atomic) = block_numbers.get(&config.chain_id) {
+                                        atomic.store(block_number_i32, Ordering::SeqCst);
+                                        debug!("Updated block number for chain {}: {}", config.chain_id, block_number_i32);
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            error!("Failed to fetch block number for chain {}: {}", chain_id, e);
+                            Err(e) => {
+                                warn!("Primary provider failed for chain {}: {:?}, trying fallback", config.chain_id, e);
+                                match fallback_provider.get_block_number().await {
+                                    Ok(block_number) => {
+                                        let block_number_i32 = block_number as i32;
+                                        {
+                                            let block_numbers = BLOCK_NUMBERS.lock().unwrap();
+                                            if let Some(atomic) = block_numbers.get(&config.chain_id) {
+                                                atomic.store(block_number_i32, Ordering::SeqCst);
+                                                debug!("Updated block number for chain {} from fallback: {}", config.chain_id, block_number_i32);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Both providers failed for chain {}: {:?}", config.chain_id, e);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -141,7 +218,7 @@ impl EventProofReadyChecker {
             poll_interval, 
             block_update_interval,
             task_handle: None,
-            tracked_chain_ids,
+            chain_configs,
         }
     }
 
@@ -156,7 +233,7 @@ impl EventProofReadyChecker {
         let db = self.db.clone();
         let poll_interval = self.poll_interval;
         let block_update_interval = self.block_update_interval;
-        let tracked_chain_ids = self.tracked_chain_ids.clone();
+        let chain_configs = self.chain_configs.clone();
         
         let handle = tokio::spawn(async move {
             let checker = EventProofReadyChecker {
@@ -164,7 +241,7 @@ impl EventProofReadyChecker {
                 poll_interval,
                 block_update_interval,
                 task_handle: None,
-                tracked_chain_ids,
+                chain_configs,
             };
             
             if let Err(e) = checker.run().await {
@@ -188,14 +265,14 @@ impl EventProofReadyChecker {
             let mut current_block_map = HashMap::new();
             {
                 let block_numbers_lock = BLOCK_NUMBERS.lock().unwrap();
-                for &chain_id in &self.tracked_chain_ids {
-                    if let Some(atomic_block) = block_numbers_lock.get(&chain_id) {
+                for config in &self.chain_configs {
+                    if let Some(atomic_block) = block_numbers_lock.get(&config.chain_id) {
                         let block_num = atomic_block.load(Ordering::SeqCst);
                         if block_num > 0 { // Only include chains where we have a valid block number
-                           current_block_map.insert(chain_id, block_num);
+                           current_block_map.insert(config.chain_id, block_num);
                         }
                     } else {
-                        warn!("No block number found in map for tracked chain ID: {}", chain_id);
+                        warn!("No block number found in map for tracked chain ID: {}", config.chain_id);
                     }
                 }
             } // Lock released here
@@ -210,16 +287,12 @@ impl EventProofReadyChecker {
                 Ok(_) => { /* Success logged within the DB function */ }
                 Err(e) => {
                     error!("Failed to update events to ready status: {:?}", e);
-                    // Decide on error handling: continue, break, retry?
                 }
             }
         }
-        // Note: The loop never exits in this structure, similar to before.
-        // Ok(()) // Unreachable
     }
     
     pub fn get_block_number(&self, chain_id: u64) -> i32 {
-        // Synchronous version of get_current_block_number
         if let Some(atomic) = BLOCK_NUMBERS.lock().unwrap().get(&chain_id) {
             atomic.load(Ordering::SeqCst)
         } else {
@@ -233,7 +306,6 @@ impl Drop for EventProofReadyChecker {
         if let Some(handle) = self.task_handle.take() {
             info!("Cleaning up event proof ready checker task");
             handle.abort();
-            // Note: We don't await here as it's not possible in drop
         }
     }
 }
@@ -241,7 +313,6 @@ impl Drop for EventProofReadyChecker {
 // Helper function to create a provider
 async fn create_provider(
     rpc_url: Url,
-    private_key: &str,
 ) -> Result<alloy::providers::fillers::FillProvider<
     alloy::providers::fillers::JoinFill<
         alloy::providers::fillers::JoinFill<
@@ -263,7 +334,9 @@ async fn create_provider(
     alloy::transports::http::Http<alloy::transports::http::Client>,
     alloy::network::Ethereum
 >> {
-    let signer: PrivateKeySigner = private_key.parse().expect("should parse private key");
+    // Use a dummy private key since we only need view calls
+    let dummy_key = "0000000000000000000000000000000000000000000000000000000000000001";
+    let signer: PrivateKeySigner = dummy_key.parse().expect("should parse private key");
     let wallet = EthereumWallet::from(signer);
 
     let provider = ProviderBuilder::new()

@@ -47,6 +47,13 @@ echo "Running database migrations..."
 cd "$SEQUENCER_DIR"
 sqlx migrate run --database-url "${DATABASE_URL}"
 
+# Rename existing log file with timestamp if it exists
+if [ -f "$SEQUENCER_DIR/logs/sequencer.log" ]; then
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    mv "$SEQUENCER_DIR/logs/sequencer.log" "$SEQUENCER_DIR/logs/sequencer_${TIMESTAMP}.log"
+    echo "Renamed old log file to sequencer_${TIMESTAMP}.log"
+fi
+
 # Start the sequencer in the background with verbose logging
 echo "Starting sequencer..."
 cd "$SEQUENCER_DIR"
