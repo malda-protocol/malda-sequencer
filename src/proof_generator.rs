@@ -1,14 +1,17 @@
-use alloy::primitives::{Address, Bytes, TxHash, U256};
+use alloy::primitives::{Address, Bytes, TxHash};
+use alloy::providers::{Provider, ProviderBuilder};
+use alloy::transports::http::reqwest::Url;
+use alloy::eips::BlockNumberOrTag;
 use eyre::Result;
-use sequencer::database::{Database, EventStatus, EventUpdate};
+use sequencer::database::{Database, EventUpdate};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
 use tracing::{debug, error, info, warn};
-use chrono::Utc;
 
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
+use malda_rs::constants::*;
 
 #[derive(Debug)]
 pub struct ProofInfo {
@@ -26,6 +29,8 @@ pub struct ProofGenerator {
     last_proof_time: Arc<Mutex<Instant>>,
     db: Database,
     batch_size: usize,
+    ethereum_max_block_delay_secs: u64,
+    l2_max_block_delay_secs: u64,
 }
 
 impl ProofGenerator {
@@ -34,6 +39,8 @@ impl ProofGenerator {
         retry_delay: Duration,
         db: Database,
         batch_size: usize,
+        ethereum_max_block_delay_secs: u64,
+        l2_max_block_delay_secs: u64,
     ) -> Self {
         Self {
             max_retries,
@@ -41,6 +48,8 @@ impl ProofGenerator {
             last_proof_time: Arc::new(Mutex::new(Instant::now())),
             db,
             batch_size,
+            ethereum_max_block_delay_secs,
+            l2_max_block_delay_secs,
         }
     }
 
@@ -71,12 +80,16 @@ impl ProofGenerator {
             let max_retries = self.max_retries;
             let retry_delay = self.retry_delay;
             let db = self.db.clone();
+            let ethereum_max_block_delay_secs = self.ethereum_max_block_delay_secs;
+            let l2_max_block_delay_secs = self.l2_max_block_delay_secs;
 
             tokio::spawn(async move {
                 let proof_generator = ProofGeneratorWorker {
                     max_retries,
                     retry_delay,
                     db,
+                    ethereum_max_block_delay_secs,
+                    l2_max_block_delay_secs,
                 };
 
                 if let Err(e) = proof_generator.process_batch(events_to_process).await { // Use events_to_process
@@ -94,6 +107,8 @@ struct ProofGeneratorWorker {
     max_retries: u32,
     retry_delay: Duration,
     db: Database,
+    ethereum_max_block_delay_secs: u64,
+    l2_max_block_delay_secs: u64,
 }
 
 impl ProofGeneratorWorker {
@@ -208,6 +223,49 @@ impl ProofGeneratorWorker {
         Ok(())
     }
 
+    // Check provider for block freshness
+    async fn is_provider_fresh(&self, rpc_url: &str, chain_id: u64, max_block_delay_secs: u64) -> bool {
+        // Parse URL
+        let url = match Url::parse(rpc_url) {
+            Ok(url) => url,
+            Err(e) => {
+                warn!("Failed to parse RPC URL {}: {}", rpc_url, e);
+                return false;
+            }
+        };
+        
+        // Create provider
+        let provider = ProviderBuilder::new().on_http(url);
+        
+        // Get latest block
+        let block = match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+            Ok(Some(block)) => block,
+            Ok(None) => {
+                warn!("Provider at {} returned no latest block", rpc_url);
+                return false;
+            }
+            Err(e) => {
+                warn!("Failed to get latest block from provider at {}: {}", rpc_url, e);
+                return false;
+            }
+        };
+        
+        // Check block timestamp
+        let block_timestamp: u64 = block.header.inner.timestamp.into();
+        let current_time = chrono::Utc::now().timestamp() as u64;
+        
+        if current_time > block_timestamp && (current_time - block_timestamp) > max_block_delay_secs {
+            warn!(
+                "Provider's latest block for chain {} is too old: block_time={}, current_time={}, diff={}s, max_delay={}s",
+                chain_id, block_timestamp, current_time, current_time - block_timestamp, max_block_delay_secs
+            );
+            return false;
+        }
+        
+        // Provider is fresh
+        true
+    }
+
     async fn generate_proof_with_retry(
         &self,
         users: Vec<Vec<Address>>,
@@ -222,12 +280,65 @@ impl ProofGeneratorWorker {
         );
 
         loop {
-            let start_time = Instant::now();
-            let fallback = attempts >= self.max_retries / 2;
+            // Check providers for all source chains involved
+            let should_use_fallback = if attempts >= self.max_retries / 2 {
+                // If we've retried many times, always use fallback
+                true
+            } else {
+                // Otherwise check provider freshness
+                let mut use_fallback = false;
+                
+                for &chain_id in &src_chain_ids {
+                    // Determine RPC URL for this chain
+                    let (rpc_url, max_block_delay_secs) = match chain_id {
+                        // Ethereum mainnet
+                        id if id == ETHEREUM_CHAIN_ID => {
+                            (rpc_url_ethereum().to_string(), self.ethereum_max_block_delay_secs)
+                        }
+                        // Ethereum Sepolia testnet
+                        id if id == ETHEREUM_SEPOLIA_CHAIN_ID => {
+                            (rpc_url_ethereum_sepolia().to_string(), self.ethereum_max_block_delay_secs)
+                        }
+                        // Optimism mainnet
+                        id if id == OPTIMISM_CHAIN_ID => {
+                            (rpc_url_optimism().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        // Optimism Sepolia testnet
+                        id if id == OPTIMISM_SEPOLIA_CHAIN_ID => {
+                            (rpc_url_optimism_sepolia().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        // Linea mainnet
+                        id if id == LINEA_CHAIN_ID => {
+                            (rpc_url_linea().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        // Linea Sepolia testnet
+                        id if id == LINEA_SEPOLIA_CHAIN_ID => {
+                            (rpc_url_linea_sepolia().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        _ => {
+                            warn!("Unknown chain ID: {}, defaulting to fallback mode", chain_id);
+                            use_fallback = true;
+                            break;
+                        }
+                    };
+                    
+                    // Check if provider is fresh
+                    if !self.is_provider_fresh(&rpc_url, chain_id, max_block_delay_secs).await {
+                        use_fallback = true;
+                        break;
+                    }
+                }
+                
+                use_fallback
+            };
             
-            if fallback {
-                info!("Using fallback mode for proof generation after {} failed attempts", attempts);
+            if should_use_fallback {
+                info!("Using fallback mode for proof generation due to provider issues or after {} failed attempts", attempts);
+            } else {
+                info!("Using primary mode for proof generation");
             }
+            
+            let start_time = Instant::now();
             
             match get_proof_data_prove_sdk(
                 users.clone(),
@@ -235,7 +346,7 @@ impl ProofGeneratorWorker {
                 dst_chain_ids.clone(),
                 src_chain_ids.clone(),
                 false,
-                fallback
+                should_use_fallback
             )
             .await
             {
@@ -257,8 +368,9 @@ impl ProofGeneratorWorker {
                     let cycles = proof_info.stats.total_cycles;
                     let tx_num = users.iter().flatten().count();
                     info!(
-                        "Generated proof for {} transactions with {} cycles in {:?}",
-                        tx_num, cycles, duration
+                        "Generated proof for {} transactions with {} cycles in {:?}{}",
+                        tx_num, cycles, duration,
+                        if should_use_fallback { " (fallback mode)" } else { "" }
                     );
                     debug!(
                         "Proof details - journal: 0x{}, seal: 0x{}",

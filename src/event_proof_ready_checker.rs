@@ -4,8 +4,9 @@ use alloy::{
     signers::local::PrivateKeySigner,
     transports::http::reqwest::Url,
     primitives::{Address, TxHash},
+    eips::BlockNumberOrTag,
 };
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use futures::future::join_all;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -39,6 +40,7 @@ pub struct ChainConfig {
     pub rpc_url: String,
     pub fallback_rpc_url: String,
     pub is_l2: bool,
+    pub max_block_delay_secs: u64, // Maximum acceptable block delay in seconds
 }
 
 // Define L1 block contract addresses
@@ -51,6 +53,36 @@ pub struct EventProofReadyChecker {
     block_update_interval: Duration,
     task_handle: Option<tokio::task::JoinHandle<()>>,
     chain_configs: Vec<ChainConfig>,
+}
+
+// Provider type alias for readability
+type ProviderType = alloy::providers::fillers::FillProvider<
+    alloy::providers::fillers::JoinFill<
+        alloy::providers::fillers::JoinFill<
+            alloy::providers::Identity,
+            alloy::providers::fillers::JoinFill<
+                alloy::providers::fillers::GasFiller,
+                alloy::providers::fillers::JoinFill<
+                    alloy::providers::fillers::BlobGasFiller,
+                    alloy::providers::fillers::JoinFill<
+                        alloy::providers::fillers::NonceFiller,
+                        alloy::providers::fillers::ChainIdFiller
+                    >
+                >
+            >
+        >,
+        alloy::providers::fillers::WalletFiller<alloy::network::EthereumWallet>
+    >,
+    alloy::providers::RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
+    alloy::transports::http::Http<alloy::transports::http::Client>,
+    alloy::network::Ethereum
+>;
+
+// Chain provider state
+struct ChainProviderState {
+    primary_provider: Option<ProviderType>,
+    config: ChainConfig,
+    used_fallback: bool,
 }
 
 impl EventProofReadyChecker {
@@ -67,151 +99,6 @@ impl EventProofReadyChecker {
         for config in &chain_configs {
             block_numbers.insert(config.chain_id, AtomicI32::new(0));
         }
-
-        // Start the background task to update block numbers
-        let chain_configs_clone = chain_configs.clone();
-        let block_update_interval_clone = block_update_interval;
-        tokio::spawn(async move {
-            let mut interval = interval(block_update_interval_clone);
-            
-            // Create providers for each chain
-            let mut providers = HashMap::new();
-            let mut fallback_providers = HashMap::new();
-            for config in &chain_configs_clone {
-                // Create primary provider
-                match create_provider(
-                    Url::parse(&config.rpc_url).unwrap(),
-                ).await {
-                    Ok(provider) => {
-                        providers.insert(config.chain_id, provider);
-                    }
-                    Err(e) => {
-                        error!("Failed to create primary provider for chain {}: {}", config.chain_id, e);
-                    }
-                }
-
-                // Create fallback provider
-                match create_provider(
-                    Url::parse(&config.fallback_rpc_url).unwrap(),
-                ).await {
-                    Ok(provider) => {
-                        fallback_providers.insert(config.chain_id, provider);
-                    }
-                    Err(e) => {
-                        error!("Failed to create fallback provider for chain {}: {}", config.chain_id, e);
-                    }
-                }
-            }
-
-            // Get Optimism provider for L1 block contract
-            let optimism_provider = match providers.get(&OPTIMISM_SEPOLIA_CHAIN_ID) {
-                Some(provider) => provider.clone(),
-                None => {
-                    error!("Optimism provider not found, cannot get L1 block numbers");
-                    return;
-                }
-            };
-
-            // Get Optimism fallback provider for L1 block contract
-            let optimism_fallback_provider = match fallback_providers.get(&OPTIMISM_SEPOLIA_CHAIN_ID) {
-                Some(provider) => provider.clone(),
-                None => {
-                    error!("Optimism fallback provider not found");
-                    return;
-                }
-            };
-            
-            // Create L1 block contract instances
-            let l1_block_contract = new(
-                L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
-                optimism_provider
-            );
-
-            let l1_block_fallback_contract = new(
-                L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
-                optimism_fallback_provider
-            );
-            
-            loop {
-                interval.tick().await;
-                
-                // Get Ethereum Sepolia block number via Optimism Sepolia with fallback
-                match l1_block_contract.number().call().await {
-                    Ok(number_return) => {
-                        let block_number = number_return._0;
-                        let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                        if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
-                            let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
-                            atomic.store(block_number_i32, Ordering::SeqCst);
-                            debug!("Updated Ethereum Sepolia block number: {}", block_number_i32);
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Primary L1 block contract failed: {:?}, trying fallback", e);
-                        match l1_block_fallback_contract.number().call().await {
-                            Ok(number_return) => {
-                                let block_number = number_return._0;
-                                let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                                if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
-                                    let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
-                                    atomic.store(block_number_i32, Ordering::SeqCst);
-                                    debug!("Updated Ethereum Sepolia block number from fallback: {}", block_number_i32);
-                                }
-                            }
-                            Err(e) => {
-                                error!("Both L1 block contracts failed: {:?}", e);
-                            }
-                        }
-                    }
-                }
-                
-                // Update other chain block numbers
-                for config in &chain_configs_clone {
-                    // Skip Ethereum Sepolia as it's handled above
-                    if config.chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
-                        continue;
-                    }
-                    
-                    // Get the providers for this chain
-                    if let (Some(provider), Some(fallback_provider)) = (
-                        providers.get(&config.chain_id),
-                        fallback_providers.get(&config.chain_id)
-                    ) {
-                        // Get the current block number with fallback
-                        match provider.get_block_number().await {
-                            Ok(block_number) => {
-                                let block_number_i32 = block_number as i32;
-                                {
-                                    let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                                    if let Some(atomic) = block_numbers.get(&config.chain_id) {
-                                        atomic.store(block_number_i32, Ordering::SeqCst);
-                                        debug!("Updated block number for chain {}: {}", config.chain_id, block_number_i32);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Primary provider failed for chain {}: {:?}, trying fallback", config.chain_id, e);
-                                match fallback_provider.get_block_number().await {
-                                    Ok(block_number) => {
-                                        let block_number_i32 = block_number as i32;
-                                        {
-                                            let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                                            if let Some(atomic) = block_numbers.get(&config.chain_id) {
-                                                atomic.store(block_number_i32, Ordering::SeqCst);
-                                                debug!("Updated block number for chain {} from fallback: {}", config.chain_id, block_number_i32);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Both providers failed for chain {}: {:?}", config.chain_id, e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
 
         Self { 
             db, 
@@ -256,33 +143,129 @@ impl EventProofReadyChecker {
     async fn run(&self) -> Result<()> {
         info!("Starting event proof ready checker with optimized DB query");
         
-        let mut interval = interval(self.poll_interval);
+        // Initialize provider state for each chain
+        let mut chain_providers = HashMap::new();
+        for config in &self.chain_configs {
+            chain_providers.insert(config.chain_id, ChainProviderState {
+                primary_provider: None,
+                config: config.clone(),
+                used_fallback: false,
+            });
+        }
+        
+        // Start the block update task
+        let mut interval = interval(self.block_update_interval);
         
         loop {
             interval.tick().await;
             
-            // 1. Get current block numbers for tracked chains
+            // Update block numbers for all chains
             let mut current_block_map = HashMap::new();
-            {
-                let block_numbers_lock = BLOCK_NUMBERS.lock().unwrap();
-                for config in &self.chain_configs {
-                    if let Some(atomic_block) = block_numbers_lock.get(&config.chain_id) {
-                        let block_num = atomic_block.load(Ordering::SeqCst);
-                        if block_num > 0 { // Only include chains where we have a valid block number
-                           current_block_map.insert(config.chain_id, block_num);
+            
+            // Special handling for Ethereum Sepolia via Optimism L1 block contract
+            if let Some(optimism_state) = chain_providers.get_mut(&OPTIMISM_SEPOLIA_CHAIN_ID) {
+                // Get active provider for Optimism
+                let (optimism_provider, is_fallback) = match Self::get_active_provider(optimism_state, &self.db).await {
+                    Ok((provider, is_fallback)) => {
+                        optimism_state.used_fallback = is_fallback;
+                        (provider, is_fallback)
+                    },
+                    Err(e) => {
+                        error!("Failed to get Optimism provider: {:?}", e);
+                        continue;
+                    }
+                };
+                
+                // Create L1 block contract
+                let l1_block_contract = new(
+                    L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
+                    optimism_provider
+                );
+                
+                // Get Ethereum Sepolia block number via Optimism contract
+                match l1_block_contract.number().call().await {
+                    Ok(number_return) => {
+                        let block_number = number_return._0;
+                        let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
+                        
+                        // Update the block number in the map
+                        let block_numbers = BLOCK_NUMBERS.lock().unwrap();
+                        if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
+                            atomic.store(block_number_i32, Ordering::SeqCst);
+                            debug!("Updated Ethereum Sepolia block number{}: {}", 
+                                if is_fallback { " (via fallback)" } else { "" }, 
+                                block_number_i32);
+                            
+                            current_block_map.insert(ETHEREUM_SEPOLIA_CHAIN_ID, block_number_i32);
                         }
-                    } else {
-                        warn!("No block number found in map for tracked chain ID: {}", config.chain_id);
+                    },
+                    Err(e) => {
+                        error!("Failed to get L1 block number from Optimism: {:?}", e);
+                        optimism_state.used_fallback = true; // Force new provider next time
                     }
                 }
-            } // Lock released here
-
+            }
+            
+            // Update block numbers for other chains
+            for (chain_id, state) in chain_providers.iter_mut() {
+                // Skip Ethereum Sepolia as it's handled above
+                if *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+                    continue;
+                }
+                
+                // Get active provider for this chain
+                let (provider, is_fallback) = match Self::get_active_provider(state, &self.db).await {
+                    Ok((provider, is_fallback)) => {
+                        state.used_fallback = is_fallback;
+                        (provider, is_fallback)
+                    },
+                    Err(e) => {
+                        error!("Failed to get provider for chain {}: {:?}", chain_id, e);
+                        continue;
+                    }
+                };
+                
+                // Get block number
+                match provider.get_block_number().await {
+                    Ok(block_number) => {
+                        let block_number_i32 = block_number as i32;
+                        
+                        // Update the block number in the map
+                        let block_numbers = BLOCK_NUMBERS.lock().unwrap();
+                        if let Some(atomic) = block_numbers.get(chain_id) {
+                            atomic.store(block_number_i32, Ordering::SeqCst);
+                            debug!("Updated block number for chain {}{}: {}", 
+                                chain_id, 
+                                if is_fallback { " (via fallback)" } else { "" }, 
+                                block_number_i32);
+                            
+                            current_block_map.insert(*chain_id, block_number_i32);
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to get block number for chain {}: {:?}", chain_id, e);
+                        state.used_fallback = true; // Force new provider next time
+                    }
+                }
+            }
+            
             if current_block_map.is_empty() {
                 debug!("No valid current block numbers available yet, skipping DB update.");
                 continue;
             }
             
-            // 2. Call the optimized database function
+            // Update database with new block numbers
+            match self.db.update_events_to_ready_status(&current_block_map).await {
+                Ok(_) => { /* Success logged within the DB function */ }
+                Err(e) => {
+                    error!("Failed to update events to ready status: {:?}", e);
+                }
+            }
+            
+            // Sleep for poll interval before checking for events again
+            tokio::time::sleep(self.poll_interval).await;
+            
+            // Call the optimized database function again
             match self.db.update_events_to_ready_status(&current_block_map).await {
                 Ok(_) => { /* Success logged within the DB function */ }
                 Err(e) => {
@@ -290,6 +273,197 @@ impl EventProofReadyChecker {
                 }
             }
         }
+    }
+    
+    // Helper method to get an active provider for a chain
+    async fn get_active_provider(state: &mut ChainProviderState, db: &Database) -> Result<(ProviderType, bool)> {
+        // If we have a primary provider and don't need to force a new one, check if it's still valid
+        if !state.used_fallback && state.primary_provider.is_some() {
+            let provider = state.primary_provider.as_ref().unwrap();
+            
+            // Check if the primary provider is fresh enough
+            match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+                Ok(Some(block)) => {
+                    // Check block timestamp
+                    let block_timestamp: u64 = block.header.inner.timestamp.into();
+                    let current_time = chrono::Utc::now().timestamp() as u64;
+                    let max_delay = state.config.max_block_delay_secs;
+
+                    if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
+                        let reason = format!(
+                            "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s",
+                            block_timestamp, current_time, current_time - block_timestamp, max_delay
+                        );
+                        
+                        warn!(
+                            "{} for chain {}, trying fallback",
+                            reason, state.config.chain_id
+                        );
+                        
+                        // Record the failure in the database
+                        if let Err(e) = db.add_to_node_status(
+                            state.config.chain_id,
+                            &state.config.rpc_url,
+                            &state.config.fallback_rpc_url,
+                            &reason
+                        ).await {
+                            error!("Failed to record node status: {:?}", e);
+                        }
+                        
+                        // Use fallback and mark primary as invalid
+                        state.primary_provider = None;
+                        return Self::create_fallback_provider(&state.config, db).await;
+                    }
+                    
+                    // Primary provider is good, use it
+                    debug!("Reusing existing primary provider for chain {}", state.config.chain_id);
+                    return Ok((provider.clone(), false));
+                },
+                Ok(None) => {
+                    let reason = format!("Existing primary provider returned no latest block");
+                    warn!("{} for chain {}, creating new one", reason, state.config.chain_id);
+                    
+                    // Record the failure in the database
+                    if let Err(e) = db.add_to_node_status(
+                        state.config.chain_id,
+                        &state.config.rpc_url,
+                        &state.config.fallback_rpc_url,
+                        &reason
+                    ).await {
+                        error!("Failed to record node status: {:?}", e);
+                    }
+                    
+                    // Primary provider failed, clear it and try creating a new one
+                    state.primary_provider = None;
+                }
+                Err(e) => {
+                    let reason = format!("Existing primary provider failed to get latest block: {:?}", e);
+                    warn!("{} for chain {}, creating new one", reason, state.config.chain_id);
+                    
+                    // Record the failure in the database
+                    if let Err(e) = db.add_to_node_status(
+                        state.config.chain_id,
+                        &state.config.rpc_url,
+                        &state.config.fallback_rpc_url,
+                        &reason
+                    ).await {
+                        error!("Failed to record node status: {:?}", e);
+                    }
+                    
+                    // Primary provider failed, clear it and try creating a new one
+                    state.primary_provider = None;
+                }
+            }
+        }
+
+        // Create a new primary provider
+        let rpc_url = Url::parse(&state.config.rpc_url)
+            .wrap_err_with(|| format!("Invalid RPC URL: {}", state.config.rpc_url))?;
+
+        debug!("Connecting to primary provider for chain {} at {}", state.config.chain_id, rpc_url);
+        let primary_provider = match create_provider(rpc_url).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                let reason = format!("Failed to create primary provider: {:?}", e);
+                warn!("{} for chain {}, trying fallback", reason, state.config.chain_id);
+                
+                // Record the failure in the database
+                if let Err(db_err) = db.add_to_node_status(
+                    state.config.chain_id,
+                    &state.config.rpc_url,
+                    &state.config.fallback_rpc_url,
+                    &reason
+                ).await {
+                    error!("Failed to record node status: {:?}", db_err);
+                }
+                
+                return Self::create_fallback_provider(&state.config, db).await;
+            }
+        };
+
+        // Check if the primary provider is fresh enough
+        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+            Ok(Some(block)) => block,
+            Ok(None) => {
+                let reason = format!("Primary provider returned no latest block");
+                warn!("{} for chain {}, trying fallback", reason, state.config.chain_id);
+                
+                // Record the failure in the database
+                if let Err(e) = db.add_to_node_status(
+                    state.config.chain_id,
+                    &state.config.rpc_url,
+                    &state.config.fallback_rpc_url,
+                    &reason
+                ).await {
+                    error!("Failed to record node status: {:?}", e);
+                }
+                
+                return Self::create_fallback_provider(&state.config, db).await;
+            }
+            Err(e) => {
+                let reason = format!("Primary provider failed to get latest block: {:?}", e);
+                warn!("{} for chain {}, trying fallback", reason, state.config.chain_id);
+                
+                // Record the failure in the database
+                if let Err(db_err) = db.add_to_node_status(
+                    state.config.chain_id,
+                    &state.config.rpc_url,
+                    &state.config.fallback_rpc_url,
+                    &reason
+                ).await {
+                    error!("Failed to record node status: {:?}", db_err);
+                }
+                
+                return Self::create_fallback_provider(&state.config, db).await;
+            }
+        };
+
+        // Check if the block is fresh enough
+        let block_timestamp: u64 = block.header.inner.timestamp.into();
+        let current_time = chrono::Utc::now().timestamp() as u64;
+        let max_delay = state.config.max_block_delay_secs;
+
+        if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
+            let reason = format!(
+                "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s",
+                block_timestamp, current_time, current_time - block_timestamp, max_delay
+            );
+            
+            warn!(
+                "{} for chain {}, trying fallback",
+                reason, state.config.chain_id
+            );
+            
+            // Record the failure in the database
+            if let Err(e) = db.add_to_node_status(
+                state.config.chain_id,
+                &state.config.rpc_url,
+                &state.config.fallback_rpc_url,
+                &reason
+            ).await {
+                error!("Failed to record node status: {:?}", e);
+            }
+            
+            return Self::create_fallback_provider(&state.config, db).await;
+        }
+
+        // Store the new primary provider
+        debug!("Using new primary provider for chain {}", state.config.chain_id);
+        state.primary_provider = Some(primary_provider.clone());
+        Ok((primary_provider, false))
+    }
+
+    // Helper method to create fallback provider
+    async fn create_fallback_provider(config: &ChainConfig, db: &Database) -> Result<(ProviderType, bool)> {
+        let fallback_url = Url::parse(&config.fallback_rpc_url)
+            .wrap_err_with(|| format!("Invalid fallback RPC URL: {}", config.fallback_rpc_url))?;
+
+        info!("Connecting to fallback provider for chain {} at {}", config.chain_id, fallback_url);
+        let fallback_provider = create_provider(fallback_url).await
+            .wrap_err("Failed to connect to fallback provider")?;
+
+        info!("Using fallback provider for chain {}", config.chain_id);
+        Ok((fallback_provider, true))
     }
     
     pub fn get_block_number(&self, chain_id: u64) -> i32 {
@@ -313,27 +487,7 @@ impl Drop for EventProofReadyChecker {
 // Helper function to create a provider
 async fn create_provider(
     rpc_url: Url,
-) -> Result<alloy::providers::fillers::FillProvider<
-    alloy::providers::fillers::JoinFill<
-        alloy::providers::fillers::JoinFill<
-            alloy::providers::Identity,
-            alloy::providers::fillers::JoinFill<
-                alloy::providers::fillers::GasFiller,
-                alloy::providers::fillers::JoinFill<
-                    alloy::providers::fillers::BlobGasFiller,
-                    alloy::providers::fillers::JoinFill<
-                        alloy::providers::fillers::NonceFiller,
-                        alloy::providers::fillers::ChainIdFiller
-                    >
-                >
-            >
-        >,
-        alloy::providers::fillers::WalletFiller<alloy::network::EthereumWallet>
-    >,
-    alloy::providers::RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
-    alloy::transports::http::Http<alloy::transports::http::Client>,
-    alloy::network::Ethereum
->> {
+) -> Result<ProviderType> {
     // Use a dummy private key since we only need view calls
     let dummy_key = "0000000000000000000000000000000000000000000000000000000000000001";
     let signer: PrivateKeySigner = dummy_key.parse().expect("should parse private key");

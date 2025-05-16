@@ -43,6 +43,6 @@ PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.
 PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
 PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
 PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TYPE IF EXISTS event_status CASCADE;"
-
+PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS node_status CASCADE;"
 echo "Database cleanup completed successfully!" 
 
