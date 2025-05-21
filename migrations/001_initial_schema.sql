@@ -8,6 +8,23 @@ DROP TABLE IF EXISTS node_status;
 
 DROP TYPE IF EXISTS event_status;
 
+-- Create database users if they don't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_roles WHERE rolname = 'Frontend'
+    ) THEN
+        CREATE USER "Frontend" WITH PASSWORD 'frontend_password';
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_roles WHERE rolname = 'Analytics'
+    ) THEN
+        CREATE USER "Analytics" WITH PASSWORD 'analytics_password';
+    END IF;
+END
+$$;
+
 -- Create enum type for status
 CREATE TYPE event_status AS ENUM (
     'Received',

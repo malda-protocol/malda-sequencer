@@ -5572,7 +5572,7 @@ dependencies = [
  "malda_utils",
  "reqwest 0.12.9",
  "revm 18.0.0",
- "risc0-ethereum-contracts 2.0.2",
+ "risc0-ethereum-contracts",
  "risc0-op-steel",
  "risc0-steel",
  "risc0-zkvm",
@@ -7276,20 +7276,6 @@ dependencies = [
 
 [[package]]
 name = "risc0-ethereum-contracts"
-version = "2.0.0"
-source = "git+https://github.com/risc0/risc0-ethereum?tag=v2.0.0#38591d7a1302d437b76937bd3e0432005b33f616"
-dependencies = [
- "alloy 0.12.6",
- "alloy-sol-types 0.8.25",
- "anyhow",
- "cfg-if",
- "risc0-zkvm",
- "thiserror 2.0.12",
- "tracing",
-]
-
-[[package]]
-name = "risc0-ethereum-contracts"
 version = "2.0.2"
 source = "git+https://github.com/risc0/risc0-ethereum?tag=v2.0.2#728ec4b0432ddb49d8416b7a3c3cfdfe052356f9"
 dependencies = [
@@ -7918,7 +7904,7 @@ dependencies = [
  "lazy_static",
  "malda_rs",
  "rand 0.8.5",
- "risc0-ethereum-contracts 2.0.0",
+ "risc0-ethereum-contracts",
  "serde",
  "serde_json",
  "sqldatetime",

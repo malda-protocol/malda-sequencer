@@ -100,6 +100,37 @@ impl ResetTxManager {
 
         info!("Started polling for stuck events to reset");
 
+        // Spawn a parallel task to poll get_failed_tx every poll_interval
+        let db_clone = self.db.clone();
+        let poll_interval_clone = poll_interval.clone();
+        let failed_tx_handle = tokio::spawn(async move {
+            let mut failed_interval = tokio::time::interval(poll_interval_clone);
+            loop {
+                failed_interval.tick().await;
+                match db_clone.get_failed_tx().await {
+                    Ok(failed_txs) => {
+                        debug!("Polled failed transactions: {} groups", failed_txs.len());
+                        for (_dst_chain_id, _market, _sum, tx_hashes) in failed_txs {
+                            if tx_hashes.is_empty() {
+                                continue;
+                            }
+                            match db_clone.reset_failed_transactions(&tx_hashes).await {
+                                Ok(_) => {
+                                    debug!("Reset {} failed transactions", tx_hashes.len());
+                                }
+                                Err(e) => {
+                                    error!("Failed to reset failed transactions: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to poll failed transactions: {:?}", e);
+                    }
+                }
+            }
+        });
+
         loop {
             interval.tick().await;
 

@@ -10,7 +10,7 @@ echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
 # Set database URL
-export DATABASE_URL="postgres://doadmin:AVNS_3E4eXK40PwwJm9cEwCL@sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+export DATABASE_URL="postgres://app:8Ixx4N5OYuDR6lQGZfDgxxF9cUnl2yW6jYbFsZRMi69ZrCnhYIgU7HuQCsgKhWyl@dal.database.lsh.io:30166/app"
 
 # Check if database is accessible
 echo "Checking database connection..."
@@ -37,12 +37,11 @@ fi
 
 # Drop tables and migrations
 echo "Dropping database tables and migrations..."
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS events CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS finished_events CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TYPE IF EXISTS event_status CASCADE;"
-PGPASSWORD=AVNS_3E4eXK40PwwJm9cEwCL psql -h sequencerv2-do-user-15988403-0.g.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS node_status CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS events CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS finished_events CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
+psql "$DATABASE_URL" -c "DROP TYPE IF EXISTS event_status CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS node_status CASCADE;"
 echo "Database cleanup completed successfully!" 
-
