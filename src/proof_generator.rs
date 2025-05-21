@@ -117,8 +117,8 @@ impl ProofGeneratorWorker {
         // Sort events by src_chain (Linea first) and dst_chain for consistent journal indexing
         let mut sorted_events = events;
         sorted_events.sort_by(|a, b| {
-            let a_src = a.src_chain_id.unwrap_or(malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32) as u64;
-            let b_src = b.src_chain_id.unwrap_or(malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32) as u64;
+            let a_src = a.src_chain_id.unwrap_or(LINEA_CHAIN_ID as u32) as u64;
+            let b_src = b.src_chain_id.unwrap_or(LINEA_CHAIN_ID as u32) as u64;
             let a_dst = a.dst_chain_id.unwrap_or(0) as u64;
             let b_dst = b.dst_chain_id.unwrap_or(0) as u64;
 
@@ -314,6 +314,14 @@ impl ProofGeneratorWorker {
                         // Linea Sepolia testnet
                         id if id == LINEA_SEPOLIA_CHAIN_ID => {
                             (rpc_url_linea_sepolia().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        // Base mainnet
+                        id if id == BASE_CHAIN_ID => {
+                            (rpc_url_base().to_string(), self.l2_max_block_delay_secs)
+                        }
+                        // Base Sepolia testnet
+                        id if id == BASE_SEPOLIA_CHAIN_ID => {
+                            (rpc_url_base_sepolia().to_string(), self.l2_max_block_delay_secs)
                         }
                         _ => {
                             warn!("Unknown chain ID: {}, defaulting to fallback mode", chain_id);

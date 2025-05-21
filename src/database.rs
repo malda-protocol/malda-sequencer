@@ -1024,6 +1024,94 @@ impl Database {
         debug!("Recorded node failure for chain {}: {}", chain_id, reason);
         Ok(())
     }
+
+    pub async fn get_failed_tx(&self) -> Result<Vec<(u32, Address, U256, Vec<TxHash>)>> {
+        use sqlx::Row;
+        use std::str::FromStr;
+        use alloy::primitives::{Address, TxHash, U256};
+
+        // Query: group by dst_chain_id and market, sum amounts, collect tx_hashes
+        let rows = sqlx::query(
+            r#"
+            SELECT 
+                dst_chain_id, 
+                market, 
+                SUM(COALESCE(amount::bigint, 0)) as total_amount, 
+                array_agg(tx_hash) as tx_hashes
+            FROM finished_events
+            WHERE status = 'TxProcessFail'::event_status
+              AND event_type IN ('HostWithdraw', 'HostBorrow')
+              AND (resubmitted IS NULL)
+            GROUP BY dst_chain_id, market
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            // Parse dst_chain_id
+            let dst_chain_id: Option<i32> = row.try_get("dst_chain_id").ok();
+            let dst_chain_id = match dst_chain_id {
+                Some(id) => id as u32,
+                None => continue, // skip if missing
+            };
+            // Parse market
+            let market: Option<String> = row.try_get("market").ok();
+            let market = match market {
+                Some(ref s) => match Address::from_str(s) {
+                    Ok(addr) => addr,
+                    Err(_) => continue, // skip if invalid
+                },
+                None => continue, // skip if missing
+            };
+            // Parse total_amount
+            let total_amount: Option<String> = row.try_get("total_amount").ok();
+            let total_amount = match total_amount {
+                Some(ref s) => U256::from_str(s).unwrap_or(U256::from(0)),
+                None => U256::from(0),
+            };
+            // Parse tx_hashes
+            let tx_hashes: Option<Vec<String>> = row.try_get("tx_hashes").ok();
+            let tx_hashes = match tx_hashes {
+                Some(vec) => vec.into_iter().filter_map(|h| TxHash::from_str(&h).ok()).collect(),
+                None => Vec::new(),
+            };
+            result.push((dst_chain_id, market, total_amount, tx_hashes));
+        }
+        Ok(result)
+    }
+
+    pub async fn reset_failed_transactions(&self, tx_hashes: &Vec<TxHash>) -> Result<()> {
+        if tx_hashes.is_empty() {
+            return Ok(());
+        }
+        let tx_hashes_str: Vec<String> = tx_hashes.iter().map(|h| h.to_string()).collect();
+        let mut tx = self.pool.begin().await?;
+        // Move the specified fields from finished_events to events, set status to ProofReceived
+        sqlx::query(
+            r#"
+            WITH moved AS (
+                DELETE FROM finished_events
+                WHERE tx_hash = ANY($1::text[])
+                RETURNING 
+                    tx_hash, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at
+            )
+            INSERT INTO events (
+                tx_hash, status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, resubmitted
+            )
+            SELECT 
+                tx_hash, 'Received'::event_status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, 1
+            FROM moved
+            ON CONFLICT (tx_hash) DO NOTHING
+            "#
+        )
+        .bind(&tx_hashes_str)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 

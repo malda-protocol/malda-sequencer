@@ -65,8 +65,14 @@ type ProviderType = alloy::providers::fillers::FillProvider<
 
 type RpcUrls = HashMap<u32, String>;
 
-pub const USDC_MOCK_MARKET_SEPOLIA: Address = address!("c15EF00790b987ce4B82eB9e25e1233a89589510");
-pub const WSTETH_MOCK_MARKET_SEPOLIA: Address = address!("B84644c24B4D0823A0770ED698f7C20B88Bcf824");
+pub const mUSDC_market: Address = address!("269C36A173D881720544Fb303E681370158FF1FD");
+pub const mWETH_market: Address = address!("C7Bc6bD45Eb84D594f51cED3c5497E6812C7732f");
+pub const mUSDT_market: Address = address!("DF0635c1eCfdF08146150691a97e2Ff6a8Aa1a90");
+pub const mWBTC_market: Address = address!("cb4d153604a6F21Ff7625e5044E89C3b903599Bc");
+pub const mwstETH_market: Address = address!("1D8e8cEFEb085f3211Ab6a443Ad9051b54D1cd1a");
+pub const mezETH_market: Address = address!("0B3c6645F4F2442AD4bbee2e2273A250461cA6f8");
+pub const mweETH_market: Address = address!("8BaD0c523516262a439197736fFf982F5E0987cC");
+pub const mwrsETH_market: Address = address!("4DF3DD62DB219C47F6a7CB1bE02C511AFceAdf5E");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -92,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize database
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://doadmin:AVNS_G5U-F8YEsMY2G4odL39@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require".to_string());
+        .unwrap();
     info!(
         "Using database URL: {}",
         database_url.replace("postgres://", "postgres://*****:*****@")
@@ -103,32 +109,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Markets
     let markets = vec![
-        USDC_MOCK_MARKET_SEPOLIA,
-        WSTETH_MOCK_MARKET_SEPOLIA,
+        mUSDC_market,
+        mWETH_market,
+        mUSDT_market,
+        mWBTC_market,
+        mwstETH_market,
+        mezETH_market,
+        mweETH_market,
+        mwrsETH_market,
     ];
     info!("Configured markets: {:?}", markets);
 
     // Chain configurations
     let chain_configs = vec![
         (
-            WS_URL_LINEA_SEPOLIA,
-            WS_URL_LINEA_SEPOLIA_BACKUP,
-            LINEA_SEPOLIA_CHAIN_ID,
+            WS_URL_LINEA,
+            WS_URL_LINEA_BACKUP,
+            LINEA_CHAIN_ID,
             vec![
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
             ],
         ),
         (
-            WS_URL_OPT_SEPOLIA,
-            WS_URL_OPT_SEPOLIA_BACKUP,
-            OPTIMISM_SEPOLIA_CHAIN_ID,
+            WS_URL_BASE,
+            WS_URL_BASE_BACKUP,
+            BASE_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
         (
-            WS_URL_ETH_SEPOLIA,
-            WS_URL_ETH_SEPOLIA_BACKUP,
-            ETHEREUM_SEPOLIA_CHAIN_ID,
+            WS_URL_ETH,
+            WS_URL_ETH_BACKUP,
+            ETHEREUM_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
     ];
@@ -145,9 +157,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Batch submitter configurations for each chain
     let batch_configs = vec![
-        (WS_URL_LINEA_SEPOLIA, WS_URL_LINEA_SEPOLIA_BACKUP, LINEA_SEPOLIA_CHAIN_ID),
-        (WS_URL_OPT_SEPOLIA, WS_URL_OPT_SEPOLIA_BACKUP, OPTIMISM_SEPOLIA_CHAIN_ID),
-        (WS_URL_ETH_SEPOLIA, WS_URL_ETH_SEPOLIA_BACKUP, ETHEREUM_SEPOLIA_CHAIN_ID),
+        (WS_URL_LINEA, WS_URL_LINEA_BACKUP, LINEA_CHAIN_ID),
+        (WS_URL_BASE, WS_URL_BASE_BACKUP, BASE_CHAIN_ID),
+        (WS_URL_ETH, WS_URL_ETH_BACKUP, ETHEREUM_CHAIN_ID),
     ];
 
     // Spawn batch event listeners
@@ -159,16 +171,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             chain_id, BATCH_SUBMITTER
         );
 
-        let block_delay = if ws_url == WS_URL_LINEA_SEPOLIA || ws_url == WS_URL_ETH_SEPOLIA {
+        let block_delay = if ws_url == WS_URL_LINEA || ws_url == WS_URL_ETH {
             2
         } else {
             5
         };
 
-        let max_block_delay_secs = if chain_id == ETHEREUM_SEPOLIA_CHAIN_ID || chain_id == ETHEREUM_CHAIN_ID {
+        let max_block_delay_secs = if chain_id == ETHEREUM_CHAIN_ID || chain_id == BASE_CHAIN_ID {
             24
         } else {
-            6
+            10
         };
 
         let config = BatchEventConfig {
@@ -212,25 +224,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize chain configurations for EventProofReadyChecker
     let proof_checker_chain_configs = vec![
         event_proof_ready_checker::ChainConfig {
-            chain_id: ETHEREUM_SEPOLIA_CHAIN_ID,
-            rpc_url: rpc_url_ethereum_sepolia().to_string(),
-            fallback_rpc_url: RPC_URL_ETH_SEPOLIA_BACKUP.to_string(),
+            chain_id: ETHEREUM_CHAIN_ID,
+            rpc_url: rpc_url_ethereum().to_string(),
+            fallback_rpc_url: rpc_url_ethereum_fallback().to_string(),
             is_l2: false,
             max_block_delay_secs: 24,
         },
         event_proof_ready_checker::ChainConfig {
-            chain_id: OPTIMISM_SEPOLIA_CHAIN_ID,
-            rpc_url: rpc_url_optimism_sepolia().to_string(),
-            fallback_rpc_url: RPC_URL_OPT_SEPOLIA_BACKUP.to_string(),
+            chain_id: BASE_CHAIN_ID,
+            rpc_url: rpc_url_base().to_string(),
+            fallback_rpc_url: rpc_url_base_fallback().to_string(),
             is_l2: true,
             max_block_delay_secs: 6,
         },
         event_proof_ready_checker::ChainConfig {
-            chain_id: LINEA_SEPOLIA_CHAIN_ID,
-            rpc_url: rpc_url_linea_sepolia().to_string(),
-            fallback_rpc_url: RPC_URL_LINEA_SEPOLIA_BACKUP.to_string(),
+            chain_id: OPTIMISM_CHAIN_ID,
+            rpc_url: rpc_url_optimism().to_string(),
+            fallback_rpc_url: rpc_url_optimism_fallback().to_string(),
             is_l2: true,
             max_block_delay_secs: 6,
+        },
+        event_proof_ready_checker::ChainConfig {
+            chain_id: LINEA_CHAIN_ID,
+            rpc_url: rpc_url_linea().to_string(),
+            fallback_rpc_url: rpc_url_linea_fallback().to_string(),
+            is_l2: true,
+            max_block_delay_secs: 10,
         },
     ];
 
@@ -257,10 +276,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     market, chain_id, event
                 );
 
-                let max_block_delay_secs = if *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID || *chain_id == ETHEREUM_CHAIN_ID {
+                let max_block_delay_secs = if *chain_id == ETHEREUM_CHAIN_ID {
                     24
                 } else {
-                    6
+                    10
                 };
 
                 let config = EventConfig {
@@ -314,7 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db.clone(),
         batch_limit,
         24, // ethereum_max_block_delay_secs - 24 seconds for Ethereum chains
-        6,  // l2_max_block_delay_secs - 6 seconds for L2 chains
+        10,  // l2_max_block_delay_secs - 6 seconds for L2 chains
     );
 
     // Create transaction manager configuration
@@ -322,11 +341,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Configure each chain with its specific settings
     chain_configs.insert(
-        ETHEREUM_SEPOLIA_CHAIN_ID as u32,
+        ETHEREUM_CHAIN_ID as u32,
         ChainConfig {
             max_retries: 3,
             retry_delay: Duration::from_secs(2),
-            rpc_url: rpc_url_ethereum_sepolia_fallback().to_string(),
+            rpc_url: rpc_url_ethereum_fallback().to_string(),
             submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(5),
             max_tx: 50,
@@ -335,11 +354,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     chain_configs.insert(
-        OPTIMISM_SEPOLIA_CHAIN_ID as u32,
+        BASE_CHAIN_ID as u32,
         ChainConfig {
             max_retries: 10,
             retry_delay: Duration::from_secs(1),
-            rpc_url: rpc_url_optimism_sepolia_fallback().to_string(),
+            rpc_url: rpc_url_base_fallback().to_string(),
             submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(2),
             max_tx: 50,
@@ -348,11 +367,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     chain_configs.insert(
-        LINEA_SEPOLIA_CHAIN_ID as u32,
+        LINEA_CHAIN_ID as u32,
         ChainConfig {
             max_retries: 10,
             retry_delay: Duration::from_secs(1),
-            rpc_url: rpc_url_linea_sepolia_fallback().to_string(),
+            rpc_url: rpc_url_linea_fallback().to_string(),
             submission_delay_seconds: 1,
             poll_interval: Duration::from_secs(2),
             max_tx: 50,
@@ -375,30 +394,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chain_params: {
             let mut map = HashMap::new();
             map.insert(
-                LINEA_SEPOLIA_CHAIN_ID as u32,
+                LINEA_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: 1000000000,
                     time_interval: Duration::from_secs(10),
                     block_delay: 10,
-                    reorg_protection: REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
+                    reorg_protection: REORG_PROTECTION_DEPTH_LINEA,
                 }
             );
             map.insert(
-                ETHEREUM_SEPOLIA_CHAIN_ID as u32,
+                ETHEREUM_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: 1000000000,
                     time_interval: Duration::from_secs(10),
                     block_delay: 2,
-                    reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
+                    reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM,
                 }
             );
             map.insert(
-                OPTIMISM_SEPOLIA_CHAIN_ID as u32,
+                BASE_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: 1000000000,
                     time_interval: Duration::from_secs(10),
                     block_delay: 10,
-                    reorg_protection: REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
+                    reorg_protection: REORG_PROTECTION_DEPTH_BASE,
                 }
             );
             map

@@ -193,7 +193,7 @@ impl TransactionManager {
             markets.push(event.market.unwrap_or_default());
             amounts.push(event.amount.unwrap_or_default());
             selectors.push(match chain_id {
-                chain_id if chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 => {
+                chain_id if chain_id == malda_rs::constants::LINEA_CHAIN_ID as u32 => {
                     match event.target_function.as_deref().unwrap_or("outHere") {
                         "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
                         "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),
@@ -313,9 +313,8 @@ impl TransactionManager {
                     Err(e) => {
                         let error_str = e.to_string();
                         // Check if error is "nonce too low" which indicates previous transaction was included
-                        if error_str.contains("nonce too low") {
+                        if error_str.to_lowercase().contains("nonce too low") {
                             info!("Received 'nonce too low' error for chain {}, indicating previous transaction was included", chain_id);
-                            // Get the receipt of the previous transaction
                             if let Some(prev_hash) = tx_hash {
                                 if let Ok(Some(receipt)) = provider.get_transaction_receipt(prev_hash).await {
                                     if receipt.status() == true {
@@ -329,6 +328,10 @@ impl TransactionManager {
                                         return Ok(prev_hash);
                                     }
                                 }
+                            } else {
+                                // If we don't have a tx_hash, just treat as success and return a zero hash
+                                info!("No tx_hash available, but got 'nonce too low'. Treating as success.");
+                                return Ok(TxHash::ZERO);
                             }
                         }
                         
@@ -342,6 +345,7 @@ impl TransactionManager {
                     }
                 };
                 
+            // After the first successful submission, tx_hash will always be set for subsequent retries.
             tx_hash = Some(pending_tx.tx_hash().clone());
 
             info!("Submitted batch transaction for chain {}: hash={:?} (attempt {}/{})", 

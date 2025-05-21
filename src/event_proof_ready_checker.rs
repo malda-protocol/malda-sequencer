@@ -21,7 +21,7 @@ use malda_rs::types::IL1Block;
 use crate::types::IL1Block::new;
 
 use crate::constants::{
-    ETHEREUM_SEPOLIA_CHAIN_ID, LINEA_SEPOLIA_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID,
+    ETHEREUM_CHAIN_ID, LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID,
 };
 use sequencer::database::{Database, EventStatus, EventUpdate};
 
@@ -45,7 +45,7 @@ pub struct ChainConfig {
 
 // Define L1 block contract addresses
 const L1_BLOCK_ADDRESS_OPTIMISM: &str = "0x4200000000000000000000000000000000000015";
-const L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA: &str = "0x4200000000000000000000000000000000000015";
+const L1_BLOCK_ADDRESS_BASE: &str = "0x4200000000000000000000000000000000000015";
 
 pub struct EventProofReadyChecker {
     db: Database,
@@ -155,15 +155,15 @@ impl EventProofReadyChecker {
         
         // Start the block update task
         let mut interval = interval(self.block_update_interval);
-        
+        let mut iteration_count = 0;
         loop {
             interval.tick().await;
             
             // Update block numbers for all chains
             let mut current_block_map = HashMap::new();
             
-            // Special handling for Ethereum Sepolia via Optimism L1 block contract
-            if let Some(optimism_state) = chain_providers.get_mut(&OPTIMISM_SEPOLIA_CHAIN_ID) {
+            // Special handling for Ethereum via Optimism L1 block contract
+            if let Some(optimism_state) = chain_providers.get_mut(&OPTIMISM_CHAIN_ID) {
                 // Get active provider for Optimism
                 let (optimism_provider, is_fallback) = match Self::get_active_provider(optimism_state, &self.db).await {
                     Ok((provider, is_fallback)) => {
@@ -178,11 +178,11 @@ impl EventProofReadyChecker {
                 
                 // Create L1 block contract
                 let l1_block_contract = new(
-                    L1_BLOCK_ADDRESS_OPTIMISM_SEPOLIA.parse::<Address>().unwrap(), 
+                    L1_BLOCK_ADDRESS_OPTIMISM.parse::<Address>().unwrap(), 
                     optimism_provider
                 );
                 
-                // Get Ethereum Sepolia block number via Optimism contract
+                // Get Ethereum block number via Optimism contract
                 match l1_block_contract.number().call().await {
                     Ok(number_return) => {
                         let block_number = number_return._0;
@@ -190,13 +190,13 @@ impl EventProofReadyChecker {
                         
                         // Update the block number in the map
                         let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                        if let Some(atomic) = block_numbers.get(&ETHEREUM_SEPOLIA_CHAIN_ID) {
+                        if let Some(atomic) = block_numbers.get(&ETHEREUM_CHAIN_ID) {
                             atomic.store(block_number_i32, Ordering::SeqCst);
-                            debug!("Updated Ethereum Sepolia block number{}: {}", 
+                            debug!("Updated Ethereum block number{}: {}", 
                                 if is_fallback { " (via fallback)" } else { "" }, 
                                 block_number_i32);
                             
-                            current_block_map.insert(ETHEREUM_SEPOLIA_CHAIN_ID, block_number_i32);
+                            current_block_map.insert(ETHEREUM_CHAIN_ID, block_number_i32);
                         }
                     },
                     Err(e) => {
@@ -208,8 +208,8 @@ impl EventProofReadyChecker {
             
             // Update block numbers for other chains
             for (chain_id, state) in chain_providers.iter_mut() {
-                // Skip Ethereum Sepolia as it's handled above
-                if *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
+                // Skip Ethereum as it's handled above
+                if *chain_id == ETHEREUM_CHAIN_ID {
                     continue;
                 }
                 
@@ -253,6 +253,10 @@ impl EventProofReadyChecker {
                 debug!("No valid current block numbers available yet, skipping DB update.");
                 continue;
             }
+
+            if iteration_count % 10 == 0 {
+                info!("Current block map: {:?}", current_block_map);
+            }
             
             // Update database with new block numbers
             match self.db.update_events_to_ready_status(&current_block_map).await {
@@ -264,14 +268,7 @@ impl EventProofReadyChecker {
             
             // Sleep for poll interval before checking for events again
             tokio::time::sleep(self.poll_interval).await;
-            
-            // Call the optimized database function again
-            match self.db.update_events_to_ready_status(&current_block_map).await {
-                Ok(_) => { /* Success logged within the DB function */ }
-                Err(e) => {
-                    error!("Failed to update events to ready status: {:?}", e);
-                }
-            }
+            iteration_count += 1;
         }
     }
     
