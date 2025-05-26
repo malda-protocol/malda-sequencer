@@ -208,10 +208,7 @@ impl EventProofReadyChecker {
             
             // Update block numbers for other chains
             for (chain_id, state) in chain_providers.iter_mut() {
-                // Skip Ethereum as it's handled above
-                if *chain_id == ETHEREUM_CHAIN_ID {
-                    continue;
-                }
+
                 
                 // Get active provider for this chain
                 let (provider, is_fallback) = match Self::get_active_provider(state, &self.db).await {
@@ -224,6 +221,11 @@ impl EventProofReadyChecker {
                         continue;
                     }
                 };
+
+                // Skip Ethereum as it's handled above
+                if *chain_id == ETHEREUM_CHAIN_ID {
+                    continue;
+                }
                 
                 // Get block number
                 match provider.get_block_number().await {
@@ -254,7 +256,7 @@ impl EventProofReadyChecker {
                 continue;
             }
 
-            if iteration_count % 10 == 0 {
+            if iteration_count % 60 == 0 {
                 info!("Current block map: {:?}", current_block_map);
             }
             

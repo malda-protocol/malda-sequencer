@@ -15,6 +15,7 @@ pub struct ResetTxManagerConfig {
     pub sample_size: i64,
     pub multiplier: f64,
     pub batch_limit: i64,
+    pub max_retries_reset: i64,
 }
 
 pub struct ResetTxManager {
@@ -100,21 +101,20 @@ impl ResetTxManager {
 
         info!("Started polling for stuck events to reset");
 
-        // Spawn a parallel task to poll get_failed_tx every poll_interval
-        let db_clone = self.db.clone();
-        let poll_interval_clone = poll_interval.clone();
+        let max_retries_reset = self.config.max_retries_reset;
+        let db = self.db.clone();
         let failed_tx_handle = tokio::spawn(async move {
-            let mut failed_interval = tokio::time::interval(poll_interval_clone);
+            let mut failed_interval = tokio::time::interval(poll_interval);
             loop {
                 failed_interval.tick().await;
-                match db_clone.get_failed_tx().await {
+                match db.get_failed_tx(max_retries_reset).await {
                     Ok(failed_txs) => {
                         debug!("Polled failed transactions: {} groups", failed_txs.len());
                         for (_dst_chain_id, _market, _sum, tx_hashes) in failed_txs {
                             if tx_hashes.is_empty() {
                                 continue;
                             }
-                            match db_clone.reset_failed_transactions(&tx_hashes).await {
+                            match db.reset_failed_transactions(&tx_hashes).await {
                                 Ok(_) => {
                                     debug!("Reset {} failed transactions", tx_hashes.len());
                                 }
@@ -137,7 +137,8 @@ impl ResetTxManager {
             match self.db.reset_stuck_events(
                 self.config.sample_size,
                 self.config.multiplier,
-                self.config.batch_limit // batch_limit
+                self.config.batch_limit, // batch_limit
+                self.config.max_retries_reset.clone(), // max_retries
             ).await {
                 Ok(_) => {
                     debug!("Successfully reset stuck events");

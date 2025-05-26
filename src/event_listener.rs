@@ -33,7 +33,7 @@ use malda_rs::constants::{
     rpc_url_optimism_sepolia,
 };
 
-use crate::constants::ETHEREUM_BLOCK_DELAY;
+
 use crate::create_provider;
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use crate::types::IL1Block;
@@ -54,6 +54,9 @@ pub struct EventConfig {
     pub retry_delay_secs: u64,
     pub poll_interval_secs: u64,
     pub max_block_delay_secs: u64,
+    pub block_range_offset_from: u64,
+    pub block_range_offset_to: u64,
+    pub is_retarded: bool,
 }
 
 #[derive(Clone)]
@@ -161,7 +164,7 @@ impl EventListener {
             let from_block = if last_processed_block > 0 {
                 last_processed_block + 1
             } else {
-                current_block - 2
+                current_block - self.config.block_range_offset_from
             };
 
             debug!(
@@ -171,8 +174,10 @@ impl EventListener {
 
             let mut block_timestamps = HashMap::new();
 
+            let to_block = current_block - self.config.block_range_offset_to;
+
             // Get block timestamps
-            for block_number in from_block..=current_block {
+            for block_number in from_block..=to_block {
                 let block = match provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
                     Ok(Some(block)) => block,
                     Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
@@ -230,14 +235,14 @@ impl EventListener {
             // Write updates to database if any
             if !pending_updates.is_empty() {
                 let count = pending_updates.len();
-                match self.db.add_new_events(&pending_updates).await {
+                match self.db.add_new_events(&pending_updates, self.config.is_retarded).await {
                     Ok(_) => info!("Successfully added batch of {} new events to database", count),
                     Err(e) => error!("Failed to write events to database: {:?}", e),
                 }
             }
 
             // Update last processed block
-            last_processed_block = current_block;
+            last_processed_block = to_block;
         }
     }
 
@@ -341,7 +346,6 @@ impl EventListener {
             .await
             .wrap_err("Failed to connect to fallback WebSocket")?;
 
-        info!("Using fallback provider for this polling cycle");
         Ok((fallback_provider, true))
     }
 
@@ -425,11 +429,7 @@ impl EventListener {
 impl Drop for EventListener {
     fn drop(&mut self) {
         if self.primary_provider.is_some() {
-            info!("Dropping primary provider connection for chain {} and event {}", 
-                  self.config.chain_id, self.config.event_signature);
         }
         
-        info!("Dropping event listener for chain {} and event {}", 
-              self.config.chain_id, self.config.event_signature);
     }
 }

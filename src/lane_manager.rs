@@ -6,7 +6,7 @@ use alloy::primitives::{Address, address};
 use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
-
+use crate::constants::*;
 #[derive(Clone)]
 pub struct LaneManagerConfig {
     pub max_retries: u32,
@@ -33,11 +33,12 @@ impl LaneManager {
     fn get_price(&self, market: &Address) -> f64 {
         // For now, just return 1.0 for all markets
         // TODO: Implement actual price fetching
-        if *market == address!("c15EF00790b987ce4B82eB9e25e1233a89589510") {
+        if *market == mUSDC_market || *market == mUSDT_market {
             return 1.0 / 1000000.0;
-        }
-        else {
-            return 2000.0 / 1000000000000000000.0;
+        } else if *market == mWBTC_market {
+            return 100000.0 / 100000000.0;
+        } else {
+            return 2500.0 / 1000000000000000000.0;
         }
         
     }
