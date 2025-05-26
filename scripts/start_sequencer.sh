@@ -54,19 +54,19 @@ if [ -f "$SEQUENCER_DIR/logs/sequencer.log" ]; then
     echo "Renamed old log file to sequencer_${TIMESTAMP}.log"
 fi
 
-# Start the sequencer in the background with verbose logging
-echo "Starting sequencer..."
+# Start the sequencer, redirecting output to the log file directly
 cd "$SEQUENCER_DIR"
-RUST_LOG=debug nohup cargo run --release --bin sequencer > "$SEQUENCER_DIR/logs/sequencer.log" 2>&1 &
+RUST_LOG=debug cargo run --release --bin sequencer > "$SEQUENCER_DIR/logs/sequencer.log" 2>&1 &
+SEQUENCER_PID=$!
 
 # Save the process ID
-echo $! > "$SEQUENCER_DIR/logs/sequencer.pid"
-echo "Sequencer started with PID: $!"
-echo "Logs are being written to: $SEQUENCER_DIR/logs/sequencer.log"
+echo $SEQUENCER_PID > "$SEQUENCER_DIR/logs/sequencer.pid"
+echo "Sequencer started with PID: $SEQUENCER_PID"
+echo "Logs are being written to: $SEQUENCER_DIR/logs/sequencer.log (rotated by logrotate)"
 
 # Wait a moment and check if the process is still running
 sleep 2
-if ps -p $(cat "$SEQUENCER_DIR/logs/sequencer.pid") > /dev/null 2>&1; then
+if ps -p $SEQUENCER_PID > /dev/null 2>&1; then
     echo "Sequencer is running successfully!"
 else
     echo "Error: Sequencer failed to start. Check the logs for details."

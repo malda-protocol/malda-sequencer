@@ -15,13 +15,13 @@ use chrono::{DateTime, Utc};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 type Bytes4 = FixedBytes<4>;
 
 use malda_rs::constants::*;
 
 use crate::{
-    constants::{BATCH_SUBMITTER, SEQUENCER_ADDRESS, SEQUENCER_PRIVATE_KEY},
     create_provider,
     events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
@@ -43,6 +43,7 @@ pub struct ChainConfig {
     pub poll_interval: Duration,
     pub max_tx: i64, // Maximum number of transactions to process per batch
     pub tx_timeout: Duration, // Chain-specific transaction timeout
+    pub gas_percentage_increase_per_retry: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,7 @@ impl TransactionManager {
         Self {
             config,
             db,
+
         }
     }
 
@@ -115,6 +117,7 @@ impl TransactionManager {
                         
                         // Process the batch
                         match Self::process_chain_batch(
+                            chain_config.gas_percentage_increase_per_retry,
                             db,
                             &events,
                             start_idx,
@@ -167,6 +170,7 @@ impl TransactionManager {
     }
 
     async fn process_chain_batch(
+        percent_increase_per_retry_numerator: u128,
         db: &Database,
         events: &Vec<EventUpdate>,
         start_idx: u64,
@@ -175,6 +179,9 @@ impl TransactionManager {
     ) -> Result<TxHash> {
         let batch_start = Instant::now();
         info!("Starting batch processing for chain {} with {} events", chain_id, events.len());
+
+        let batch_submitter = Address::from_str(&std::env::var("BATCH_SUBMITTER_ADDRESS").expect("BATCH_SUBMITTER_ADDRESS must be set in .env")).expect("Invalid BATCH_SUBMITTER_ADDRESS");
+        let sequencer = Address::from_str(&std::env::var("SEQUENCER_ADDRESS").expect("SEQUENCER_ADDRESS must be set in .env")).expect("Invalid SEQUENCER_ADDRESS");
 
         // Collect all data for the batch
         let mut receivers = Vec::new();
@@ -240,11 +247,10 @@ impl TransactionManager {
         let mut tx_hash = None;
         let mut last_error = None;
 
-        let percent_increase_per_retry_numerator = 20u128;
 
         let provider = Self::get_provider_for_chain(chain_id, chain_config).await?;
-        let nonce = provider.get_transaction_count(SEQUENCER_ADDRESS).await.unwrap();
-        let batch_submitter = IBatchSubmitter::new(BATCH_SUBMITTER, provider.clone());
+        let nonce = provider.get_transaction_count(sequencer).await.unwrap();
+        let batch_submitter = IBatchSubmitter::new(batch_submitter, provider.clone());
 
         let batch_submitted_at = Utc::now();
         
@@ -255,7 +261,7 @@ impl TransactionManager {
             info!("Starting retry attempt {}/{} for chain {}", retry_count + 1, chain_config.max_retries, chain_id);
             
             // Create the action for this attempt
-            let action = batch_submitter.batchProcess(msg.clone()).from(SEQUENCER_ADDRESS);
+            let action = batch_submitter.batchProcess(msg.clone()).from(sequencer);
             
             // Estimate gas for this attempt with proper error handling
             let gas_estimation_result = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
@@ -302,7 +308,7 @@ impl TransactionManager {
             let pending_tx = match action.gas(gas_limit)
                 .max_fee_per_gas(max_fee_per_gas)
                 .max_priority_fee_per_gas(max_priority_fee_per_gas)
-                .from(SEQUENCER_ADDRESS)
+                .from(sequencer)
                 .nonce(nonce)
                 .send()
                 .await {
@@ -440,7 +446,9 @@ impl TransactionManager {
         chain_config: &ChainConfig,
     ) -> Result<ProviderType> {
         let url = Url::parse(&chain_config.rpc_url)?;
-        let provider = create_provider(url, SEQUENCER_PRIVATE_KEY)
+        let private_key_string = std::env::var("SEQUENCER_PRIVATE_KEY").expect("SEQUENCER_PRIVATE_KEY must be set in .env");
+        let private_key: &str = &private_key_string;
+        let provider = create_provider(url, private_key)
             .await
             .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))?;
         Ok(provider)
@@ -509,10 +517,12 @@ mod tests {
         provider: &ProviderType,
         data: Vec<u8>,
     ) -> Result<(u64, u128, u128)> {
+        let batch_submitter = Address::from_str(&std::env::var("BATCH_SUBMITTER_ADDRESS").expect("BATCH_SUBMITTER_ADDRESS must be set in .env")).expect("Invalid BATCH_SUBMITTER_ADDRESS");
+        let sequencer = Address::from_str(&std::env::var("SEQUENCER_ADDRESS").expect("SEQUENCER_ADDRESS must be set in .env")).expect("Invalid SEQUENCER_ADDRESS");
         // Create the request parameters for linea_estimateGas
         let params = serde_json::json!({
-            "from": format!("{:?}", SEQUENCER_ADDRESS),
-            "to": format!("{:?}", BATCH_SUBMITTER),
+            "from": format!("{:?}", sequencer),
+            "to": format!("{:?}", batch_submitter),
             "data": format!("0x{}", hex::encode(data)),
             "value": format!("0x{:x}", U256::from(0)),
         });

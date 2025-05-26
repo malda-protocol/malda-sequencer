@@ -113,14 +113,37 @@ impl Database {
         Ok(Self { pool })
     }
 
-    pub async fn add_new_events(&self, events: &Vec<EventUpdate>) -> Result<()> {
+    pub async fn add_new_events(&self, events: &Vec<EventUpdate>, is_retarded: bool) -> Result<()> {
         if events.is_empty() {
             return Ok(());
         }
 
         let mut tx = self.pool.begin().await?;
 
-        for event in events {
+        let mut filtered_events = events.clone();
+        let mut _discarded = 0;
+        if is_retarded {
+            let tx_hashes: Vec<String> = events.iter().map(|e| e.tx_hash.to_string()).collect();
+            let rows = sqlx::query(
+                r#"
+                SELECT tx_hash
+                FROM unnest($1::text[]) AS tx_hash
+                WHERE tx_hash NOT IN (SELECT tx_hash FROM finished_events)
+                  AND tx_hash NOT IN (SELECT tx_hash FROM events)
+                "#
+            )
+            .bind(&tx_hashes)
+            .fetch_all(&self.pool)
+            .await?;
+            let valid_hashes: std::collections::HashSet<String> = rows.iter()
+                .filter_map(|row| row.try_get::<String, _>("tx_hash").ok())
+                .collect();
+            let orig_len = filtered_events.len();
+            filtered_events.retain(|e| valid_hashes.contains(&e.tx_hash.to_string()));
+            _discarded = orig_len - filtered_events.len();
+        }
+
+        for event in &filtered_events {
             // Only insert fields relevant to a newly processed event
             query(
                 r#"
@@ -154,6 +177,10 @@ impl Database {
         }
 
         tx.commit().await?;
+
+        if is_retarded && !filtered_events.is_empty() {
+            info!("{} retarded events added to events table", filtered_events.len());
+        }
 
         info!("Attempted to add batch of {} new events to database", events.len());
 
@@ -592,6 +619,7 @@ impl Database {
         tx_hashes: &Vec<TxHash>,
         status: EventStatus,
         finished_block_timestamps: &Vec<i64>,
+        is_retarded: bool,
     ) -> Result<()> {
         if tx_hashes.is_empty() {
             return Ok(());
@@ -668,13 +696,25 @@ impl Database {
 
         let rows_affected = insert_result.rows_affected();
         if rows_affected == count as u64 {
-            info!("Successfully migrated {} events to finished_events with status {}", count, status_str);
+            if is_retarded {
+                info!("Successfully migrated {} retarded events to finished_events with status {}", count, status_str);
+            } else {
+                info!("Successfully migrated {} events to finished_events with status {}", count, status_str);
+            }
         } else {
-            warn!(
-                "Attempted to migrate {} events, but {} rows were affected. Some events might not exist.",
-                count,
-                rows_affected
-            );
+            if is_retarded {
+                warn!(
+                    "Attempted to migrate {} retarded events, but {} rows were affected. Some events might not exist.",
+                    count,
+                    rows_affected
+                );
+            } else {
+                warn!(
+                    "Attempted to migrate {} events, but {} rows were affected. Some events might not exist.",
+                    count,
+                    rows_affected
+                );
+            }
         }
 
         Ok(())
@@ -810,7 +850,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn reset_stuck_events(&self, finished_sample_size: i64, multiplier: f64, batch_limit: i64) -> Result<()> {
+    pub async fn reset_stuck_events(&self, finished_sample_size: i64, multiplier: f64, batch_limit: i64, max_retries: i64) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Check if we have enough historical data first
@@ -881,48 +921,49 @@ impl Database {
                     END as stuck_type
                 FROM events
                 WHERE status IN ('ProofRequested', 'ProofReceived', 'BatchSubmitted', 'BatchFailed')
+                  AND (resubmitted IS NULL OR resubmitted < $6)
                 LIMIT $5
             )
             UPDATE events e
             SET 
                 status = CASE 
-                    WHEN se.resubmitted IS NULL OR se.resubmitted = 0 THEN 'Received'::event_status
+                    WHEN se.resubmitted IS NULL OR se.resubmitted < $6 THEN 'Received'::event_status
                     ELSE 'Failed'::event_status
                 END,
                 proof_requested_at = CASE 
-                    WHEN se.stuck_type = 'proof_requested' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type = 'proof_requested' AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE proof_requested_at 
                 END,
                 proof_received_at = CASE 
-                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE proof_received_at 
                 END,
                 batch_submitted_at = CASE 
-                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE batch_submitted_at 
                 END,
                 batch_included_at = CASE 
-                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE batch_included_at 
                 END,
                 tx_finished_at = CASE 
-                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type IN ('batch_submitted', 'batch_failed') AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE tx_finished_at 
                 END,
                 journal = CASE 
-                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE journal 
                 END,
                 seal = CASE 
-                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE seal 
                 END,
                 journal_index = CASE 
-                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted = 0) THEN NULL 
+                    WHEN se.stuck_type = 'proof_received' AND (se.resubmitted IS NULL OR se.resubmitted < $6) THEN NULL 
                     ELSE journal_index 
                 END,
                 error = CASE 
-                    WHEN se.resubmitted > 0 THEN 
+                    WHEN se.resubmitted IS NOT NULL AND se.resubmitted + 1 >= $6 THEN 
                         CASE se.stuck_type
                             WHEN 'proof_requested' THEN 'Proof request timeout after retry'
                             WHEN 'proof_received' THEN 'Proof generation timeout after retry'
@@ -931,11 +972,7 @@ impl Database {
                         END
                     ELSE NULL
                 END,
-                resubmitted = CASE 
-                    WHEN se.resubmitted IS NULL THEN 1
-                    WHEN se.resubmitted = 0 THEN 1
-                    ELSE se.resubmitted
-                END
+                resubmitted = COALESCE(se.resubmitted, 0) + 1
             FROM stuck_events se
             WHERE e.tx_hash = se.tx_hash
               AND se.stuck_type IS NOT NULL
@@ -946,6 +983,7 @@ impl Database {
         .bind(batch_submission_timeout)
         .bind(batch_inclusion_timeout)
         .bind(batch_limit)
+        .bind(max_retries)
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -1025,7 +1063,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_failed_tx(&self) -> Result<Vec<(u32, Address, U256, Vec<TxHash>)>> {
+    pub async fn get_failed_tx(&self, max_retries: i64) -> Result<Vec<(u32, Address, U256, Vec<TxHash>)>> {
         use sqlx::Row;
         use std::str::FromStr;
         use alloy::primitives::{Address, TxHash, U256};
@@ -1041,10 +1079,11 @@ impl Database {
             FROM finished_events
             WHERE status = 'TxProcessFail'::event_status
               AND event_type IN ('HostWithdraw', 'HostBorrow')
-              AND (resubmitted IS NULL)
+              AND (resubmitted IS NULL OR resubmitted < $1)
             GROUP BY dst_chain_id, market
             "#
         )
+        .bind(max_retries)
         .fetch_all(&self.pool)
         .await?;
 
@@ -1095,13 +1134,13 @@ impl Database {
                 DELETE FROM finished_events
                 WHERE tx_hash = ANY($1::text[])
                 RETURNING 
-                    tx_hash, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at
+                    tx_hash, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, resubmitted
             )
             INSERT INTO events (
                 tx_hash, status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, resubmitted
             )
             SELECT 
-                tx_hash, 'Received'::event_status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, 1
+                tx_hash, 'Received'::event_status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, COALESCE(resubmitted, 0) + 1
             FROM moved
             ON CONFLICT (tx_hash) DO NOTHING
             "#

@@ -28,6 +28,7 @@ pub struct BatchEventConfig {
     pub chain_id: u64,
     pub block_delay: u64,  // Number of blocks to delay processing
     pub max_block_delay_secs: u64, // Maximum acceptable block delay in seconds
+    pub is_retarded: bool,
 }
 
 #[derive(Clone)]
@@ -243,7 +244,7 @@ impl BatchEventListener {
                     self.config.chain_id
                 );
                 
-                if let Err(e) = self.db.update_finished_events(&success_hashes, EventStatus::TxProcessSuccess, &success_timestamps).await {
+                if let Err(e) = self.db.update_finished_events(&success_hashes, EventStatus::TxProcessSuccess, &success_timestamps, self.config.is_retarded).await {
                     error!("Failed to update success events: {:?}", e);
                 } else {
                     info!("Successfully migrated {} success events to finished_events", success_hashes.len());
@@ -258,7 +259,7 @@ impl BatchEventListener {
                     self.config.chain_id
                 );
                 
-                if let Err(e) = self.db.update_finished_events(&failure_hashes, EventStatus::TxProcessFail, &failure_timestamps).await {
+                if let Err(e) = self.db.update_finished_events(&failure_hashes, EventStatus::TxProcessFail, &failure_timestamps, self.config.is_retarded).await {
                     error!("Failed to update failure events: {:?}", e);
                 } else {
                     info!("Successfully migrated {} failure events to finished_events", failure_hashes.len());

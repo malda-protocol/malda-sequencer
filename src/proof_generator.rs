@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
 use tracing::{debug, error, info, warn};
+use std::env;
 
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 use malda_rs::constants::*;
@@ -56,7 +57,7 @@ impl ProofGenerator {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting proof generator, reading processed events from database...");
 
-        let proof_delay = Duration::from_secs(crate::constants::PROOF_REQUEST_DELAY);
+        let proof_delay = Duration::from_secs(env::var("PROOF_GENERATOR_PROOF_REQUEST_DELAY").expect("PROOF_GENERATOR_PROOF_REQUEST_DELAY must be set in .env").parse::<u64>().unwrap());
 
         loop {
             // Get processed events from database - they are claimed atomically now
