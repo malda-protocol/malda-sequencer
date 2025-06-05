@@ -13,7 +13,7 @@ echo "Sequencer directory: $SEQUENCER_DIR"
 mkdir -p "$SEQUENCER_DIR/logs"
 
 # Set Bonsai API environment variables
-export BONSAI_API_KEY="tpXcM8jXP08AKwfZ9M7ryaXVDX3u0Zaa4Z2Cpzhe"
+export BONSAI_API_KEY="bvpAbjYmxEaucsXElCDsx5cnNlehEOUn4k2cME2X"
 export BONSAI_API_URL="https://api.bonsai.xyz/"
 
 # Set database URL
@@ -42,6 +42,22 @@ if [ -f "$SEQUENCER_DIR/logs/sequencer.pid" ]; then
     fi
 fi
 
+# Check if log rotation process is already running
+if [ -f "$SEQUENCER_DIR/logs/sequencer_logrotate.pid" ]; then
+    OLD_ROTATE_PID=$(cat "$SEQUENCER_DIR/logs/sequencer_logrotate.pid")
+    if ps -p $OLD_ROTATE_PID > /dev/null 2>&1; then
+        echo "Stopping existing log rotation process (PID: $OLD_ROTATE_PID)..."
+        kill $OLD_ROTATE_PID
+        sleep 2
+        if ps -p $OLD_ROTATE_PID > /dev/null 2>&1; then
+            echo "Force killing existing log rotation process..."
+            kill -9 $OLD_ROTATE_PID
+        fi
+        echo "Existing log rotation process stopped."
+    fi
+    rm -f "$SEQUENCER_DIR/logs/sequencer_logrotate.pid"
+fi
+
 # Run migrations using sqlx from the sequencer directory
 echo "Running database migrations..."
 cd "$SEQUENCER_DIR"
@@ -63,6 +79,12 @@ SEQUENCER_PID=$!
 echo $SEQUENCER_PID > "$SEQUENCER_DIR/logs/sequencer.pid"
 echo "Sequencer started with PID: $SEQUENCER_PID"
 echo "Logs are being written to: $SEQUENCER_DIR/logs/sequencer.log (rotated by logrotate)"
+
+# Start log rotation process in the background
+"$SCRIPT_DIR/rotate_sequencer_log.sh" > "$SEQUENCER_DIR/logs/logrotate_debug.log" 2>&1 &
+LOGROTATE_PID=$!
+echo $LOGROTATE_PID > "$SEQUENCER_DIR/logs/sequencer_logrotate.pid"
+echo "Log rotation process started with PID: $LOGROTATE_PID"
 
 # Wait a moment and check if the process is still running
 sleep 2

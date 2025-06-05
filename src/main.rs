@@ -610,8 +610,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let retry_delay_secs = std::env::var("RESET_TX_MANAGER_RETRY_DELAY_SECS").expect("RESET_TX_MANAGER_RETRY_DELAY_SECS must be set in .env").parse::<u64>().unwrap();
     let poll_interval_secs = std::env::var("RESET_TX_MANAGER_POLL_INTERVAL_SECS").expect("RESET_TX_MANAGER_POLL_INTERVAL_SECS must be set in .env").parse::<u64>().unwrap();
     let batch_limit: i64 = std::env::var("RESET_TX_MANAGER_BATCH_LIMIT").expect("RESET_TX_MANAGER_BATCH_LIMIT must be set in .env").parse::<u64>().unwrap().try_into().unwrap();
-    let max_retries_reset: i64 = std::env::var("RESET_TX_MANAGER_MAX_RETRIES").expect("RESET_TX_MANAGER_MAX_RETRIES must be set in .env").parse::<u64>().unwrap().try_into().unwrap();
-
+    let api_key = std::env::var("REBALANCER_API_KEY").expect("REBALANCER_API_KEY must be set in .env");
+    let rebalancer_url = std::env::var("REBALANCER_URL").expect("REBALANCER_URL must be set in .env");
+    let rebalance_delay = std::env::var("REBALANCER_DELAY_SECONDS").expect("REBALANCER_DELAY_SECONDS must be set in .env").parse::<u64>().unwrap();
+    let minimum_usd_value = std::env::var("REBALANCER_MINIMUM_USD_VALUE").expect("REBALANCER_MINIMUM_USD_VALUE must be set in .env").parse::<f64>().unwrap();
     let reset_tx_manager_config = ResetTxManagerConfig {
         sample_size: sample_size,
         multiplier: multiplier,
@@ -619,7 +621,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         retry_delay_secs: retry_delay_secs,
         poll_interval_secs: poll_interval_secs,
         batch_limit: batch_limit,
-        max_retries_reset: max_retries_reset,
+        max_retries_reset: max_retries_reset as i64,
+        api_key,
+        rebalancer_url,
+        rebalance_delay,
+        minimum_usd_value,
     };
     
     let db_clone_reset = db.clone(); // Clone db for reset tx manager
