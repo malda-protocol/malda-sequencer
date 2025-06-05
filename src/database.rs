@@ -430,7 +430,7 @@ impl Database {
             // Safely parse potentially NULL fields
             let msg_sender = row.try_get::<Option<String>, _>("msg_sender")?.and_then(|s| s.parse::<Address>().ok());
             let market = row.try_get::<Option<String>, _>("market")?.and_then(|s| s.parse::<Address>().ok());
-            let amount = row.try_get::<Option<String>, _>("amount")?.and_then(|s| s.parse::<U256>().ok());
+            let amount: Option<U256> = row.try_get("amount").ok().and_then(|s| U256::from_str(s).ok());
 
             events.push(EventUpdate {
                 tx_hash,
@@ -754,7 +754,7 @@ impl Database {
             WITH RECURSIVE
             -- Convert market prices to a table
             market_prices(market, price) AS (
-                SELECT * FROM UNNEST($1::text[], $2::float8[])
+                SELECT * FROM UNNEST($1::text[], $2::numeric(36, 27)[])
             ),
             -- Convert chain params to a table
             chain_params(chain_id, max_volume, time_interval, block_delay, reorg_protection) AS (
@@ -779,7 +779,7 @@ impl Database {
                     COALESCE(
                         CASE 
                             WHEN e.amount IS NOT NULL AND mp.price IS NOT NULL 
-                            THEN (e.amount::numeric(78,0) * mp.price::numeric(78,0))::numeric(78,0)::bigint
+                            THEN (e.amount::numeric(78,0) * mp.price::numeric(36,27))::numeric(78,0)::bigint
                             ELSE 0
                         END,
                         0
@@ -1074,11 +1074,11 @@ impl Database {
             SELECT 
                 dst_chain_id, 
                 market, 
-                SUM(COALESCE(amount::bigint, 0)) as total_amount, 
+                SUM(amount::numeric)::text as total_amount, 
                 array_agg(tx_hash) as tx_hashes
             FROM finished_events
             WHERE status = 'TxProcessFail'::event_status
-              AND event_type IN ('HostWithdraw', 'HostBorrow')
+              AND event_type IN ('HostWithdraw', 'HostBorrow', 'ExtensionSupply')
               AND (resubmitted IS NULL OR resubmitted < $1)
             GROUP BY dst_chain_id, market
             "#
@@ -1105,9 +1105,9 @@ impl Database {
                 None => continue, // skip if missing
             };
             // Parse total_amount
-            let total_amount: Option<String> = row.try_get("total_amount").ok();
+            let total_amount: Option<&str> = row.try_get("total_amount").ok();
             let total_amount = match total_amount {
-                Some(ref s) => U256::from_str(s).unwrap_or(U256::from(0)),
+                Some(s) => U256::from_str(s).unwrap_or(U256::from(0)),
                 None => U256::from(0),
             };
             // Parse tx_hashes

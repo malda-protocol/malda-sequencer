@@ -22,6 +22,12 @@ BEGIN
     ) THEN
         CREATE USER "Analytics" WITH PASSWORD 'analytics_password';
     END IF;
+
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_roles WHERE rolname = 'ManualSubmitter'
+    ) THEN
+        CREATE USER "ManualSubmitter" WITH PASSWORD 'manual1malda2submitter';
+    END IF;
 END
 $$;
 
@@ -159,9 +165,9 @@ CREATE TABLE volume_flow (
 -- Insert initial rows for each chain
 INSERT INTO volume_flow (chain_id, last_reset, dollar_value)
 VALUES 
-    (59141, NOW(), 0),  -- Linea Sepolia
-    (11155111, NOW(), 0),  -- Ethereum Sepolia
-    (11155420, NOW(), 0)  -- Optimism Sepolia
+    (59144, NOW(), 0),  -- Linea
+    (1, NOW(), 0),  -- Ethereum
+    (8453, NOW(), 0)  -- Base
 ON CONFLICT (chain_id) DO NOTHING;
 
 -- Create table to track node status and failures
@@ -187,3 +193,9 @@ GRANT SELECT ON events TO "Analytics";
 GRANT SELECT ON finished_events TO "Analytics";
 GRANT SELECT ON archive_events TO "Analytics";
 GRANT SELECT ON node_status TO "Analytics";
+
+GRANT INSERT ON events TO "ManualSubmitter";
+GRANT SELECT ON events TO "ManualSubmitter";
+GRANT SELECT ON finished_events TO "ManualSubmitter";
+GRANT UPDATE ON volume_flow TO "ManualSubmitter";
+GRANT SELECT ON volume_flow TO "ManualSubmitter";
