@@ -3,11 +3,10 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     transports::http::reqwest::Url,
-    primitives::{Address, TxHash},
+    primitives::Address,
     eips::BlockNumberOrTag,
 };
 use eyre::{Result, WrapErr};
-use futures::future::join_all;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -16,14 +15,12 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use malda_rs::constants::*;
-use malda_rs::types::IL1Block;
 use crate::types::IL1Block::new;
 
 use crate::constants::{
-    ETHEREUM_CHAIN_ID, LINEA_CHAIN_ID, OPTIMISM_CHAIN_ID,
+    ETHEREUM_CHAIN_ID, OPTIMISM_CHAIN_ID,
 };
-use sequencer::database::{Database, EventStatus, EventUpdate};
+use sequencer::database::Database;
 
 // Define a type for the block number map
 type BlockNumberMap = HashMap<u64, AtomicI32>;
@@ -73,9 +70,7 @@ type ProviderType = alloy::providers::fillers::FillProvider<
         >,
         alloy::providers::fillers::WalletFiller<alloy::network::EthereumWallet>
     >,
-    alloy::providers::RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
-    alloy::transports::http::Http<alloy::transports::http::Client>,
-    alloy::network::Ethereum
+    alloy::providers::RootProvider<alloy::network::Ethereum>
 >;
 
 // Chain provider state
@@ -185,7 +180,7 @@ impl EventProofReadyChecker {
                 // Get Ethereum block number via Optimism contract
                 match l1_block_contract.number().call().await {
                     Ok(number_return) => {
-                        let block_number = number_return._0;
+                        let block_number = number_return;
                         let block_number_i32 = block_number.try_into().unwrap_or(i32::MAX);
                         
                         // Update the block number in the map
@@ -231,7 +226,6 @@ impl EventProofReadyChecker {
                 match provider.get_block_number().await {
                     Ok(block_number) => {
                         let block_number_i32 = block_number as i32;
-                        
                         // Update the block number in the map
                         let block_numbers = BLOCK_NUMBERS.lock().unwrap();
                         if let Some(atomic) = block_numbers.get(chain_id) {
@@ -240,7 +234,6 @@ impl EventProofReadyChecker {
                                 chain_id, 
                                 if is_fallback { " (via fallback)" } else { "" }, 
                                 block_number_i32);
-                            
                             current_block_map.insert(*chain_id, block_number_i32);
                         }
                     },
@@ -281,7 +274,7 @@ impl EventProofReadyChecker {
             let provider = state.primary_provider.as_ref().unwrap();
             
             // Check if the primary provider is fresh enough
-            match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+            match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
                 Ok(Some(block)) => {
                     // Check block timestamp
                     let block_timestamp: u64 = block.header.inner.timestamp.into();
@@ -381,7 +374,7 @@ impl EventProofReadyChecker {
         };
 
         // Check if the primary provider is fresh enough
-        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest).await {
             Ok(Some(block)) => block,
             Ok(None) => {
                 let reason = format!("Primary provider returned no latest block");
@@ -453,7 +446,7 @@ impl EventProofReadyChecker {
     }
 
     // Helper method to create fallback provider
-    async fn create_fallback_provider(config: &ChainConfig, db: &Database) -> Result<(ProviderType, bool)> {
+    async fn create_fallback_provider(config: &ChainConfig, _db: &Database) -> Result<(ProviderType, bool)> {
         let fallback_url = Url::parse(&config.fallback_rpc_url)
             .wrap_err_with(|| format!("Invalid fallback RPC URL: {}", config.fallback_rpc_url))?;
 
@@ -493,9 +486,8 @@ async fn create_provider(
     let wallet = EthereumWallet::from(signer);
 
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url);
+        .connect_http(rpc_url);
 
     Ok(provider)
 } 

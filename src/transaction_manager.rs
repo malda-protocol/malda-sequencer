@@ -17,6 +17,34 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+// ProviderType alias matching the actual provider returned by create_provider
+use alloy::providers::fillers::{
+    BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller, WalletFiller
+};
+use alloy::providers::RootProvider;
+use alloy::network::EthereumWallet;
+use alloy::network::Ethereum;
+
+type ProviderType = alloy::providers::fillers::FillProvider<
+    JoinFill<
+        JoinFill<
+            alloy::providers::Identity,
+            JoinFill<
+                GasFiller,
+                JoinFill<
+                    BlobGasFiller,
+                    JoinFill<
+                        NonceFiller,
+                        ChainIdFiller
+                    >
+                >
+            >
+        >,
+        WalletFiller<EthereumWallet>
+    >,
+    RootProvider<Ethereum>
+>;
+
 type Bytes4 = FixedBytes<4>;
 
 use malda_rs::constants::*;
@@ -25,7 +53,6 @@ use crate::{
     create_provider,
     events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
-    ProviderType,
 };
 
 // Track last submission time for each chain
@@ -80,6 +107,7 @@ impl TransactionManager {
         // Create a task for each chain
         let mut chain_tasks = Vec::new();
         for (chain_id, chain_config) in &self.config.chain_configs {
+            let _chain_config = chain_config;
             let config = self.config.clone();
             let db = self.db.clone();
             let chain_id = *chain_id;
@@ -171,7 +199,7 @@ impl TransactionManager {
 
     async fn process_chain_batch(
         percent_increase_per_retry_numerator: u128,
-        db: &Database,
+        _db: &Database,
         events: &Vec<EventUpdate>,
         start_idx: u64,
         chain_id: u32,
@@ -252,7 +280,7 @@ impl TransactionManager {
         let nonce = provider.get_transaction_count(sequencer).await.unwrap();
         let batch_submitter = IBatchSubmitter::new(batch_submitter, provider.clone());
 
-        let batch_submitted_at = Utc::now();
+        let _batch_submitted_at = Utc::now();
         
         while retry_count < chain_config.max_retries {
             // Get the provider for this chain
@@ -447,10 +475,11 @@ impl TransactionManager {
     ) -> Result<ProviderType> {
         let url = Url::parse(&chain_config.rpc_url)?;
         let private_key_string = std::env::var("SEQUENCER_PRIVATE_KEY").expect("SEQUENCER_PRIVATE_KEY must be set in .env");
-        let private_key: &str = &private_key_string;
-        let provider = create_provider(url, private_key)
-            .await
-            .map_err(|e| eyre::eyre!("Failed to create provider: {}", e))?;
+        let signer: alloy::signers::local::PrivateKeySigner = private_key_string.parse().expect("should parse private key");
+        let wallet = EthereumWallet::from(signer);
+        let provider = alloy::providers::ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(url);
         Ok(provider)
     }
 }

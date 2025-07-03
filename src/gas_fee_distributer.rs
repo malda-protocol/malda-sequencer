@@ -71,7 +71,7 @@ impl GasFeeDistributer {
             distributor_balances.insert(chain_id, U256::from(0u64));
             sequencer_balances.insert(chain_id, U256::from(0u64));
         }
-        let mut cross_chain_rebalance = Vec::new();
+        let cross_chain_rebalance = Vec::new();
         let accross_settlement_time = std::env::var("ACCROSS_SETTLEMENT_TIME").expect("ACCROSS_SETTLEMENT_TIME must be set in .env").parse().expect("ACCROSS_SETTLEMENT_TIME must be a u64");
         let accross_timer = None;
         GasFeeDistributer {
@@ -117,7 +117,7 @@ impl GasFeeDistributer {
                         continue;
                     }
                 };
-                let provider = ProviderBuilder::new().on_http(url.clone());
+                let provider = ProviderBuilder::new().connect_http(url.clone());
                 // Get distributor balance
                 match provider.get_balance(self.public_address).await {
                     Ok(balance) => {
@@ -204,7 +204,7 @@ impl GasFeeDistributer {
             }
         };
         let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new().with_recommended_fillers().wallet(wallet).on_http(url);
+        let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
         let min_harvest = self.minimum_harvest_balance_per_chain.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
         if let Some(markets) = self.markets_per_chain.get(&chain_id) {
             for &market in markets {
@@ -269,12 +269,12 @@ impl GasFeeDistributer {
             }
         };
         let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new().with_recommended_fillers().wallet(wallet).on_http(url);
+        let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
         let distributor_balance = self.distributor_balances.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
         let sequencer_balance = self.sequencer_balances.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
         let min_distributor = self.min_distributor_balance_per_chain.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
         let target_sequencer = self.target_sequencer_balance_per_chain.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
-        let min_sequencer = self.minimum_sequencer_balance_per_chain.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
+        let _min_sequencer = self.minimum_sequencer_balance_per_chain.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
         if distributor_balance <= min_distributor {
             info!("Distributor balance too low to send on chain {}", chain_id);
             self.cross_chain_rebalance.push(chain_id);
@@ -285,7 +285,7 @@ impl GasFeeDistributer {
         } else {
             U256::from(0u64)
         };
-        if needed < min_sequencer / U256::from(5u64) {
+        if needed < _min_sequencer / U256::from(5u64) {
             info!("Sequencer already at or above target (or close enough) on chain {}", chain_id);
             return;
         }
@@ -353,7 +353,7 @@ impl GasFeeDistributer {
         }
         // If sequencer is still below minimum, add to cross_chain_rebalance
         let updated_seq = self.sequencer_balances.get(&chain_id).cloned().unwrap_or(U256::from(0u64));
-        if updated_seq < min_sequencer {
+        if updated_seq < _min_sequencer {
             if !self.cross_chain_rebalance.contains(&chain_id) {
                 self.cross_chain_rebalance.push(chain_id);
             }
@@ -366,7 +366,7 @@ impl GasFeeDistributer {
         let min_distributor = self.min_distributor_balance_per_chain.get(&src_chain_id).cloned().unwrap_or(U256::from(0u64));
         // Get sequencer balance, min_sequencer, and target_sequencer for target_chain_id
         let sequencer_balance = self.sequencer_balances.get(&target_chain_id).cloned().unwrap_or(U256::from(0u64));
-        let min_sequencer = self.minimum_sequencer_balance_per_chain.get(&target_chain_id).cloned().unwrap_or(U256::from(0u64));
+        let _min_sequencer = self.minimum_sequencer_balance_per_chain.get(&target_chain_id).cloned().unwrap_or(U256::from(0u64));
         let target_sequencer = self.target_sequencer_balance_per_chain.get(&target_chain_id).cloned().unwrap_or(U256::from(0u64));
         // Calculate how much is available to send from src
         let available = if distributor_balance > min_distributor {
@@ -418,7 +418,7 @@ impl GasFeeDistributer {
             }
         };
         let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new().with_recommended_fillers().wallet(wallet).on_http(url);
+        let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
 
         // Convert addresses from String to Address
         let spoke_pool_address = match Address::from_str(&spoke_pool_address) {
@@ -450,14 +450,14 @@ impl GasFeeDistributer {
         };
         // Get quoteTimestamp and buffer from contract
         let current_time = match contract.getCurrentTime().call().await {
-            Ok(t) => t._0,
+            Ok(t) => t,
             Err(e) => {
                 error!("[BRIDGE] Failed to get current time from contract: {}", e);
                 return;
             }
         };
         let buffer = match contract.depositQuoteTimeBuffer().call().await {
-            Ok(b) => b._0,
+            Ok(b) => b,
             Err(e) => {
                 error!("[BRIDGE] Failed to get depositQuoteTimeBuffer from contract: {}", e);
                 return;
