@@ -4,21 +4,17 @@ use alloy::{
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
     eips::BlockNumberOrTag,
+    network::Ethereum,
 };
 use eyre::{Result, WrapErr};
-use futures_util::StreamExt;
 use tracing::{debug, error, info, warn};
-use alloy::primitives::{ TxHash, U256};
 use eyre::eyre;
-use hex;
 use lazy_static::lazy_static;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-use tokio::task;
 use tokio::time::interval;
 use tokio::time::sleep;
 use chrono::Utc;
-use std::cmp::max;
 use std::collections::HashMap;
 
 use malda_rs::constants::*;
@@ -29,16 +25,30 @@ use crate::{HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, HOST_BORROW_ON_EXTENSION_CHAIN
 
 // Import the chain ID constant from malda_rs
 use malda_rs::constants::{
-    ETHEREUM_SEPOLIA_CHAIN_ID, L1_BLOCK_ADDRESS_OPSTACK, LINEA_SEPOLIA_CHAIN_ID,
-    rpc_url_optimism_sepolia,
+    LINEA_SEPOLIA_CHAIN_ID,
 };
 
-
-use crate::create_provider;
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
-use crate::types::IL1Block;
 use sequencer::database::{Database, EventStatus, EventUpdate};
-use serde::{Deserialize, Serialize};
+
+// Type alias for the provider type returned by ProviderBuilder::connect_ws()
+type ProviderType = alloy::providers::fillers::FillProvider<
+    alloy::providers::fillers::JoinFill<
+        alloy::providers::Identity,
+        alloy::providers::fillers::JoinFill<
+            alloy::providers::fillers::GasFiller,
+            alloy::providers::fillers::JoinFill<
+                alloy::providers::fillers::BlobGasFiller,
+                alloy::providers::fillers::JoinFill<
+                    alloy::providers::fillers::NonceFiller,
+                    alloy::providers::fillers::ChainIdFiller
+                >
+            >
+        >
+    >,
+    alloy::providers::RootProvider<Ethereum>
+>;
+
 lazy_static! {
     pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
 }
@@ -63,7 +73,7 @@ pub struct EventConfig {
 pub struct EventListener {
     config: EventConfig,
     db: Database,
-    primary_provider: Option<alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>>,
+    primary_provider: Option<ProviderType>,
 }
 
 impl EventListener {
@@ -178,7 +188,7 @@ impl EventListener {
 
             // Get block timestamps
             for block_number in from_block..=to_block {
-                let block = match provider.get_block_by_number(BlockNumberOrTag::Number(block_number), false.into()).await {
+                let block = match provider.get_block_by_number(BlockNumberOrTag::Number(block_number)).await {
                     Ok(Some(block)) => block,
                     Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
                     Err(e) => return Err(eyre::eyre!("Failed to get block: {:?}", e)),
@@ -247,13 +257,13 @@ impl EventListener {
     }
 
     // Updated helper method to determine which provider to use
-    async fn get_active_provider(&mut self, force_new_primary: bool) -> Result<(alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>, bool)> {
+    async fn get_active_provider(&mut self, force_new_primary: bool) -> Result<(ProviderType, bool)> {
         // If we have a primary provider and don't need to force a new one, check if it's still valid
         if !force_new_primary && self.primary_provider.is_some() {
             let provider = self.primary_provider.as_ref().unwrap();
             
             // Check if the primary provider is fresh enough
-            match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+            match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
                 Ok(Some(block)) => {
                     // Check block timestamp
                     let block_timestamp: u64 = block.header.inner.timestamp.into();
@@ -291,7 +301,7 @@ impl EventListener {
 
         debug!("Connecting to primary provider at {}", primary_ws_url);
         let primary_ws = WsConnect::new(primary_ws_url);
-        let primary_provider = match ProviderBuilder::new().on_ws(primary_ws).await {
+        let primary_provider = match ProviderBuilder::new().connect_ws(primary_ws).await {
             Ok(provider) => provider,
             Err(e) => {
                 warn!("Failed to connect to primary WebSocket: {:?}, trying fallback at {}", e, self.config.fallback_ws_url);
@@ -300,7 +310,7 @@ impl EventListener {
         };
 
         // Check if the primary provider is fresh enough
-        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest).await {
             Ok(Some(block)) => block,
             Ok(None) => {
                 warn!("Primary provider returned no latest block, trying fallback at {}", self.config.fallback_ws_url);
@@ -332,7 +342,7 @@ impl EventListener {
     }
 
     // Helper method to create fallback provider
-    async fn create_fallback_provider(&self) -> Result<(alloy::providers::RootProvider<alloy::pubsub::PubSubFrontend>, bool)> {
+    async fn create_fallback_provider(&self) -> Result<(ProviderType, bool)> {
         let fallback_ws_url: Url = self
             .config
             .fallback_ws_url
@@ -342,7 +352,7 @@ impl EventListener {
         info!("Connecting to fallback provider at {}", fallback_ws_url);
         let fallback_ws = WsConnect::new(fallback_ws_url);
         let fallback_provider = ProviderBuilder::new()
-            .on_ws(fallback_ws)
+            .connect_ws(fallback_ws)
             .await
             .wrap_err("Failed to connect to fallback WebSocket")?;
 

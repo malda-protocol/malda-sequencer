@@ -759,9 +759,8 @@ async fn create_provider(
     let wallet = EthereumWallet::from(signer);
 
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url);
+        .connect_http(rpc_url);
 
     Ok(provider)
 }
