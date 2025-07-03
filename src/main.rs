@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{Address, address, U256},
+    primitives::{Address, U256},
     network::EthereumWallet,
     providers::{
         fillers::{BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller},
@@ -38,11 +38,9 @@ use lane_manager::{LaneManager, LaneManagerConfig};
 mod reset_tx_manager;
 use reset_tx_manager::{ResetTxManager, ResetTxManagerConfig};
 
-use alloy::primitives::TxHash;
-use sequencer::database::{Database, EventStatus, EventUpdate, ChainParams};
+use sequencer::database::{Database, ChainParams};
 
 use std::collections::HashMap;
-use std::env;
 
 mod event_proof_ready_checker;
 use event_proof_ready_checker::{EventProofReadyChecker};
@@ -63,8 +61,7 @@ type ProviderType = alloy::providers::fillers::FillProvider<
         >,
         alloy::providers::fillers::WalletFiller<EthereumWallet>,
     >,
-    RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
-    alloy::transports::http::Http<alloy::transports::http::Client>,
+    RootProvider<alloy::network::Ethereum>,
     alloy::network::Ethereum,
 >;
 
@@ -98,11 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse WebSocket URLs from .env
     let ws_url_linea = std::env::var("WS_URL_LINEA").expect("WS_URL_LINEA must be set in .env");
-    let ws_url_opt = std::env::var("WS_URL_OPT").expect("WS_URL_OPT must be set in .env");
+    let _ws_url_opt = std::env::var("WS_URL_OPT").expect("WS_URL_OPT must be set in .env");
     let ws_url_eth = std::env::var("WS_URL_ETH").expect("WS_URL_ETH must be set in .env");
     let ws_url_base = std::env::var("WS_URL_BASE").expect("WS_URL_BASE must be set in .env");
     let ws_url_linea_backup = std::env::var("WS_URL_LINEA_BACKUP").expect("WS_URL_LINEA_BACKUP must be set in .env");
-    let ws_url_opt_backup = std::env::var("WS_URL_OPT_BACKUP").expect("WS_URL_OPT_BACKUP must be set in .env");
+    let _ws_url_opt_backup = std::env::var("WS_URL_OPT_BACKUP").expect("WS_URL_OPT_BACKUP must be set in .env");
     let ws_url_eth_backup = std::env::var("WS_URL_ETH_BACKUP").expect("WS_URL_ETH_BACKUP must be set in .env");
     let ws_url_base_backup = std::env::var("WS_URL_BASE_BACKUP").expect("WS_URL_BASE_BACKUP must be set in .env");
 
@@ -687,7 +684,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     minimum_sequencer_balance_per_chain.insert(LINEA_CHAIN_ID as u64, min_seq_linea);
     minimum_sequencer_balance_per_chain.insert(BASE_CHAIN_ID as u64, min_seq_base);
     let mut min_distributor_balance_per_chain = std::collections::HashMap::new();
-    for (&chain_id, &min_seq) in &minimum_sequencer_balance_per_chain {
+    for (&chain_id, &_min_seq) in &minimum_sequencer_balance_per_chain {
         let key = match chain_id {
             x if x == ETHEREUM_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_ETHEREUM",
             x if x == LINEA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_LINEA",
@@ -698,7 +695,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         min_distributor_balance_per_chain.insert(chain_id, min_dist);
     }
     let mut target_sequencer_balance_per_chain = std::collections::HashMap::new();
-    for (&chain_id, &min_seq) in &minimum_sequencer_balance_per_chain {
+    for (&chain_id, &_min_seq) in &minimum_sequencer_balance_per_chain {
         let key = match chain_id {
             x if x == ETHEREUM_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_ETHEREUM",
             x if x == LINEA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_LINEA",
@@ -736,7 +733,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bridge_fee_percentage,
         min_amount_to_bridge,
     );
-    let gas_fee_distributer_handle = tokio::spawn(async move {
+    let _gas_fee_distributer_handle = tokio::spawn(async move {
         gas_fee_distributer.start_polling_balances().await;
     });
 
@@ -758,7 +755,7 @@ async fn create_provider(
     let signer: PrivateKeySigner = private_key.parse().expect("should parse private key");
     let wallet = EthereumWallet::from(signer);
 
-    let provider = ProviderBuilder::new()
+    let provider: ProviderType = ProviderBuilder::new()
         .wallet(wallet)
         .connect_http(rpc_url);
 

@@ -236,10 +236,10 @@ impl ProofGeneratorWorker {
         };
         
         // Create provider
-        let provider = ProviderBuilder::new().on_http(url);
+        let provider = ProviderBuilder::new().connect_http(url);
         
         // Get latest block
-        let block = match provider.get_block_by_number(BlockNumberOrTag::Latest, false.into()).await {
+        let block = match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
             Ok(Some(block)) => block,
             Ok(None) => {
                 warn!("Provider at {} returned no latest block", rpc_url);
