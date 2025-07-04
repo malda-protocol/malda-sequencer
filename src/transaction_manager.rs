@@ -228,7 +228,7 @@ impl TransactionManager {
             markets.push(event.market.unwrap_or_default());
             amounts.push(event.amount.unwrap_or_default());
             selectors.push(match chain_id {
-                chain_id if chain_id == malda_rs::constants::LINEA_CHAIN_ID as u32 => {
+                chain_id if chain_id == malda_rs::constants::LINEA_CHAIN_ID as u32 || chain_id == malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID as u32 => {
                     match event.target_function.as_deref().unwrap_or("outHere") {
                         "outHere" => Bytes4::from_slice(OUT_HERE_SELECTOR_FB4),
                         "mintExternal" => Bytes4::from_slice(MINT_EXTERNAL_SELECTOR_FB4),

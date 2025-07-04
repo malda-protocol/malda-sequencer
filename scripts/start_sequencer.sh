@@ -17,7 +17,7 @@ export BONSAI_API_KEY="bvpAbjYmxEaucsXElCDsx5cnNlehEOUn4k2cME2X"
 export BONSAI_API_URL="https://api.bonsai.xyz/"
 
 # Set database URL
-export DATABASE_URL="postgres://app:8Ixx4N5OYuDR6lQGZfDgxxF9cUnl2yW6jYbFsZRMi69ZrCnhYIgU7HuQCsgKhWyl@dal.database.lsh.io:30166/app"
+export DATABASE_URL="postgres://app:NVHEojL0TwU2xOhhAegvhNKGx2OvwsjJyL9JfNNIE5u4OX8Zo5JZARmEBfGWo7r7@dal.database.lsh.io:31187/app"
 
 # Check if database is accessible
 echo "Checking database connection..."
