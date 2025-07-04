@@ -1,7 +1,8 @@
-use alloy::primitives::{Address, Bytes, TxHash};
+use alloy::primitives::{Address, Bytes, TxHash, U256};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::transports::http::reqwest::Url;
 use alloy::eips::BlockNumberOrTag;
+use alloy_sol_types::SolValue;
 use eyre::Result;
 use sequencer::database::{Database, EventUpdate};
 use std::sync::Arc;
@@ -10,9 +11,12 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
 use tracing::{debug, error, info, warn};
 use std::env;
+use uuid::Uuid;
+use hex;
 
 use malda_rs::viewcalls::get_proof_data_prove_sdk;
 use malda_rs::constants::*;
+use malda_rs::types::{SolidityDataType, TakeLastXBytes, abi};
 
 #[derive(Debug)]
 pub struct ProofInfo {
@@ -110,6 +114,103 @@ struct ProofGeneratorWorker {
     db: Database,
     ethereum_max_block_delay_secs: u64,
     l2_max_block_delay_secs: u64,
+}
+
+/// Generates a dummy proof for testing purposes without making real blockchain calls or ZK proof generation.
+/// 
+/// This function constructs the journal data directly from input parameters using the same logic
+/// as the validator, but returns dummy values for amounts and an empty seal.
+/// 
+/// # Arguments
+/// * `users` - Vector of user address vectors, one per chain.
+/// * `markets` - Vector of market contract address vectors, one per chain.
+/// * `target_chain_ids` - Vector of target chain IDs to query (vector of vectors).
+/// * `chain_ids` - Vector of chain IDs to query.
+/// * `l1_inclusion` - Whether to include L1 data in the proof.
+/// * `fallback` - Whether to use fallback mode (unused in dummy mode).
+/// 
+/// # Returns
+/// * `Result<ProofInfo, eyre::Error>` - Dummy proof information with constructed journal and empty seal.
+async fn generate_dummy_proof(
+    users: Vec<Vec<Address>>,
+    markets: Vec<Vec<Address>>,
+    target_chain_ids: Vec<Vec<u64>>,
+    chain_ids: Vec<u64>,
+    l1_inclusion: bool,
+    _fallback: bool,
+) -> Result<ProofInfo, eyre::Error> {
+    let start_time = Instant::now();
+    
+    // Construct journal data using the same logic as the validator
+    let mut journal_data: Vec<Bytes> = Vec::new();
+    
+    // Process each chain's data
+    for (chain_idx, chain_id) in chain_ids.iter().enumerate() {
+        let chain_users = &users[chain_idx];
+        let chain_markets = &markets[chain_idx];
+        let chain_target_ids = &target_chain_ids[chain_idx];
+        
+        // Process each user/market/target_chain_id tuple for this chain
+        for ((user, market), target_chain_id) in chain_users
+            .iter()
+            .zip(chain_markets.iter())
+            .zip(chain_target_ids.iter())
+        {
+            // Use dummy amounts (0) since we can't make real contract calls
+            let dummy_amount_in = U256::from(1000000000000000000u64);
+            let dummy_amount_out = U256::from(1000000000000000000u64);
+            
+            // Construct the same input structure as in the validator
+            let input = vec![
+                SolidityDataType::Address(*user),
+                SolidityDataType::Address(*market),
+                SolidityDataType::Number(dummy_amount_in),
+                SolidityDataType::Number(dummy_amount_out),
+                SolidityDataType::NumberWithShift(U256::from(*chain_id), TakeLastXBytes(32)),
+                SolidityDataType::NumberWithShift(U256::from(*target_chain_id), TakeLastXBytes(32)),
+                SolidityDataType::Bool(l1_inclusion),
+            ];
+            
+            // Encode using the same method as the validator
+            let (bytes, _hash) = abi::encode_packed(&input);
+            journal_data.push(bytes.into());
+        }
+    }
+    
+    // Create dummy receipt with constructed journal and empty seal
+    let journal = journal_data.abi_encode();
+    let seal = Bytes::from(vec![]); // Empty seal since no real proof is generated
+    
+    // Generate dummy statistics
+    let total_transactions = users.iter().flatten().count();
+    let dummy_cycles = total_transactions as u64 * 1000; // Reasonable dummy cycle count
+    
+    // Generate UUID for the session
+    let uuid = Uuid::new_v4().to_string();
+    
+    // Use dummy timing values
+    let stark_time = 1u64; // 1 second
+    let snark_time = 2u64; // 2 seconds
+    
+    let duration = start_time.elapsed();
+    info!(
+        "Generated dummy proof for {} transactions with {} cycles in {:?}",
+        total_transactions, dummy_cycles, duration
+    );
+    debug!(
+        "Dummy proof details - journal: 0x{}, seal: 0x{}",
+        hex::encode(&journal),
+        hex::encode(&seal)
+    );
+    
+    Ok(ProofInfo {
+        journal: journal.into(),
+        seal,
+        uuid,
+        stark_time: stark_time as i32,
+        snark_time: snark_time as i32,
+        total_cycles: dummy_cycles as i64,
+    })
 }
 
 impl ProofGeneratorWorker {
