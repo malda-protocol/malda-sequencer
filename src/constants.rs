@@ -29,3 +29,8 @@ pub const mwstETH_market: Address = address!("1D8e8cEFEb085f3211Ab6a443Ad9051b54
 pub const mezETH_market: Address = address!("0B3c6645F4F2442AD4bbee2e2273A250461cA6f8");
 pub const mweETH_market: Address = address!("8BaD0c523516262a439197736fFf982F5E0987cC");
 pub const mwrsETH_market: Address = address!("4DF3DD62DB219C47F6a7CB1bE02C511AFceAdf5E");
+
+// TESTNET MOCK MARKETS
+
+pub const mUSDC_mock_market: Address = address!("0x76daf584Cbf152c85EB2c7Fe7a3d50DaF3f5B6e6");
+pub const mwstETH_mock_market: Address = address!("0xD4286cc562b906589f8232335413f79d9aD42f7E");

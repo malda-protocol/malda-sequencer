@@ -95,13 +95,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse WebSocket URLs from .env
     let ws_url_linea = std::env::var("WS_URL_LINEA").expect("WS_URL_LINEA must be set in .env");
-    let _ws_url_opt = std::env::var("WS_URL_OPT").expect("WS_URL_OPT must be set in .env");
+    let ws_url_opt = std::env::var("WS_URL_OPT").expect("WS_URL_OPT must be set in .env");
     let ws_url_eth = std::env::var("WS_URL_ETH").expect("WS_URL_ETH must be set in .env");
-    let ws_url_base = std::env::var("WS_URL_BASE").expect("WS_URL_BASE must be set in .env");
+    // let ws_url_base = std::env::var("WS_URL_BASE").expect("WS_URL_BASE must be set in .env");
     let ws_url_linea_backup = std::env::var("WS_URL_LINEA_BACKUP").expect("WS_URL_LINEA_BACKUP must be set in .env");
-    let _ws_url_opt_backup = std::env::var("WS_URL_OPT_BACKUP").expect("WS_URL_OPT_BACKUP must be set in .env");
+    let ws_url_opt_backup = std::env::var("WS_URL_OPT_BACKUP").expect("WS_URL_OPT_BACKUP must be set in .env");
     let ws_url_eth_backup = std::env::var("WS_URL_ETH_BACKUP").expect("WS_URL_ETH_BACKUP must be set in .env");
-    let ws_url_base_backup = std::env::var("WS_URL_BASE_BACKUP").expect("WS_URL_BASE_BACKUP must be set in .env");
+    // let ws_url_base_backup = std::env::var("WS_URL_BASE_BACKUP").expect("WS_URL_BASE_BACKUP must be set in .env");
 
     let batch_submitter_address: Address = Address::from_str(&std::env::var("BATCH_SUBMITTER_ADDRESS").expect("BATCH_SUBMITTER_ADDRESS must be set in .env")).expect("Invalid BATCH_SUBMITTER_ADDRESS");
     let sequencer_address: Address = Address::from_str(&std::env::var("SEQUENCER_ADDRESS").expect("SEQUENCER_ADDRESS must be set in .env")).expect("Invalid SEQUENCER_ADDRESS");
@@ -117,43 +117,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     db.sequencer_start_events_reset().await?;
 
+    //
+    // FROM CONFIG THE MARKETS SHOULD BE TAKEN
+    //
+
     // Markets
     let markets = vec![
-        mUSDC_market,
-        mWETH_market,
-        mUSDT_market,
-        mWBTC_market,
-        mwstETH_market,
-        mezETH_market,
-        mweETH_market,
-        mwrsETH_market,
+        // mUSDC_market,
+        // mWETH_market,
+        // mUSDT_market,
+        // mWBTC_market,
+        // mwstETH_market,
+        // mezETH_market,
+        // mweETH_market,
+        // mwrsETH_market,
+        mUSDC_mock_market,
+        mwstETH_mock_market,
     ];
     info!("Configured markets: {:?}", markets);
 
     // Chain configurations
+    // let chain_configs = vec![
+    //     (
+    //         &ws_url_linea,
+    //         &ws_url_linea_backup,
+    //         LINEA_CHAIN_ID,
+    //         vec![
+    //             HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
+    //             HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
+    //         ],
+    //     ),
+    //     (
+    //         &ws_url_base,
+    //         &ws_url_base_backup,
+    //         BASE_CHAIN_ID,
+    //         vec![EXTENSION_SUPPLIED_SIG],
+    //     ),
+    //     (
+    //         &ws_url_eth,
+    //         &ws_url_eth_backup,
+    //         ETHEREUM_CHAIN_ID,
+    //         vec![EXTENSION_SUPPLIED_SIG],
+    //     ),
+    // ];
+
+    // TESTNET MOCK CHAIN CONFIGS
+
     let chain_configs = vec![
         (
             &ws_url_linea,
             &ws_url_linea_backup,
-            LINEA_CHAIN_ID,
+            LINEA_SEPOLIA_CHAIN_ID,
             vec![
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG,
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG,
             ],
         ),
         (
-            &ws_url_base,
-            &ws_url_base_backup,
-            BASE_CHAIN_ID,
+            &ws_url_opt,
+            &ws_url_opt_backup,
+            OPTIMISM_SEPOLIA_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
         (
             &ws_url_eth,
             &ws_url_eth_backup,
-            ETHEREUM_CHAIN_ID,
+            ETHEREUM_SEPOLIA_CHAIN_ID,
             vec![EXTENSION_SUPPLIED_SIG],
         ),
     ];
+
+
     info!(
         "Configured chains: {:?}",
         chain_configs
@@ -167,9 +201,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Batch submitter configurations for each chain
     let batch_configs = vec![
-        (&ws_url_linea, &ws_url_linea_backup, LINEA_CHAIN_ID),
-        (&ws_url_base, &ws_url_base_backup, BASE_CHAIN_ID),
-        (&ws_url_eth, &ws_url_eth_backup, ETHEREUM_CHAIN_ID),
+        (&ws_url_linea, &ws_url_linea_backup, LINEA_SEPOLIA_CHAIN_ID),
+        (&ws_url_opt, &ws_url_opt_backup, OPTIMISM_SEPOLIA_CHAIN_ID),
+        (&ws_url_eth, &ws_url_eth_backup, ETHEREUM_SEPOLIA_CHAIN_ID),
     ];
 
     // Spawn batch event listeners
@@ -193,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::env::var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2").expect("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2 must be set in .env").parse::<u64>().unwrap()
         };
 
-        let max_block_delay_secs = if chain_id == ETHEREUM_CHAIN_ID {
+        let max_block_delay_secs = if chain_id == ETHEREUM_CHAIN_ID || chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
             std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1 must be set in .env").parse::<u64>().unwrap()
         } else {
             std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2 must be set in .env").parse::<u64>().unwrap()
@@ -263,30 +297,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     // Initialize chain configurations for EventProofReadyChecker
+    // let proof_checker_chain_configs = vec![
+    //     event_proof_ready_checker::ChainConfig {
+    //         chain_id: ETHEREUM_CHAIN_ID,
+    //         rpc_url: rpc_url_ethereum().to_string(),
+    //         fallback_rpc_url: rpc_url_ethereum_fallback().to_string(),
+    //         is_l2: false,
+    //         max_block_delay_secs,
+    //     },
+    //     event_proof_ready_checker::ChainConfig {
+    //         chain_id: BASE_CHAIN_ID,
+    //         rpc_url: rpc_url_base().to_string(),
+    //         fallback_rpc_url: rpc_url_base_fallback().to_string(),
+    //         is_l2: true,
+    //         max_block_delay_secs,
+    //     },
+    //     event_proof_ready_checker::ChainConfig {
+    //         chain_id: OPTIMISM_CHAIN_ID,
+    //         rpc_url: rpc_url_optimism().to_string(),
+    //         fallback_rpc_url: rpc_url_optimism_fallback().to_string(),
+    //         is_l2: true,
+    //         max_block_delay_secs,
+    //     },
+    //     event_proof_ready_checker::ChainConfig {
+    //         chain_id: LINEA_CHAIN_ID,
+    //         rpc_url: rpc_url_linea().to_string(),
+    //         fallback_rpc_url: rpc_url_linea_fallback().to_string(),
+    //         is_l2: true,
+    //         max_block_delay_secs,
+    //     },
+    // ];
+
+    // TESTNET MOCK PROOF READY CHECKER CHAIN CONFIGS
+
     let proof_checker_chain_configs = vec![
         event_proof_ready_checker::ChainConfig {
-            chain_id: ETHEREUM_CHAIN_ID,
+            chain_id: ETHEREUM_SEPOLIA_CHAIN_ID,
             rpc_url: rpc_url_ethereum().to_string(),
             fallback_rpc_url: rpc_url_ethereum_fallback().to_string(),
             is_l2: false,
             max_block_delay_secs,
         },
+        // event_proof_ready_checker::ChainConfig {
+        //     chain_id: BASE_CHAIN_ID,
+        //     rpc_url: rpc_url_base().to_string(),
+        //     fallback_rpc_url: rpc_url_base_fallback().to_string(),
+        //     is_l2: true,
+        //     max_block_delay_secs,
+        // },
         event_proof_ready_checker::ChainConfig {
-            chain_id: BASE_CHAIN_ID,
-            rpc_url: rpc_url_base().to_string(),
-            fallback_rpc_url: rpc_url_base_fallback().to_string(),
-            is_l2: true,
-            max_block_delay_secs,
-        },
-        event_proof_ready_checker::ChainConfig {
-            chain_id: OPTIMISM_CHAIN_ID,
+            chain_id: OPTIMISM_SEPOLIA_CHAIN_ID,
             rpc_url: rpc_url_optimism().to_string(),
             fallback_rpc_url: rpc_url_optimism_fallback().to_string(),
             is_l2: true,
             max_block_delay_secs,
         },
         event_proof_ready_checker::ChainConfig {
-            chain_id: LINEA_CHAIN_ID,
+            chain_id: LINEA_SEPOLIA_CHAIN_ID,
             rpc_url: rpc_url_linea().to_string(),
             fallback_rpc_url: rpc_url_linea_fallback().to_string(),
             is_l2: true,
@@ -319,19 +386,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     market, chain_id, event
                 );
 
-                let max_block_delay_secs = if *chain_id == ETHEREUM_CHAIN_ID {
+                let max_block_delay_secs = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1 must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2 must be set in .env").parse::<u64>().unwrap()
                 };
 
-                let block_range_offset_from = if *chain_id == ETHEREUM_CHAIN_ID {
+                let block_range_offset_from = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM").expect("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM").expect("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM must be set in .env").parse::<u64>().unwrap()
                 };
 
-                let block_range_offset_to = if *chain_id == ETHEREUM_CHAIN_ID {
+                let block_range_offset_to = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO").expect("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO").expect("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO must be set in .env").parse::<u64>().unwrap()
@@ -392,19 +459,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     market, chain_id, event
                 );
 
-                let max_block_delay_secs = if *chain_id == ETHEREUM_CHAIN_ID {
+                let max_block_delay_secs = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1 must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2").expect("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2 must be set in .env").parse::<u64>().unwrap()
                 };
 
-                let block_range_offset_from = if *chain_id == ETHEREUM_CHAIN_ID {
+                let block_range_offset_from = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM").expect("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM").expect("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM must be set in .env").parse::<u64>().unwrap()
                 };
 
-                let block_range_offset_to = if *chain_id == ETHEREUM_CHAIN_ID {
+                let block_range_offset_to = if *chain_id == ETHEREUM_CHAIN_ID || *chain_id == ETHEREUM_SEPOLIA_CHAIN_ID {
                     std::env::var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO").expect("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO must be set in .env").parse::<u64>().unwrap()
                 } else {
                     std::env::var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO").expect("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO must be set in .env").parse::<u64>().unwrap()
@@ -494,8 +561,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rpc_url_linea_transaction = std::env::var("RPC_URL_LINEA_TRANSACTION").expect("RPC_URL_LINEA_TRANSACTION must be set in .env");
     // Configure each chain with its specific settings
+    // chain_configs.insert(
+    //     ETHEREUM_CHAIN_ID as u32,
+    //     ChainConfig {
+    //         max_retries: ethereum_max_retries as u128,
+    //         retry_delay: Duration::from_secs(ethereum_retry_delay),
+    //         rpc_url: rpc_url_ethereum_fallback().to_string(),
+    //         submission_delay_seconds: ethereum_submission_delay_seconds,
+    //         poll_interval: Duration::from_secs(ethereum_poll_interval),
+    //         max_tx: ethereum_max_tx as i64,
+    //         tx_timeout: Duration::from_secs(ethereum_tx_timeout),
+    //         gas_percentage_increase_per_retry: gas_percentage_increase_per_retry.try_into().unwrap(),
+    //     },
+    // );
+
+    // chain_configs.insert(
+    //     BASE_CHAIN_ID as u32,
+    //     ChainConfig {
+    //         max_retries: l2_max_retries as u128,
+    //         retry_delay: Duration::from_secs(l2_retry_delay),
+    //         rpc_url: rpc_url_base_fallback().to_string(),
+    //         submission_delay_seconds: l2_submission_delay_seconds,
+    //         poll_interval: Duration::from_secs(l2_poll_interval),
+    //         max_tx: l2_max_tx as i64,
+    //         tx_timeout: Duration::from_secs(l2_tx_timeout),
+    //         gas_percentage_increase_per_retry: gas_percentage_increase_per_retry.try_into().unwrap(),
+    //     },
+    // );
+
+    // chain_configs.insert(
+    //     LINEA_CHAIN_ID as u32,
+    //     ChainConfig {
+    //         max_retries: l2_max_retries as u128,
+    //         retry_delay: Duration::from_secs(l2_retry_delay),
+    //         rpc_url: rpc_url_linea_transaction.to_string(),
+    //         submission_delay_seconds: l2_submission_delay_seconds,
+    //         poll_interval: Duration::from_secs(l2_poll_interval),
+    //         max_tx: l2_max_tx as i64,
+    //         tx_timeout: Duration::from_secs(l2_tx_timeout),
+    //         gas_percentage_increase_per_retry: gas_percentage_increase_per_retry.try_into().unwrap(),
+    //     },
+    // );
+
+    // TESTNET MOCK LANE MANAGER CHAIN CONFIGS
+
     chain_configs.insert(
-        ETHEREUM_CHAIN_ID as u32,
+        ETHEREUM_SEPOLIA_CHAIN_ID as u32,
         ChainConfig {
             max_retries: ethereum_max_retries as u128,
             retry_delay: Duration::from_secs(ethereum_retry_delay),
@@ -509,7 +620,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     chain_configs.insert(
-        BASE_CHAIN_ID as u32,
+        OPTIMISM_SEPOLIA_CHAIN_ID as u32,
         ChainConfig {
             max_retries: l2_max_retries as u128,
             retry_delay: Duration::from_secs(l2_retry_delay),
@@ -523,7 +634,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     chain_configs.insert(
-        LINEA_CHAIN_ID as u32,
+        LINEA_SEPOLIA_CHAIN_ID as u32,
         ChainConfig {
             max_retries: l2_max_retries as u128,
             retry_delay: Duration::from_secs(l2_retry_delay),
@@ -556,6 +667,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block_delay_ethereum = std::env::var("LANE_MANAGER_BLOCK_DELAY_ETHEREUM").expect("LANE_MANAGER_BLOCK_DELAY_ETHEREUM must be set in .env").parse::<u64>().unwrap();
     let block_delay_base = std::env::var("LANE_MANAGER_BLOCK_DELAY_BASE").expect("LANE_MANAGER_BLOCK_DELAY_BASE must be set in .env").parse::<u64>().unwrap();
     // Initialize LaneManager
+    // let lane_manager_config = LaneManagerConfig {
+    //     max_retries: max_retries,
+    //     retry_delay_secs: retry_delay_secs,
+    //     poll_interval_secs: poll_interval_secs,
+    //     chain_params: {
+    //         let mut map = HashMap::new();
+    //         map.insert(
+    //             LINEA_CHAIN_ID as u32,
+    //             ChainParams {
+    //                 max_volume: max_volume_linea,
+    //                 time_interval: Duration::from_secs(time_interval_linea),
+    //                 block_delay: block_delay_linea,
+    //                 reorg_protection: REORG_PROTECTION_DEPTH_LINEA,
+    //             }
+    //         );
+    //         map.insert(
+    //             ETHEREUM_CHAIN_ID as u32,
+    //             ChainParams {
+    //                 max_volume: max_volume_ethereum,
+    //                 time_interval: Duration::from_secs(time_interval_ethereum),
+    //                 block_delay: block_delay_ethereum,
+    //                 reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM,
+    //             }
+    //         );
+    //         map.insert(
+    //             BASE_CHAIN_ID as u32,
+    //             ChainParams {
+    //                 max_volume: max_volume_base,
+    //                 time_interval: Duration::from_secs(time_interval_base),
+    //                 block_delay: block_delay_base,
+    //                 reorg_protection: REORG_PROTECTION_DEPTH_BASE,
+    //             }
+    //         );
+    //         map
+    //     },
+    //     market_addresses: markets.clone(),
+    // };
+
+    // TESTNET MOCK RESET TX MANAGER CHAIN CONFIGS
+
     let lane_manager_config = LaneManagerConfig {
         max_retries: max_retries,
         retry_delay_secs: retry_delay_secs,
@@ -563,30 +714,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chain_params: {
             let mut map = HashMap::new();
             map.insert(
-                LINEA_CHAIN_ID as u32,
+                LINEA_SEPOLIA_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: max_volume_linea,
                     time_interval: Duration::from_secs(time_interval_linea),
                     block_delay: block_delay_linea,
-                    reorg_protection: REORG_PROTECTION_DEPTH_LINEA,
+                    reorg_protection: REORG_PROTECTION_DEPTH_LINEA_SEPOLIA,
                 }
             );
             map.insert(
-                ETHEREUM_CHAIN_ID as u32,
+                ETHEREUM_SEPOLIA_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: max_volume_ethereum,
                     time_interval: Duration::from_secs(time_interval_ethereum),
                     block_delay: block_delay_ethereum,
-                    reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM,
+                    reorg_protection: REORG_PROTECTION_DEPTH_ETHEREUM_SEPOLIA,
                 }
             );
             map.insert(
-                BASE_CHAIN_ID as u32,
+                OPTIMISM_SEPOLIA_CHAIN_ID as u32,
                 ChainParams {
                     max_volume: max_volume_base,
                     time_interval: Duration::from_secs(time_interval_base),
                     block_delay: block_delay_base,
-                    reorg_protection: REORG_PROTECTION_DEPTH_BASE,
+                    reorg_protection: REORG_PROTECTION_DEPTH_OPTIMISM_SEPOLIA,
                 }
             );
             map
@@ -664,15 +815,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     handles.push(tx_manager_handle);
 
     // Initialize GasFeeDistributer
-    let chains = vec![LINEA_CHAIN_ID as u64, ETHEREUM_CHAIN_ID as u64, BASE_CHAIN_ID as u64];
+    // let chains = vec![LINEA_CHAIN_ID as u64, ETHEREUM_CHAIN_ID as u64, BASE_CHAIN_ID as u64];
+    let chains = vec![LINEA_SEPOLIA_CHAIN_ID as u64, ETHEREUM_SEPOLIA_CHAIN_ID as u64, OPTIMISM_SEPOLIA_CHAIN_ID as u64];
     let mut markets_per_chain = HashMap::new();
     for &chain_id in &chains {
         markets_per_chain.insert(chain_id, markets.clone());
     }
     let mut rpc_urls = HashMap::new();
-    rpc_urls.insert(LINEA_CHAIN_ID as u64, rpc_url_linea_fallback().to_string());
-    rpc_urls.insert(ETHEREUM_CHAIN_ID as u64, rpc_url_ethereum_fallback().to_string());
-    rpc_urls.insert(BASE_CHAIN_ID as u64, rpc_url_base_fallback().to_string());
+    // rpc_urls.insert(LINEA_CHAIN_ID as u64, rpc_url_linea_fallback().to_string());
+    // rpc_urls.insert(ETHEREUM_CHAIN_ID as u64, rpc_url_ethereum_fallback().to_string());
+    // rpc_urls.insert(BASE_CHAIN_ID as u64, rpc_url_base_fallback().to_string());
+    rpc_urls.insert(LINEA_SEPOLIA_CHAIN_ID as u64, rpc_url_linea_fallback().to_string());
+    rpc_urls.insert(ETHEREUM_SEPOLIA_CHAIN_ID as u64, rpc_url_ethereum_fallback().to_string());
+    rpc_urls.insert(OPTIMISM_SEPOLIA_CHAIN_ID as u64, rpc_url_optimism_fallback().to_string());
     let poll_interval_secs = 60; // Set the polling interval for ETH balance updates
     let private_key = std::env::var("GAS_FEE_DISTRIBUTER_PRIVATE_KEY").expect("GAS_FEE_DISTRIBUTER_PRIVATE_KEY must be set in .env");
     let public_address = Address::from_str(&std::env::var("GAS_FEE_DISTRIBUTER_ADDRESS").expect("GAS_FEE_DISTRIBUTER_ADDRESS must be set in .env")).expect("Invalid GAS_FEE_DISTRIBUTER_ADDRESS");
@@ -680,15 +835,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let min_seq_linea = U256::from_str(&std::env::var("MIN_SEQUENCER_BALANCE_LINEA").expect("MIN_SEQUENCER_BALANCE_LINEA must be set in .env")).unwrap();
     let min_seq_base = U256::from_str(&std::env::var("MIN_SEQUENCER_BALANCE_BASE").expect("MIN_SEQUENCER_BALANCE_BASE must be set in .env")).unwrap();
     let mut minimum_sequencer_balance_per_chain = std::collections::HashMap::new();
-    minimum_sequencer_balance_per_chain.insert(ETHEREUM_CHAIN_ID as u64, min_seq_eth);
-    minimum_sequencer_balance_per_chain.insert(LINEA_CHAIN_ID as u64, min_seq_linea);
-    minimum_sequencer_balance_per_chain.insert(BASE_CHAIN_ID as u64, min_seq_base);
+    // minimum_sequencer_balance_per_chain.insert(ETHEREUM_CHAIN_ID as u64, min_seq_eth);
+    // minimum_sequencer_balance_per_chain.insert(LINEA_CHAIN_ID as u64, min_seq_linea);
+    // minimum_sequencer_balance_per_chain.insert(BASE_CHAIN_ID as u64, min_seq_base);
+    minimum_sequencer_balance_per_chain.insert(ETHEREUM_SEPOLIA_CHAIN_ID as u64, min_seq_eth);
+    minimum_sequencer_balance_per_chain.insert(LINEA_SEPOLIA_CHAIN_ID as u64, min_seq_linea);
+    minimum_sequencer_balance_per_chain.insert(OPTIMISM_SEPOLIA_CHAIN_ID as u64, min_seq_base);
     let mut min_distributor_balance_per_chain = std::collections::HashMap::new();
     for (&chain_id, &_min_seq) in &minimum_sequencer_balance_per_chain {
         let key = match chain_id {
-            x if x == ETHEREUM_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_ETHEREUM",
-            x if x == LINEA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_LINEA",
-            x if x == BASE_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_BASE",
+            // x if x == ETHEREUM_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_ETHEREUM",
+            // x if x == LINEA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_LINEA",
+            // x if x == BASE_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_BASE",
+            x if x == ETHEREUM_SEPOLIA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_ETHEREUM",
+            x if x == LINEA_SEPOLIA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_LINEA",
+            x if x == OPTIMISM_SEPOLIA_CHAIN_ID as u64 => "MIN_DISTRIBUTOR_BALANCE_BASE",
             _ => panic!("Unknown chain_id for distributor balance")
         };
         let min_dist = U256::from_str(&std::env::var(key).expect(&format!("{} must be set in .env", key))).unwrap();
@@ -697,20 +858,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut target_sequencer_balance_per_chain = std::collections::HashMap::new();
     for (&chain_id, &_min_seq) in &minimum_sequencer_balance_per_chain {
         let key = match chain_id {
-            x if x == ETHEREUM_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_ETHEREUM",
-            x if x == LINEA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_LINEA",
-            x if x == BASE_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_BASE",
+            // x if x == ETHEREUM_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_ETHEREUM",
+            // x if x == LINEA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_LINEA",
+            // x if x == BASE_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_BASE",
+            x if x == ETHEREUM_SEPOLIA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_ETHEREUM",
+            x if x == LINEA_SEPOLIA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_LINEA",
+            x if x == OPTIMISM_SEPOLIA_CHAIN_ID as u64 => "TARGET_SEQUENCER_BALANCE_BASE",
             _ => panic!("Unknown chain_id for target sequencer balance")
         };
         let target_seq = U256::from_str(&std::env::var(key).expect(&format!("{} must be set in .env", key))).unwrap();
         target_sequencer_balance_per_chain.insert(chain_id, target_seq);
     }
     let mut minimum_harvest_balance_per_chain = std::collections::HashMap::new();
-    for &chain_id in &[ETHEREUM_CHAIN_ID as u64, LINEA_CHAIN_ID as u64, BASE_CHAIN_ID as u64] {
+    // for &chain_id in &[ETHEREUM_CHAIN_ID as u64, LINEA_CHAIN_ID as u64, BASE_CHAIN_ID as u64] {
+    for &chain_id in &[ETHEREUM_SEPOLIA_CHAIN_ID as u64, LINEA_SEPOLIA_CHAIN_ID as u64, OPTIMISM_SEPOLIA_CHAIN_ID as u64] {
         let key = match chain_id {
-            x if x == ETHEREUM_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_ETHEREUM",
-            x if x == LINEA_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_LINEA",
-            x if x == BASE_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_BASE",
+            // x if x == ETHEREUM_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_ETHEREUM",
+            // x if x == LINEA_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_LINEA",
+            // x if x == BASE_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_BASE",
+            x if x == ETHEREUM_SEPOLIA_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_ETHEREUM",
+            x if x == LINEA_SEPOLIA_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_LINEA",
+            x if x == OPTIMISM_SEPOLIA_CHAIN_ID as u64 => "MIN_HARVEST_BALANCE_BASE",
             _ => panic!("Unknown chain_id for min harvest balance")
         };
         let min_harvest = U256::from_str(&std::env::var(key).expect(&format!("{} must be set in .env", key))).unwrap();
