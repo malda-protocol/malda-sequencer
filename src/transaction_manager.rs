@@ -50,7 +50,6 @@ type Bytes4 = FixedBytes<4>;
 use malda_rs::constants::*;
 
 use crate::{
-    create_provider,
     events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
 };

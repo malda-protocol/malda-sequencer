@@ -167,7 +167,12 @@ INSERT INTO volume_flow (chain_id, last_reset, dollar_value)
 VALUES 
     (59144, NOW(), 0),  -- Linea
     (1, NOW(), 0),  -- Ethereum
-    (8453, NOW(), 0)  -- Base
+    (8453, NOW(), 0),  -- Base
+    (10, NOW(), 0),  -- Optimism
+    (59141, NOW(), 0),  -- Linea Sepolia
+    (11155111, NOW(), 0),  -- Ethereum Sepolia
+    (84532, NOW(), 0),  -- Base Sepolia
+    (11155420, NOW(), 0)  -- Optimism Sepolia
 ON CONFLICT (chain_id) DO NOTHING;
 
 -- Create table to track node status and failures

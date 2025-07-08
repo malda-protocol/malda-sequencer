@@ -1,23 +1,25 @@
 use alloy::{
-    primitives::Address,
+    primitives::{Address, U256},
     network::EthereumWallet,
     providers::{
         fillers::{BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller},
-        Identity,
-        RootProvider,
+        Identity, ProviderBuilder, RootProvider,
     },
+    signers::local::PrivateKeySigner,
+    transports::http::reqwest::Url,
 };
 
 use eyre::Result;
+use malda_rs::constants::*;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub mod constants;
 pub mod events;
 pub mod types;
 pub mod config;
 
-use crate::{events::*, config::*};
+use crate::{constants::*, events::*, config::*};
 
 mod event_listener;
 use event_listener::{EventConfig, EventListener};
@@ -43,11 +45,12 @@ use std::collections::HashMap;
 
 mod event_proof_ready_checker;
 use event_proof_ready_checker::{EventProofReadyChecker};
+use crate::transaction_manager::ChainConfig;
 
 mod gas_fee_distributer;
 use gas_fee_distributer::GasFeeDistributer;
 
-
+use std::str::FromStr;
 
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
@@ -80,48 +83,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration - this is the only configuration needed!
     let config = SequencerConfig::new()?;
     
-    // Print configuration summary to stdout for deploy.sh
-    println!("\n================ Sequencer Configuration Summary ================");
-    println!("  Environment: {:?}", config.environment);
-    println!("  Database: {}", config.database_url);
-    println!("  Chains:");
-    for chain in config.get_all_chains() {
-        println!("    - {} (ID: {})", chain.name, chain.chain_id);
-        println!("      Type: {}", if chain.is_l1 { "L1" } else { "L2" });
-        println!("      Markets: {} ({})", chain.markets.len(),
-            chain.markets.iter().map(|m| format!("{:?}", m)).collect::<Vec<_>>().join(", "));
-        println!("      Events: {} ({})", chain.events.len(),
-            chain.events.join(", "));
-    }
-    println!("================================================================\n");
-
-    info!("🚀 Starting sequencer in {:?} mode", config.environment);
-    
-    // Display configured chains and markets
-    let chains = config.get_all_chains();
-    info!("📋 Configuration Summary:");
-    info!("   Environment: {:?}", config.environment);
-    info!("   Total chains configured: {}", chains.len());
-    
-    for chain in &chains {
-        info!("   🔗 Chain: {} (ID: {})", chain.name, chain.chain_id);
-        info!("      Type: {}", if chain.is_l1 { "L1" } else { "L2" });
-        info!("      Markets: {} ({})", chain.markets.len(), 
-            chain.markets.iter().map(|m| format!("{:?}", m)).collect::<Vec<_>>().join(", "));
-        info!("      Events: {} ({})", chain.events.len(), 
-            chain.events.join(", "));
-    }
-    
-    info!("✅ Sequencer configuration loaded successfully!");
+    info!("Starting sequencer in {:?} mode", config.environment);
+    info!("Configured chains: {:?}", 
+        config.get_all_chains().iter().map(|c| c.name.clone()).collect::<Vec<_>>());
 
     // Initialize database
     let db = Database::new(&config.database_url).await?;
     db.sequencer_start_events_reset().await?;
 
-    // Start event proof ready checker first (before event listeners)
-    start_event_proof_ready_checker(&config, db.clone()).await?;
-    
-    // Start all other components using the centralized configuration
+    // Start all components using the centralized configuration
     start_sequencer_components(config, db).await?;
 
     // Keep the main thread alive
@@ -142,7 +112,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
             primary_ws_url: chain.ws_url.clone(),
             fallback_ws_url: chain.fallback_ws_url.clone(),
             batch_submitter: chain.batch_submitter_address,
-            chain_id: chain.chain_id as u64,
+            chain_id: chain.chain_id,
             block_delay: chain.block_delay,
             max_block_delay_secs: chain.max_block_delay_secs,
             is_retarded: false,
@@ -152,7 +122,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
             primary_ws_url: chain.ws_url.clone(),
             fallback_ws_url: chain.fallback_ws_url.clone(),
             batch_submitter: chain.batch_submitter_address,
-            chain_id: chain.chain_id as u64,
+            chain_id: chain.chain_id,
             block_delay: chain.retarded_block_delay,
             max_block_delay_secs: chain.max_block_delay_secs,
             is_retarded: true,
@@ -191,7 +161,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     }
 
     // Start proof generator
-    let mut proof_generator = ProofGenerator::new(
+    let proof_generator = ProofGenerator::new(
         config.proof_config.max_retries,
         config.proof_config.retry_delay,
         db.clone(),
@@ -228,36 +198,43 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
 fn create_event_config(
     chain: &ChainConfig, 
     market: &Address, 
-    event: &str,
+    event: &str, 
     config: &SequencerConfig, 
     is_retarded: bool
 ) -> EventConfig {
     let event_config = &config.event_listener_config;
     
-    let block_range_offset_from = if chain.is_l1 { 
-        if is_retarded { event_config.retarded_block_range_offset_l1_from } else { event_config.block_range_offset_l1_from }
-    } else { 
-        if is_retarded { event_config.retarded_block_range_offset_l2_from } else { event_config.block_range_offset_l2_from }
-    };
-    
-    let block_range_offset_to = if chain.is_l1 { 
-        if is_retarded { event_config.retarded_block_range_offset_l1_to } else { event_config.block_range_offset_l1_to }
-    } else { 
-        if is_retarded { event_config.retarded_block_range_offset_l2_to } else { event_config.block_range_offset_l2_to }
-    };
+    let (max_retries, retry_delay_secs, poll_interval_secs, block_range_offset_from, block_range_offset_to) = 
+        if is_retarded {
+            (
+                event_config.retarded_max_retries,
+                event_config.retarded_retry_delay_secs,
+                event_config.retarded_poll_interval_secs,
+                if chain.is_l1 { event_config.retarded_block_range_offset_l1_from } else { event_config.retarded_block_range_offset_l2_from },
+                if chain.is_l1 { event_config.retarded_block_range_offset_l1_to } else { event_config.retarded_block_range_offset_l2_to },
+            )
+        } else {
+            (
+                event_config.max_retries,
+                event_config.retry_delay_secs,
+                event_config.poll_interval_secs,
+                if chain.is_l1 { event_config.block_range_offset_l1_from } else { event_config.block_range_offset_l2_from },
+                if chain.is_l1 { event_config.block_range_offset_l1_to } else { event_config.block_range_offset_l2_to },
+            )
+        };
 
     EventConfig {
         primary_ws_url: chain.ws_url.clone(),
         fallback_ws_url: chain.fallback_ws_url.clone(),
         market: *market,
         event_signature: event.to_string(),
-        chain_id: chain.chain_id as u64,
+        chain_id: chain.chain_id,
+        max_retries,
+        retry_delay_secs,
+        poll_interval_secs: poll_interval_secs,
+        max_block_delay_secs: chain.max_block_delay_secs,
         block_range_offset_from,
         block_range_offset_to,
-        max_retries: if is_retarded { event_config.retarded_max_retries } else { event_config.max_retries },
-        retry_delay_secs: if is_retarded { event_config.retarded_retry_delay_secs } else { event_config.retry_delay_secs },
-        poll_interval_secs: if is_retarded { event_config.retarded_poll_interval_secs } else { event_config.poll_interval_secs },
-        max_block_delay_secs: chain.max_block_delay_secs,
         is_retarded,
     }
 }
@@ -266,7 +243,7 @@ fn create_transaction_config(config: &SequencerConfig) -> TransactionConfig {
     let mut chain_configs = HashMap::new();
     
     for chain in config.get_all_chains() {
-        chain_configs.insert(chain.chain_id, transaction_manager::ChainConfig {
+        chain_configs.insert(chain.chain_id, ChainConfig {
             max_retries: chain.transaction_config.max_retries,
             retry_delay: chain.transaction_config.retry_delay,
             rpc_url: chain.rpc_url.clone(),
@@ -287,21 +264,33 @@ async fn start_batch_event_listeners(
     db: Database,
     restart_config: RestartConfig,
 ) -> Result<()> {
+    let mut current_listener = None;
+    let mut current_retarded_listener = None;
+    
     loop {
-        let mut normal_listener = BatchEventListener::new(normal_config.clone(), db.clone());
-        let mut retarded_listener = BatchEventListener::new(retarded_config.clone(), db.clone());
+        let mut new_listener = BatchEventListener::new(normal_config.clone(), db.clone());
+        let mut new_retarded_listener = BatchEventListener::new(retarded_config.clone(), db.clone());
         
-        info!("Starting new batch event listener instance");
-        
-        if let Err(e) = normal_listener.start().await {
+        if let Err(e) = new_listener.start().await {
             error!("Batch event listener failed: {:?}", e);
         }
         
-        if let Err(e) = retarded_listener.start().await {
+        if let Err(e) = new_retarded_listener.start().await {
             error!("Retarded batch event listener failed: {:?}", e);
         }
         
         tokio::time::sleep(Duration::from_secs(restart_config.listener_delay_seconds)).await;
+        
+        if let Some(listener) = current_listener.take() {
+            drop(listener);
+        }
+        if let Some(listener) = current_retarded_listener.take() {
+            drop(listener);
+        }
+        
+        current_listener = Some(new_listener);
+        current_retarded_listener = Some(new_retarded_listener);
+        tokio::time::sleep(Duration::from_secs(restart_config.listener_interval_seconds)).await;
     }
 }
 
@@ -311,21 +300,33 @@ async fn start_event_listeners(
     db: Database,
     restart_config: RestartConfig,
 ) -> Result<()> {
+    let mut current_listener = None;
+    let mut current_retarded_listener = None;
+    
     loop {
-        let mut normal_listener = EventListener::new(normal_config.clone(), db.clone());
-        let mut retarded_listener = EventListener::new(retarded_config.clone(), db.clone());
+        let mut new_listener = EventListener::new(normal_config.clone(), db.clone());
+        let mut new_retarded_listener = EventListener::new(retarded_config.clone(), db.clone());
         
-        info!("Starting new event listener instance");
-        
-        if let Err(e) = normal_listener.start().await {
+        if let Err(e) = new_listener.start().await {
             error!("Event listener failed: {:?}", e);
         }
         
-        if let Err(e) = retarded_listener.start().await {
+        if let Err(e) = new_retarded_listener.start().await {
             error!("Retarded event listener failed: {:?}", e);
         }
         
         tokio::time::sleep(Duration::from_secs(restart_config.listener_delay_seconds)).await;
+        
+        if let Some(listener) = current_listener.take() {
+            drop(listener);
+        }
+        if let Some(listener) = current_retarded_listener.take() {
+            drop(listener);
+        }
+        
+        current_listener = Some(new_listener);
+        current_retarded_listener = Some(new_retarded_listener);
+        tokio::time::sleep(Duration::from_secs(restart_config.listener_interval_seconds)).await;
     }
 }
 
@@ -337,93 +338,52 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
         poll_interval_secs: 2,
         chain_params: config.get_all_chains()
             .iter()
-            .map(|c| (c.chain_id, ChainParams {
+            .map(|c| (c.chain_id as u64, ChainParams {
                 max_volume: c.lane_config.max_volume,
                 time_interval: c.lane_config.time_interval,
                 block_delay: c.lane_config.block_delay,
                 reorg_protection: c.lane_config.reorg_protection,
             }))
             .collect(),
-        market_addresses: config.get_all_chains().iter().flat_map(|c| c.markets.clone()).collect(),
     };
-
-    let mut lane_manager = LaneManager::new(lane_config, db.clone());
     
+    let mut lane_manager = LaneManager::new(lane_config, db.clone());
     tokio::spawn(async move {
         if let Err(e) = lane_manager.start().await {
             error!("Lane manager failed: {:?}", e);
         }
     });
 
-
-
-    // Start reset tx manager
-    let reset_tx_manager_config = ResetTxManagerConfig {
-        sample_size: config.reset_tx_manager_config.sample_size,
-        multiplier: config.reset_tx_manager_config.multiplier,
-        max_retries: config.reset_tx_manager_config.max_retries,
-        retry_delay_secs: config.reset_tx_manager_config.retry_delay_secs,
-        poll_interval_secs: config.reset_tx_manager_config.poll_interval_secs,
-        batch_limit: config.reset_tx_manager_config.batch_limit,
-        max_retries_reset: config.reset_tx_manager_config.max_retries_reset,
-        api_key: config.reset_tx_manager_config.api_key.clone(),
-        rebalancer_url: config.reset_tx_manager_config.rebalancer_url.clone(),
-        rebalance_delay: config.reset_tx_manager_config.rebalance_delay,
-        minimum_usd_value: config.reset_tx_manager_config.minimum_usd_value,
-    };
-
-    let db_clone_reset = db.clone();
+    // Start gas fee distributer
+    let gas_fee_distributer = GasFeeDistributer::new(
+        config.gas_fee_distributer_private_key.clone(),
+        config.gas_fee_distributer_address,
+        db.clone(),
+    );
+    
     tokio::spawn(async move {
-        let mut current_manager = None;
-        loop {
-            let mut new_manager = ResetTxManager::new(reset_tx_manager_config.clone(), db_clone_reset.clone());
-            info!("Starting new reset tx manager instance");
-            
-            if let Err(e) = new_manager.start().await {
-                error!("Reset tx manager failed: {:?}", e);
-            }
-            
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            
-            if let Some(manager) = current_manager.take() {
-                drop(manager);
-            }
-            
-            current_manager = Some(new_manager);
-            tokio::time::sleep(Duration::from_secs(600)).await;
+        if let Err(e) = gas_fee_distributer.start().await {
+            error!("Gas fee distributer failed: {:?}", e);
         }
     });
 
-    // Start gas fee distributer
-    let chains: Vec<u64> = config.get_all_chains().iter().map(|c| c.chain_id as u64).collect();
-    let markets_per_chain: HashMap<u64, Vec<Address>> = config.get_all_chains()
-        .iter()
-        .map(|c| (c.chain_id as u64, c.markets.clone()))
-        .collect();
-    let rpc_urls: HashMap<u64, String> = config.get_all_chains()
-        .iter()
-        .map(|c| (c.chain_id as u64, c.rpc_url.clone()))
-        .collect();
-
-    let mut gas_fee_distributer = GasFeeDistributer::new(
-        chains,
-        markets_per_chain,
-        rpc_urls,
-        config.gas_fee_distributer_config.poll_interval_secs,
-        config.gas_fee_distributer_private_key.clone(),
-        config.gas_fee_distributer_address,
-        config.sequencer_address,
-        config.gas_fee_distributer_config.minimum_sequencer_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.min_distributor_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.target_sequencer_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.minimum_harvest_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.bridge_fee_percentage,
-        config.gas_fee_distributer_config.min_amount_to_bridge,
-    );
-
-    tokio::spawn(async move {
-        gas_fee_distributer.start_polling_balances().await;
-    });
-
     Ok(())
+}
+
+async fn create_provider(
+    rpc_url: Url,
+    private_key: &str,
+) -> Result<ProviderType, Box<dyn std::error::Error>> {
+    let signer = PrivateKeySigner::from_str(private_key)?;
+    let wallet = EthereumWallet::from(signer);
+    
+    let provider = ProviderBuilder::new()
+        .on_http(rpc_url)
+        .await?;
+    
+    let provider = provider
+        .with_signer(wallet)
+        .await?;
+    
+    Ok(provider)
 } 
