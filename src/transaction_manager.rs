@@ -5,11 +5,11 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use eyre::Result;
-use futures::future::join_all;
+
 use sequencer::database::{Database, EventStatus, EventUpdate};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{debug, warn, trace};
+use tracing::debug;
 use tracing::{error, info};
 use chrono::{DateTime, Utc};
 use std::sync::Mutex;
@@ -469,7 +469,7 @@ impl TransactionManager {
     }
 
     async fn get_provider_for_chain(
-        chain_id: u32,
+        _chain_id: u32,
         chain_config: &ChainConfig,
     ) -> Result<ProviderType> {
         let url = Url::parse(&chain_config.rpc_url)?;

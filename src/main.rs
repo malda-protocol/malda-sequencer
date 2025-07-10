@@ -51,17 +51,7 @@ use gas_fee_distributer::GasFeeDistributer;
 
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
-type ProviderType = alloy::providers::fillers::FillProvider<
-    JoinFill<
-        JoinFill<
-            Identity,
-            JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
-        >,
-        alloy::providers::fillers::WalletFiller<EthereumWallet>,
-    >,
-    RootProvider<alloy::network::Ethereum>,
-    alloy::network::Ethereum,
->;
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -113,15 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     info!("✅ Sequencer configuration loaded successfully!");
-
+    
     // Initialize database
     let db = Database::new(&config.database_url).await?;
     db.sequencer_start_events_reset().await?;
 
-    // Start event proof ready checker first (before event listeners)
-    start_event_proof_ready_checker(&config, db.clone()).await?;
-    
-    // Start all other components using the centralized configuration
+    // Start all components using the centralized configuration
     start_sequencer_components(config, db).await?;
 
     // Keep the main thread alive
@@ -137,7 +124,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     // Start batch event listeners for all chains
     for chain in config.get_all_chains() {
         info!("Starting batch event listener for {}", chain.name);
-        
+
         let batch_config = BatchEventConfig {
             primary_ws_url: chain.ws_url.clone(),
             fallback_ws_url: chain.fallback_ws_url.clone(),
@@ -164,7 +151,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
         let handle = tokio::spawn(async move {
             start_batch_event_listeners(batch_config, retarded_batch_config, db_clone, config_clone.restart_config).await
         });
-        
+
         handles.push(handle);
     }
 
@@ -184,35 +171,54 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
                 let handle = tokio::spawn(async move {
                     start_event_listeners(event_config, retarded_event_config, db_clone, config_clone.restart_config).await
                 });
-                
+
                 handles.push(handle);
             }
         }
     }
 
     // Start proof generator
-    let mut proof_generator = ProofGenerator::new(
-        config.proof_config.max_retries,
-        config.proof_config.retry_delay,
-        db.clone(),
-        config.proof_config.batch_limit,
-        config.get_l1_chains().first().map(|c| c.max_block_delay_secs).unwrap_or(24000000000),
-        config.get_l2_chains().first().map(|c| c.max_block_delay_secs).unwrap_or(12000000000),
-    );
-
+    let db_clone_proof_gen = db.clone();
+    let max_retries = config.proof_config.max_retries;
+    let retry_delay = config.proof_config.retry_delay;
+    let batch_limit = config.proof_config.batch_limit;
+    let l1_max_block_delay = config.get_l1_chains().first().map(|c| c.max_block_delay_secs).unwrap_or(24000000000);
+    let l2_max_block_delay = config.get_l2_chains().first().map(|c| c.max_block_delay_secs).unwrap_or(12000000000);
+    
     tokio::spawn(async move {
+        let mut proof_generator = ProofGenerator::new(
+            max_retries,
+            retry_delay,
+            db_clone_proof_gen,
+            batch_limit,
+            l1_max_block_delay,
+            l2_max_block_delay,
+        );
+
         if let Err(e) = proof_generator.start().await {
             error!("Proof generator failed: {:?}", e);
+        }
+        
+        // Keep the task alive
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
     // Start transaction manager
     let transaction_config = create_transaction_config(&config);
-    let mut transaction_manager = TransactionManager::new(transaction_config, db.clone());
+    let db_clone_tx = db.clone();
     
     tokio::spawn(async move {
+        let mut transaction_manager = TransactionManager::new(transaction_config, db_clone_tx);
+        
         if let Err(e) = transaction_manager.start().await {
             error!("Transaction manager failed: {:?}", e);
+        }
+        
+        // Keep the task alive
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
@@ -233,27 +239,27 @@ fn create_event_config(
     is_retarded: bool
 ) -> EventConfig {
     let event_config = &config.event_listener_config;
-    
+
     let block_range_offset_from = if chain.is_l1 { 
         if is_retarded { event_config.retarded_block_range_offset_l1_from } else { event_config.block_range_offset_l1_from }
-    } else { 
+                } else {
         if is_retarded { event_config.retarded_block_range_offset_l2_from } else { event_config.block_range_offset_l2_from }
-    };
-    
+                };
+
     let block_range_offset_to = if chain.is_l1 { 
         if is_retarded { event_config.retarded_block_range_offset_l1_to } else { event_config.block_range_offset_l1_to }
-    } else { 
+                } else {
         if is_retarded { event_config.retarded_block_range_offset_l2_to } else { event_config.block_range_offset_l2_to }
     };
 
     EventConfig {
         primary_ws_url: chain.ws_url.clone(),
         fallback_ws_url: chain.fallback_ws_url.clone(),
-        market: *market,
-        event_signature: event.to_string(),
+                    market: *market,
+                    event_signature: event.to_string(),
         chain_id: chain.chain_id as u64,
-        block_range_offset_from,
-        block_range_offset_to,
+                    block_range_offset_from,
+                    block_range_offset_to,
         max_retries: if is_retarded { event_config.retarded_max_retries } else { event_config.max_retries },
         retry_delay_secs: if is_retarded { event_config.retarded_retry_delay_secs } else { event_config.retry_delay_secs },
         poll_interval_secs: if is_retarded { event_config.retarded_poll_interval_secs } else { event_config.poll_interval_secs },
@@ -264,12 +270,19 @@ fn create_event_config(
 
 fn create_transaction_config(config: &SequencerConfig) -> TransactionConfig {
     let mut chain_configs = HashMap::new();
-    
+
     for chain in config.get_all_chains() {
+        // Try to get transaction-specific RPC URL, fall back to regular RPC URL
+        let transaction_rpc_url = std::env::var(format!("RPC_URL_{}_TRANSACTION", chain.name.to_uppercase().replace(" ", "_")))
+            .unwrap_or_else(|_| chain.rpc_url.clone());
+        
+        info!("Creating transaction config for chain {} ({}): using RPC URL {}", 
+            chain.chain_id, chain.name, transaction_rpc_url);
+        
         chain_configs.insert(chain.chain_id, transaction_manager::ChainConfig {
             max_retries: chain.transaction_config.max_retries,
             retry_delay: chain.transaction_config.retry_delay,
-            rpc_url: chain.rpc_url.clone(),
+            rpc_url: transaction_rpc_url,
             submission_delay_seconds: chain.transaction_config.submission_delay_seconds,
             poll_interval: chain.transaction_config.poll_interval,
             max_tx: chain.transaction_config.max_tx,
@@ -278,6 +291,7 @@ fn create_transaction_config(config: &SequencerConfig) -> TransactionConfig {
         });
     }
     
+    info!("Created transaction config for {} chains", chain_configs.len());
     TransactionConfig { chain_configs }
 }
 
@@ -347,15 +361,53 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
         market_addresses: config.get_all_chains().iter().flat_map(|c| c.markets.clone()).collect(),
     };
 
-    let mut lane_manager = LaneManager::new(lane_config, db.clone());
-    
+    let db_clone_lane = db.clone();
     tokio::spawn(async move {
+        let lane_manager = LaneManager::new(lane_config, db_clone_lane);
+        
         if let Err(e) = lane_manager.start().await {
             error!("Lane manager failed: {:?}", e);
         }
+        
+        // Keep the task alive
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     });
 
+    // Start event proof ready checker
+    let proof_checker_chain_configs: Vec<event_proof_ready_checker::ChainConfig> = config.get_all_chains()
+        .iter()
+        .map(|c| event_proof_ready_checker::ChainConfig {
+            chain_id: c.chain_id as u64,
+            rpc_url: c.rpc_url.clone(),
+            fallback_rpc_url: c.fallback_rpc_url.clone(),
+            is_l2: !c.is_l1,
+            max_block_delay_secs: c.max_block_delay_secs,
+        })
+        .collect();
 
+    let db_clone_proof = db.clone();
+    let poll_interval = Duration::from_secs(config.event_proof_ready_checker_config.poll_interval_seconds);
+    let block_update_interval = Duration::from_secs(config.event_proof_ready_checker_config.block_update_interval_seconds);
+    
+    tokio::spawn(async move {
+        let mut proof_checker = EventProofReadyChecker::new(
+            db_clone_proof,
+            poll_interval,
+            block_update_interval,
+            proof_checker_chain_configs,
+        );
+
+        if let Err(e) = proof_checker.start().await {
+            error!("Event proof ready checker failed: {:?}", e);
+        }
+        
+        // Keep the task alive
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
 
     // Start reset tx manager
     let reset_tx_manager_config = ResetTxManagerConfig {
@@ -371,7 +423,7 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
         rebalance_delay: config.reset_tx_manager_config.rebalance_delay,
         minimum_usd_value: config.reset_tx_manager_config.minimum_usd_value,
     };
-
+    
     let db_clone_reset = db.clone();
     tokio::spawn(async move {
         let mut current_manager = None;
@@ -405,25 +457,35 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
         .map(|c| (c.chain_id as u64, c.rpc_url.clone()))
         .collect();
 
-    let mut gas_fee_distributer = GasFeeDistributer::new(
-        chains,
-        markets_per_chain,
-        rpc_urls,
-        config.gas_fee_distributer_config.poll_interval_secs,
-        config.gas_fee_distributer_private_key.clone(),
-        config.gas_fee_distributer_address,
-        config.sequencer_address,
-        config.gas_fee_distributer_config.minimum_sequencer_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.min_distributor_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.target_sequencer_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.minimum_harvest_balance_per_chain.clone(),
-        config.gas_fee_distributer_config.bridge_fee_percentage,
-        config.gas_fee_distributer_config.min_amount_to_bridge,
-    );
-
+    let gas_fee_distributer_config = config.gas_fee_distributer_config.clone();
+    let gas_fee_distributer_private_key = config.gas_fee_distributer_private_key.clone();
+    let gas_fee_distributer_address = config.gas_fee_distributer_address;
+    let sequencer_address = config.sequencer_address;
+    
     tokio::spawn(async move {
+        let mut gas_fee_distributer = GasFeeDistributer::new(
+            chains,
+            markets_per_chain,
+            rpc_urls,
+            gas_fee_distributer_config.poll_interval_secs,
+            gas_fee_distributer_private_key,
+            gas_fee_distributer_address,
+            sequencer_address,
+            gas_fee_distributer_config.minimum_sequencer_balance_per_chain.clone(),
+            gas_fee_distributer_config.min_distributor_balance_per_chain.clone(),
+            gas_fee_distributer_config.target_sequencer_balance_per_chain.clone(),
+            gas_fee_distributer_config.minimum_harvest_balance_per_chain.clone(),
+            gas_fee_distributer_config.bridge_fee_percentage,
+            gas_fee_distributer_config.min_amount_to_bridge,
+        );
+
         gas_fee_distributer.start_polling_balances().await;
+        
+        // Keep the task alive (in case start_polling_balances returns)
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     });
 
     Ok(())
-} 
+}
