@@ -20,6 +20,9 @@ use crate::types::IL1Block::new;
 use crate::constants::{
     ETHEREUM_CHAIN_ID, OPTIMISM_CHAIN_ID,
 };
+use malda_rs::constants::{
+    ETHEREUM_SEPOLIA_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID,
+};
 use sequencer::database::Database;
 
 // Define a type for the block number map
@@ -158,7 +161,14 @@ impl EventProofReadyChecker {
             let mut current_block_map = HashMap::new();
             
             // Special handling for Ethereum via Optimism L1 block contract
-            if let Some(optimism_state) = chain_providers.get_mut(&OPTIMISM_CHAIN_ID) {
+            // Use the appropriate Optimism chain ID based on environment
+            let optimism_chain_id = if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "testnet".to_string()) == "mainnet" {
+                OPTIMISM_CHAIN_ID
+            } else {
+                OPTIMISM_SEPOLIA_CHAIN_ID
+            };
+            
+            if let Some(optimism_state) = chain_providers.get_mut(&optimism_chain_id) {
                 // Get active provider for Optimism
                 let (optimism_provider, is_fallback) = match Self::get_active_provider(optimism_state, &self.db).await {
                     Ok((provider, is_fallback)) => {
@@ -185,7 +195,14 @@ impl EventProofReadyChecker {
                         
                         // Update the block number in the map
                         let block_numbers = BLOCK_NUMBERS.lock().unwrap();
-                        if let Some(atomic) = block_numbers.get(&ETHEREUM_CHAIN_ID) {
+                        // Use the appropriate Ethereum chain ID based on environment
+                        let ethereum_chain_id = if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "testnet".to_string()) == "mainnet" {
+                            ETHEREUM_CHAIN_ID
+                        } else {
+                            ETHEREUM_SEPOLIA_CHAIN_ID
+                        };
+                        
+                        if let Some(atomic) = block_numbers.get(&ethereum_chain_id) {
                             atomic.store(block_number_i32, Ordering::SeqCst);
                             debug!("Updated Ethereum block number{}: {}", 
                                 if is_fallback { " (via fallback)" } else { "" }, 
@@ -218,7 +235,14 @@ impl EventProofReadyChecker {
                 };
 
                 // Skip Ethereum as it's handled above
-                if *chain_id == ETHEREUM_CHAIN_ID {
+                // Use the appropriate Ethereum chain ID based on environment
+                let ethereum_chain_id = if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "testnet".to_string()) == "mainnet" {
+                    ETHEREUM_CHAIN_ID
+                } else {
+                    ETHEREUM_SEPOLIA_CHAIN_ID
+                };
+                
+                if *chain_id == ethereum_chain_id {
                     continue;
                 }
                 

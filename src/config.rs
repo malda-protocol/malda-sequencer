@@ -42,6 +42,7 @@ pub struct ChainConfig {
     pub fallback_rpc_url: String,
     pub ws_url: String,
     pub fallback_ws_url: String,
+
     pub batch_submitter_address: Address,
     pub markets: Vec<Address>,
     pub events: Vec<String>,
@@ -285,6 +286,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_LINEA_SEPOLIA_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_LINEA_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_LINEA_SEPOLIA_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![
@@ -309,6 +311,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_OPTIMISM_SEPOLIA_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_OPT_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_OPT_SEPOLIA_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
@@ -330,6 +333,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_ETHEREUM_SEPOLIA_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_ETH_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_ETH_SEPOLIA_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
@@ -351,6 +355,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_BASE_SEPOLIA_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_BASE_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_BASE_SEPOLIA_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
@@ -373,6 +378,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_LINEA_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_LINEA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_LINEA_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
             events: vec![
@@ -397,6 +403,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_OPTIMISM_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_OPT")?,
             fallback_ws_url: Self::get_env_var("WS_URL_OPT_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
@@ -418,6 +425,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_ETHEREUM_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_ETH")?,
             fallback_ws_url: Self::get_env_var("WS_URL_ETH_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
@@ -439,6 +447,7 @@ impl SequencerConfig {
             fallback_rpc_url: Self::get_env_var("RPC_URL_BASE_FALLBACK")?,
             ws_url: Self::get_env_var("WS_URL_BASE")?,
             fallback_ws_url: Self::get_env_var("WS_URL_BASE_BACKUP")?,
+
             batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
             markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
