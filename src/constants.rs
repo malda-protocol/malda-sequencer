@@ -1,7 +1,6 @@
 use alloy::primitives::{address, Address};
 use std::time::Duration;
 
-
 pub const MAX_TX_RETRIES: u32 = 3;
 pub const TX_RETRY_DELAY: Duration = Duration::from_secs(1);
 
@@ -11,14 +10,13 @@ pub const PRIORITY_FEE_MULTIPLIER: f64 = 1.2;
 
 // Import necessary constants from malda_rs
 pub use malda_rs::constants::{
+    BASE_CHAIN_ID,
+    // Markets (non-chain specific)
     ETHEREUM_CHAIN_ID,
 
     // Chain IDs
     LINEA_CHAIN_ID,
     OPTIMISM_CHAIN_ID,
-    BASE_CHAIN_ID,
-    // Markets (non-chain specific)
-
 };
 
 pub const mUSDC_market: Address = address!("269C36A173D881720544Fb303E681370158FF1FD");

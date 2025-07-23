@@ -1,32 +1,28 @@
 use alloy::{
-    primitives::{Address, keccak256},
+    eips::BlockNumberOrTag,
+    network::Ethereum,
+    primitives::{keccak256, Address},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
-    eips::BlockNumberOrTag,
-    network::Ethereum,
 };
-use eyre::{Result, WrapErr};
-use tracing::{debug, error, info, warn};
+use chrono::Utc;
 use eyre::eyre;
+use eyre::{Result, WrapErr};
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use tokio::time::interval;
 use tokio::time::sleep;
-use chrono::Utc;
-use std::collections::HashMap;
+use tracing::{debug, error, info, warn};
 
+use crate::events::{parse_supplied_event, parse_withdraw_on_extension_chain_event};
+use crate::{HOST_BORROW_ON_EXTENSION_CHAIN_SIG, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG};
 use malda_rs::constants::*;
-use crate::{
-    events::{parse_supplied_event, parse_withdraw_on_extension_chain_event},
-};
-use crate::{HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG, HOST_BORROW_ON_EXTENSION_CHAIN_SIG};
 
 // Import the chain ID constant from malda_rs
-use malda_rs::constants::{
-    LINEA_SEPOLIA_CHAIN_ID,
-};
+use malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID;
 
 use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use sequencer::database::{Database, EventStatus, EventUpdate};
@@ -41,12 +37,12 @@ type ProviderType = alloy::providers::fillers::FillProvider<
                 alloy::providers::fillers::BlobGasFiller,
                 alloy::providers::fillers::JoinFill<
                     alloy::providers::fillers::NonceFiller,
-                    alloy::providers::fillers::ChainIdFiller
-                >
-            >
-        >
+                    alloy::providers::fillers::ChainIdFiller,
+                >,
+            >,
+        >,
     >,
-    alloy::providers::RootProvider<Ethereum>
+    alloy::providers::RootProvider<Ethereum>,
 >;
 
 lazy_static! {
@@ -104,7 +100,11 @@ impl EventListener {
                         return Ok(());
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
                 Err(e) => {
@@ -114,7 +114,11 @@ impl EventListener {
                         return Err(e);
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
             }
@@ -129,13 +133,13 @@ impl EventListener {
 
         // Track the latest block we've processed
         let mut last_processed_block = 0u64;
-        
+
         // Poll interval in seconds
         let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
         let mut interval = interval(poll_interval);
 
         info!("Started polling for events");
-        
+
         // Flag to track if we used fallback in the previous cycle
         let mut used_fallback = false;
 
@@ -147,13 +151,13 @@ impl EventListener {
                 Ok((provider, is_fallback)) => {
                     used_fallback = is_fallback;
                     provider
-                },
+                }
                 Err(e) => {
                     error!("Failed to get active provider: {:?}", e);
                     continue;
                 }
             };
-            
+
             // Get current block number
             let current_block = match provider.get_block_number().await {
                 Ok(block) => block,
@@ -188,18 +192,24 @@ impl EventListener {
 
             // Get block timestamps
             for block_number in from_block..=to_block {
-                let block = match provider.get_block_by_number(BlockNumberOrTag::Number(block_number)).await {
+                let block = match provider
+                    .get_block_by_number(BlockNumberOrTag::Number(block_number))
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
                     Err(e) => return Err(eyre::eyre!("Failed to get block: {:?}", e)),
                 };
-            
+
                 let timestamp = block.header.inner.timestamp;
                 block_timestamps.insert(block_number, timestamp);
             }
 
             // Update filter to include block range
-            let range_filter = filter.clone().from_block(from_block).to_block(current_block);
+            let range_filter = filter
+                .clone()
+                .from_block(from_block)
+                .to_block(current_block);
 
             // Get logs
             let logs = match provider.get_logs(&range_filter).await {
@@ -211,16 +221,21 @@ impl EventListener {
             };
 
             if logs.is_empty() {
-                debug!("No new events found in blocks {} to {}", from_block, current_block);
+                debug!(
+                    "No new events found in blocks {} to {}",
+                    from_block, current_block
+                );
                 last_processed_block = current_block;
                 continue;
             }
 
             // Process all logs in parallel
             let mut handles = Vec::new();
-            
+
             for log in logs {
-                let curr_timestamp = *block_timestamps.get(&log.block_number.unwrap_or_default()).unwrap_or(&0);
+                let curr_timestamp = *block_timestamps
+                    .get(&log.block_number.unwrap_or_default())
+                    .unwrap_or(&0);
                 let self_clone = self.clone();
                 let handle = tokio::spawn(async move {
                     match self_clone.process_event(log, curr_timestamp).await {
@@ -245,8 +260,15 @@ impl EventListener {
             // Write updates to database if any
             if !pending_updates.is_empty() {
                 let count = pending_updates.len();
-                match self.db.add_new_events(&pending_updates, self.config.is_retarded).await {
-                    Ok(_) => info!("Successfully added batch of {} new events to database", count),
+                match self
+                    .db
+                    .add_new_events(&pending_updates, self.config.is_retarded)
+                    .await
+                {
+                    Ok(_) => info!(
+                        "Successfully added batch of {} new events to database",
+                        count
+                    ),
                     Err(e) => error!("Failed to write events to database: {:?}", e),
                 }
             }
@@ -257,11 +279,14 @@ impl EventListener {
     }
 
     // Updated helper method to determine which provider to use
-    async fn get_active_provider(&mut self, force_new_primary: bool) -> Result<(ProviderType, bool)> {
+    async fn get_active_provider(
+        &mut self,
+        force_new_primary: bool,
+    ) -> Result<(ProviderType, bool)> {
         // If we have a primary provider and don't need to force a new one, check if it's still valid
         if !force_new_primary && self.primary_provider.is_some() {
             let provider = self.primary_provider.as_ref().unwrap();
-            
+
             // Check if the primary provider is fresh enough
             match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
                 Ok(Some(block)) => {
@@ -270,7 +295,9 @@ impl EventListener {
                     let current_time = chrono::Utc::now().timestamp() as u64;
                     let max_delay = self.config.max_block_delay_secs;
 
-                    if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
+                    if current_time > block_timestamp
+                        && (current_time - block_timestamp) > max_delay
+                    {
                         warn!(
                             "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s, trying fallback at {}",
                             block_timestamp, current_time, current_time - block_timestamp, max_delay, self.config.fallback_ws_url
@@ -279,11 +306,11 @@ impl EventListener {
                         self.primary_provider = None;
                         return self.create_fallback_provider().await;
                     }
-                    
+
                     // Primary provider is good, use it
                     debug!("Reusing existing primary provider");
                     return Ok((provider.clone(), false));
-                },
+                }
                 _ => {
                     // Primary provider failed, clear it and try creating a new one
                     warn!("Existing primary provider failed to get latest block, creating new one");
@@ -293,31 +320,42 @@ impl EventListener {
         }
 
         // Create a new primary provider
-        let primary_ws_url: Url = self
-            .config
-            .primary_ws_url
-            .parse()
-            .wrap_err_with(|| format!("Invalid primary WSS URL: {}", self.config.primary_ws_url))?;
+        let primary_ws_url: Url =
+            self.config.primary_ws_url.parse().wrap_err_with(|| {
+                format!("Invalid primary WSS URL: {}", self.config.primary_ws_url)
+            })?;
 
         debug!("Connecting to primary provider at {}", primary_ws_url);
         let primary_ws = WsConnect::new(primary_ws_url);
         let primary_provider = match ProviderBuilder::new().connect_ws(primary_ws).await {
             Ok(provider) => provider,
             Err(e) => {
-                warn!("Failed to connect to primary WebSocket: {:?}, trying fallback at {}", e, self.config.fallback_ws_url);
+                warn!(
+                    "Failed to connect to primary WebSocket: {:?}, trying fallback at {}",
+                    e, self.config.fallback_ws_url
+                );
                 return self.create_fallback_provider().await;
             }
         };
 
         // Check if the primary provider is fresh enough
-        let block = match primary_provider.get_block_by_number(BlockNumberOrTag::Latest).await {
+        let block = match primary_provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await
+        {
             Ok(Some(block)) => block,
             Ok(None) => {
-                warn!("Primary provider returned no latest block, trying fallback at {}", self.config.fallback_ws_url);
+                warn!(
+                    "Primary provider returned no latest block, trying fallback at {}",
+                    self.config.fallback_ws_url
+                );
                 return self.create_fallback_provider().await;
             }
             Err(e) => {
-                warn!("Primary provider failed to get latest block: {:?}, trying fallback at {}", e, self.config.fallback_ws_url);
+                warn!(
+                    "Primary provider failed to get latest block: {:?}, trying fallback at {}",
+                    e, self.config.fallback_ws_url
+                );
                 return self.create_fallback_provider().await;
             }
         };
@@ -343,11 +381,9 @@ impl EventListener {
 
     // Helper method to create fallback provider
     async fn create_fallback_provider(&self) -> Result<(ProviderType, bool)> {
-        let fallback_ws_url: Url = self
-            .config
-            .fallback_ws_url
-            .parse()
-            .wrap_err_with(|| format!("Invalid fallback WSS URL: {}", self.config.fallback_ws_url))?;
+        let fallback_ws_url: Url = self.config.fallback_ws_url.parse().wrap_err_with(|| {
+            format!("Invalid fallback WSS URL: {}", self.config.fallback_ws_url)
+        })?;
 
         info!("Connecting to fallback provider at {}", fallback_ws_url);
         let fallback_ws = WsConnect::new(fallback_ws_url);
@@ -380,24 +416,27 @@ impl EventListener {
         };
 
         // Process the event based on chain ID
-        if self.config.chain_id == LINEA_SEPOLIA_CHAIN_ID || self.config.chain_id == LINEA_CHAIN_ID {
+        if self.config.chain_id == LINEA_SEPOLIA_CHAIN_ID || self.config.chain_id == LINEA_CHAIN_ID
+        {
             // Process host chain events
             let event = parse_withdraw_on_extension_chain_event(&log);
-            
+
             // Get the event signature from topic 0
             let event_signature = &log.topics()[0];
-            
+
             // Determine event type based on the event signature
-            let (event_type, target_function) = if *event_signature == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) {
+            let (event_type, target_function) = if *event_signature
+                == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes())
+            {
                 ("HostBorrow", "outHere")
-            } else if *event_signature == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) {
+            } else if *event_signature == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes())
+            {
                 ("HostWithdraw", "outHere")
             } else {
                 info!("Unknown event signature: {}", event_signature);
                 return Err(eyre::eyre!("Unknown event signature: {}", event_signature));
-                
             };
-            
+
             event_update.msg_sender = Some(event.sender);
             event_update.dst_chain_id = Some(event.dst_chain_id);
             event_update.amount = Some(event.amount);
@@ -438,8 +477,6 @@ impl EventListener {
 
 impl Drop for EventListener {
     fn drop(&mut self) {
-        if self.primary_provider.is_some() {
-        }
-        
+        if self.primary_provider.is_some() {}
     }
 }
