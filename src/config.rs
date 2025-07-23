@@ -1,12 +1,12 @@
 use alloy::primitives::{Address, U256};
-use std::collections::HashMap;
-use std::time::Duration;
-use std::str::FromStr;
 use eyre::Result;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::time::Duration;
 
-use malda_rs::constants::*;
 use crate::constants::*;
 use crate::events::*;
+use malda_rs::constants::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Environment {
@@ -164,7 +164,9 @@ impl SequencerConfig {
             database_url: Self::get_env_var("DATABASE_URL")?,
             sequencer_address: Address::from_str(&Self::get_env_var("SEQUENCER_ADDRESS")?)?,
             sequencer_private_key: Self::get_env_var("SEQUENCER_PRIVATE_KEY")?,
-            gas_fee_distributer_address: Address::from_str(&Self::get_env_var("GAS_FEE_DISTRIBUTER_ADDRESS")?)?,
+            gas_fee_distributer_address: Address::from_str(&Self::get_env_var(
+                "GAS_FEE_DISTRIBUTER_ADDRESS",
+            )?)?,
             gas_fee_distributer_private_key: Self::get_env_var("GAS_FEE_DISTRIBUTER_PRIVATE_KEY")?,
             proof_config: ProofConfig::new()?,
             event_listener_config: EventListenerConfig::new()?,
@@ -195,25 +197,29 @@ impl SequencerConfig {
 
         // Try to add Linea Sepolia
         if let Ok(chain_config) = self.try_create_linea_sepolia_config() {
-            self.chains.insert(LINEA_SEPOLIA_CHAIN_ID as u32, chain_config);
+            self.chains
+                .insert(LINEA_SEPOLIA_CHAIN_ID as u32, chain_config);
             enabled_chains.push("Linea Sepolia");
         }
 
         // Try to add Optimism Sepolia
         if let Ok(chain_config) = self.try_create_optimism_sepolia_config() {
-            self.chains.insert(OPTIMISM_SEPOLIA_CHAIN_ID as u32, chain_config);
+            self.chains
+                .insert(OPTIMISM_SEPOLIA_CHAIN_ID as u32, chain_config);
             enabled_chains.push("Optimism Sepolia");
         }
 
         // Try to add Ethereum Sepolia
         if let Ok(chain_config) = self.try_create_ethereum_sepolia_config() {
-            self.chains.insert(ETHEREUM_SEPOLIA_CHAIN_ID as u32, chain_config);
+            self.chains
+                .insert(ETHEREUM_SEPOLIA_CHAIN_ID as u32, chain_config);
             enabled_chains.push("Ethereum Sepolia");
         }
 
         // Try to add Base Sepolia
         if let Ok(chain_config) = self.try_create_base_sepolia_config() {
-            self.chains.insert(BASE_SEPOLIA_CHAIN_ID as u32, chain_config);
+            self.chains
+                .insert(BASE_SEPOLIA_CHAIN_ID as u32, chain_config);
             enabled_chains.push("Base Sepolia");
         }
 
@@ -287,15 +293,22 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_LINEA_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_LINEA_SEPOLIA_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG.to_string(),
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.to_string(),
             ],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_testnet()?,
@@ -312,12 +325,19 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_OPT_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_OPT_SEPOLIA_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_testnet()?,
@@ -334,12 +354,19 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_ETH_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_ETH_SEPOLIA_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1",
+            )?
+            .parse()?,
             reorg_protection: 0,
             transaction_config: TransactionChainConfig::new_l1()?,
             lane_config: LaneChainConfig::new_testnet()?,
@@ -356,12 +383,19 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_BASE_SEPOLIA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_BASE_SEPOLIA_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
             markets: vec![mUSDC_mock_market, mwstETH_mock_market],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_testnet()?,
@@ -379,15 +413,31 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_LINEA")?,
             fallback_ws_url: Self::get_env_var("WS_URL_LINEA_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
-            markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
+            markets: vec![
+                mUSDC_market,
+                mWETH_market,
+                mUSDT_market,
+                mWBTC_market,
+                mwstETH_market,
+                mezETH_market,
+                mweETH_market,
+                mwrsETH_market,
+            ],
             events: vec![
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG.to_string(),
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.to_string(),
             ],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_mainnet()?,
@@ -404,12 +454,28 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_OPT")?,
             fallback_ws_url: Self::get_env_var("WS_URL_OPT_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
-            markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
+            markets: vec![
+                mUSDC_market,
+                mWETH_market,
+                mUSDT_market,
+                mWBTC_market,
+                mwstETH_market,
+                mezETH_market,
+                mweETH_market,
+                mwrsETH_market,
+            ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_mainnet()?,
@@ -426,12 +492,28 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_ETH")?,
             fallback_ws_url: Self::get_env_var("WS_URL_ETH_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
-            markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
+            markets: vec![
+                mUSDC_market,
+                mWETH_market,
+                mUSDT_market,
+                mWBTC_market,
+                mwstETH_market,
+                mezETH_market,
+                mweETH_market,
+                mwrsETH_market,
+            ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1",
+            )?
+            .parse()?,
             reorg_protection: 0,
             transaction_config: TransactionChainConfig::new_l1()?,
             lane_config: LaneChainConfig::new_mainnet()?,
@@ -448,12 +530,28 @@ impl SequencerConfig {
             ws_url: Self::get_env_var("WS_URL_BASE")?,
             fallback_ws_url: Self::get_env_var("WS_URL_BASE_BACKUP")?,
 
-            batch_submitter_address: Address::from_str(&Self::get_env_var("BATCH_SUBMITTER_ADDRESS")?)?,
-            markets: vec![mUSDC_market, mWETH_market, mUSDT_market, mWBTC_market, mwstETH_market, mezETH_market, mweETH_market, mwrsETH_market],
+            batch_submitter_address: Address::from_str(&Self::get_env_var(
+                "BATCH_SUBMITTER_ADDRESS",
+            )?)?,
+            markets: vec![
+                mUSDC_market,
+                mWETH_market,
+                mUSDT_market,
+                mWBTC_market,
+                mwstETH_market,
+                mezETH_market,
+                mweETH_market,
+                mwrsETH_market,
+            ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?.parse()?,
-            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
-            retarded_block_delay: Self::get_env_var("RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?.parse()?,
+            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+                .parse()?,
+            block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
+                .parse()?,
+            retarded_block_delay: Self::get_env_var(
+                "RETARDED_BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2",
+            )?
+            .parse()?,
             reorg_protection: 2,
             transaction_config: TransactionChainConfig::new_l2()?,
             lane_config: LaneChainConfig::new_mainnet()?,
@@ -464,25 +562,51 @@ impl SequencerConfig {
 impl TransactionChainConfig {
     fn new_l1() -> Result<Self> {
         Ok(Self {
-            max_retries: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_RETRIES_L1")?.parse()?,
-            retry_delay: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_RETRY_DELAY_L1")?.parse()?),
-            submission_delay_seconds: SequencerConfig::get_env_var("TRANSACTION_MANAGER_SUBMISSION_DELAY_SECONDS_L1")?.parse()?,
-            poll_interval: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_POLL_INTERVAL_L1")?.parse()?),
+            max_retries: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_RETRIES_L1")?
+                .parse()?,
+            retry_delay: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_RETRY_DELAY_L1")?.parse()?,
+            ),
+            submission_delay_seconds: SequencerConfig::get_env_var(
+                "TRANSACTION_MANAGER_SUBMISSION_DELAY_SECONDS_L1",
+            )?
+            .parse()?,
+            poll_interval: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_POLL_INTERVAL_L1")?.parse()?,
+            ),
             max_tx: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_TX_L1")?.parse()?,
-            tx_timeout: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_TX_TIMEOUT_L1")?.parse()?),
-            gas_percentage_increase_per_retry: SequencerConfig::get_env_var("TRANSACTION_MANAGER_GAS_PERCENTAGE_INCREASE_PER_RETRY")?.parse()?,
+            tx_timeout: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_TX_TIMEOUT_L1")?.parse()?,
+            ),
+            gas_percentage_increase_per_retry: SequencerConfig::get_env_var(
+                "TRANSACTION_MANAGER_GAS_PERCENTAGE_INCREASE_PER_RETRY",
+            )?
+            .parse()?,
         })
     }
 
     fn new_l2() -> Result<Self> {
         Ok(Self {
-            max_retries: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_RETRIES_L2")?.parse()?,
-            retry_delay: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_RETRY_DELAY_L2")?.parse()?),
-            submission_delay_seconds: SequencerConfig::get_env_var("TRANSACTION_MANAGER_SUBMISSION_DELAY_SECONDS_L2")?.parse()?,
-            poll_interval: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_POLL_INTERVAL_L2")?.parse()?),
+            max_retries: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_RETRIES_L2")?
+                .parse()?,
+            retry_delay: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_RETRY_DELAY_L2")?.parse()?,
+            ),
+            submission_delay_seconds: SequencerConfig::get_env_var(
+                "TRANSACTION_MANAGER_SUBMISSION_DELAY_SECONDS_L2",
+            )?
+            .parse()?,
+            poll_interval: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_POLL_INTERVAL_L2")?.parse()?,
+            ),
             max_tx: SequencerConfig::get_env_var("TRANSACTION_MANAGER_MAX_TX_L2")?.parse()?,
-            tx_timeout: Duration::from_secs(SequencerConfig::get_env_var("TRANSACTION_MANAGER_TX_TIMEOUT_L2")?.parse()?),
-            gas_percentage_increase_per_retry: SequencerConfig::get_env_var("TRANSACTION_MANAGER_GAS_PERCENTAGE_INCREASE_PER_RETRY")?.parse()?,
+            tx_timeout: Duration::from_secs(
+                SequencerConfig::get_env_var("TRANSACTION_MANAGER_TX_TIMEOUT_L2")?.parse()?,
+            ),
+            gas_percentage_increase_per_retry: SequencerConfig::get_env_var(
+                "TRANSACTION_MANAGER_GAS_PERCENTAGE_INCREASE_PER_RETRY",
+            )?
+            .parse()?,
         })
     }
 }
@@ -511,9 +635,14 @@ impl ProofConfig {
     fn new() -> Result<Self> {
         Ok(Self {
             batch_limit: SequencerConfig::get_env_var("PROOF_GENERATOR_BATCH_LIMIT")?.parse()?,
-            max_retries: SequencerConfig::get_env_var("PROOF_GENERATOR_MAX_PROOF_RETRIES")?.parse()?,
-            retry_delay: Duration::from_secs(SequencerConfig::get_env_var("PROOF_GENERATOR_PROOF_RETRY_DELAY")?.parse()?),
-            request_delay: Duration::from_secs(SequencerConfig::get_env_var("PROOF_GENERATOR_PROOF_REQUEST_DELAY")?.parse()?),
+            max_retries: SequencerConfig::get_env_var("PROOF_GENERATOR_MAX_PROOF_RETRIES")?
+                .parse()?,
+            retry_delay: Duration::from_secs(
+                SequencerConfig::get_env_var("PROOF_GENERATOR_PROOF_RETRY_DELAY")?.parse()?,
+            ),
+            request_delay: Duration::from_secs(
+                SequencerConfig::get_env_var("PROOF_GENERATOR_PROOF_REQUEST_DELAY")?.parse()?,
+            ),
             dummy_mode: SequencerConfig::get_env_var("PROOF_GENERATOR_DUMMY_MODE")?.parse()?,
         })
     }
@@ -523,19 +652,54 @@ impl EventListenerConfig {
     fn new() -> Result<Self> {
         Ok(Self {
             max_retries: SequencerConfig::get_env_var("EVENT_LISTENER_MAX_RETRIES")?.parse()?,
-            retry_delay_secs: SequencerConfig::get_env_var("EVENT_LISTENER_RETRY_DELAY_SECS")?.parse()?,
-            poll_interval_secs: SequencerConfig::get_env_var("EVENT_LISTENER_POLL_INTERVAL_SECS")?.parse()?,
-            block_range_offset_l1_from: SequencerConfig::get_env_var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM")?.parse()?,
-            block_range_offset_l1_to: SequencerConfig::get_env_var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO")?.parse()?,
-            block_range_offset_l2_from: SequencerConfig::get_env_var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM")?.parse()?,
-            block_range_offset_l2_to: SequencerConfig::get_env_var("EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO")?.parse()?,
-            retarded_max_retries: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_MAX_RETRIES")?.parse()?,
-            retarded_retry_delay_secs: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_RETRY_DELAY_SECS")?.parse()?,
-            retarded_poll_interval_secs: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_POLL_INTERVAL_SECS")?.parse()?,
-            retarded_block_range_offset_l1_from: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM")?.parse()?,
-            retarded_block_range_offset_l1_to: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO")?.parse()?,
-            retarded_block_range_offset_l2_from: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM")?.parse()?,
-            retarded_block_range_offset_l2_to: SequencerConfig::get_env_var("RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO")?.parse()?,
+            retry_delay_secs: SequencerConfig::get_env_var("EVENT_LISTENER_RETRY_DELAY_SECS")?
+                .parse()?,
+            poll_interval_secs: SequencerConfig::get_env_var("EVENT_LISTENER_POLL_INTERVAL_SECS")?
+                .parse()?,
+            block_range_offset_l1_from: SequencerConfig::get_env_var(
+                "EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM",
+            )?
+            .parse()?,
+            block_range_offset_l1_to: SequencerConfig::get_env_var(
+                "EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO",
+            )?
+            .parse()?,
+            block_range_offset_l2_from: SequencerConfig::get_env_var(
+                "EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM",
+            )?
+            .parse()?,
+            block_range_offset_l2_to: SequencerConfig::get_env_var(
+                "EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO",
+            )?
+            .parse()?,
+            retarded_max_retries: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_MAX_RETRIES",
+            )?
+            .parse()?,
+            retarded_retry_delay_secs: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_RETRY_DELAY_SECS",
+            )?
+            .parse()?,
+            retarded_poll_interval_secs: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_POLL_INTERVAL_SECS",
+            )?
+            .parse()?,
+            retarded_block_range_offset_l1_from: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_FROM",
+            )?
+            .parse()?,
+            retarded_block_range_offset_l1_to: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L1_TO",
+            )?
+            .parse()?,
+            retarded_block_range_offset_l2_from: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_FROM",
+            )?
+            .parse()?,
+            retarded_block_range_offset_l2_to: SequencerConfig::get_env_var(
+                "RETARDED_EVENT_LISTENER_BLOCK_RANGE_OFFSET_L2_TO",
+            )?
+            .parse()?,
         })
     }
 }
@@ -543,8 +707,12 @@ impl EventListenerConfig {
 impl RestartConfig {
     fn new() -> Result<Self> {
         Ok(Self {
-            listener_delay_seconds: SequencerConfig::get_env_var("RESTART_LISTENER_DELAY_SECONDS")?.parse()?,
-            listener_interval_seconds: SequencerConfig::get_env_var("RESTART_LISTENER_INTERVAL_SECONDS")?.parse()?,
+            listener_delay_seconds: SequencerConfig::get_env_var("RESTART_LISTENER_DELAY_SECONDS")?
+                .parse()?,
+            listener_interval_seconds: SequencerConfig::get_env_var(
+                "RESTART_LISTENER_INTERVAL_SECONDS",
+            )?
+            .parse()?,
         })
     }
 }
@@ -552,16 +720,17 @@ impl RestartConfig {
 impl GasFeeDistributerConfig {
     fn new() -> Result<Self> {
         let poll_interval_secs = 60; // Default polling interval
-        
+
         let bridge_fee_percentage: u32 = std::env::var("BRIDGE_FEE_PERCENTAGE")
             .expect("BRIDGE_FEE_PERCENTAGE must be set in .env")
             .parse()
             .unwrap();
-        
+
         let min_amount_to_bridge = U256::from_str(
             &std::env::var("MIN_AMOUNT_TO_BRIDGE")
-                .expect("MIN_AMOUNT_TO_BRIDGE must be set in .env")
-        ).unwrap();
+                .expect("MIN_AMOUNT_TO_BRIDGE must be set in .env"),
+        )
+        .unwrap();
 
         let mut minimum_sequencer_balance_per_chain = HashMap::new();
         let mut min_distributor_balance_per_chain = HashMap::new();
@@ -642,11 +811,12 @@ impl EventProofReadyCheckerConfig {
             .expect("PROOF_READY_CHECKER_POOL_INTERVAL_SECONDS must be set in .env")
             .parse::<u64>()
             .unwrap();
-        
-        let block_update_interval_seconds = std::env::var("PROOF_READY_CHECKER_BLOCK_UPDATE_INTERVAL_SECONDS")
-            .expect("PROOF_READY_CHECKER_BLOCK_UPDATE_INTERVAL_SECONDS must be set in .env")
-            .parse::<u64>()
-            .unwrap();
+
+        let block_update_interval_seconds =
+            std::env::var("PROOF_READY_CHECKER_BLOCK_UPDATE_INTERVAL_SECONDS")
+                .expect("PROOF_READY_CHECKER_BLOCK_UPDATE_INTERVAL_SECONDS must be set in .env")
+                .parse::<u64>()
+                .unwrap();
 
         Ok(Self {
             poll_interval_seconds,
@@ -663,49 +833,49 @@ impl ResetTxManagerConfig {
             .unwrap()
             .try_into()
             .unwrap();
-        
+
         let multiplier = std::env::var("RESET_TX_MANAGER_MULTIPLIER")
             .expect("RESET_TX_MANAGER_MULTIPLIER must be set in .env")
             .parse::<f64>()
             .unwrap();
-        
+
         let max_retries: u32 = std::env::var("RESET_TX_MANAGER_MAX_RETRIES")
             .expect("RESET_TX_MANAGER_MAX_RETRIES must be set in .env")
             .parse::<u64>()
             .unwrap()
             .try_into()
             .unwrap();
-        
+
         let retry_delay_secs = std::env::var("RESET_TX_MANAGER_RETRY_DELAY_SECS")
             .expect("RESET_TX_MANAGER_RETRY_DELAY_SECS must be set in .env")
             .parse::<u64>()
             .unwrap();
-        
+
         let poll_interval_secs = std::env::var("RESET_TX_MANAGER_POLL_INTERVAL_SECS")
             .expect("RESET_TX_MANAGER_POLL_INTERVAL_SECS must be set in .env")
             .parse::<u64>()
             .unwrap();
-        
+
         let batch_limit: i64 = std::env::var("RESET_TX_MANAGER_BATCH_LIMIT")
             .expect("RESET_TX_MANAGER_BATCH_LIMIT must be set in .env")
             .parse::<u64>()
             .unwrap()
             .try_into()
             .unwrap();
-        
+
         let max_retries_reset: i64 = max_retries as i64;
-        
-        let api_key = std::env::var("REBALANCER_API_KEY")
-            .expect("REBALANCER_API_KEY must be set in .env");
-        
-        let rebalancer_url = std::env::var("REBALANCER_URL")
-            .expect("REBALANCER_URL must be set in .env");
-        
+
+        let api_key =
+            std::env::var("REBALANCER_API_KEY").expect("REBALANCER_API_KEY must be set in .env");
+
+        let rebalancer_url =
+            std::env::var("REBALANCER_URL").expect("REBALANCER_URL must be set in .env");
+
         let rebalance_delay = std::env::var("REBALANCER_DELAY_SECONDS")
             .expect("REBALANCER_DELAY_SECONDS must be set in .env")
             .parse::<u64>()
             .unwrap();
-        
+
         let minimum_usd_value = std::env::var("REBALANCER_MINIMUM_USD_VALUE")
             .expect("REBALANCER_MINIMUM_USD_VALUE must be set in .env")
             .parse::<f64>()
@@ -725,4 +895,4 @@ impl ResetTxManagerConfig {
             minimum_usd_value,
         })
     }
-} 
+}

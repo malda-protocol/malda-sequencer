@@ -1,12 +1,12 @@
-use std::time::Duration;
+use crate::constants::*;
+use alloy::primitives::{address, Address};
 use eyre::Result;
-use sequencer::database::{Database, ChainParams};
+use sequencer::database::{ChainParams, Database};
 use std::collections::HashMap;
-use alloy::primitives::{Address, address};
+use std::time::Duration;
 use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
-use crate::constants::*;
 #[derive(Clone)]
 pub struct LaneManagerConfig {
     pub max_retries: u32,
@@ -24,10 +24,7 @@ pub struct LaneManager {
 
 impl LaneManager {
     pub fn new(config: LaneManagerConfig, db: Database) -> Self {
-        Self {
-            config,
-            db,
-        }
+        Self { config, db }
     }
 
     fn get_price(&self, market: &Address) -> f64 {
@@ -40,11 +37,13 @@ impl LaneManager {
         } else {
             return 2500.0 / 1000000000000000000.0;
         }
-        
     }
 
     pub async fn start(&self) -> Result<()> {
-        info!("Starting lane manager with {} chains configured", self.config.chain_params.len());
+        info!(
+            "Starting lane manager with {} chains configured",
+            self.config.chain_params.len()
+        );
 
         let mut retry_count = 0;
         let max_retries = self.config.max_retries;
@@ -61,7 +60,11 @@ impl LaneManager {
                         return Ok(());
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
                 Err(e) => {
@@ -71,7 +74,11 @@ impl LaneManager {
                         return Err(e);
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
             }
@@ -88,12 +95,18 @@ impl LaneManager {
             interval.tick().await;
 
             // Create market prices map using get_price function
-            let market_prices: HashMap<Address, f64> = self.config.market_addresses
+            let market_prices: HashMap<Address, f64> = self
+                .config
+                .market_addresses
                 .iter()
                 .map(|market| (*market, self.get_price(market)))
                 .collect();
 
-            match self.db.update_lane_status(&self.config.chain_params, &market_prices).await {
+            match self
+                .db
+                .update_lane_status(&self.config.chain_params, &market_prices)
+                .await
+            {
                 Ok(_) => {
                     debug!("Successfully processed events");
                 }

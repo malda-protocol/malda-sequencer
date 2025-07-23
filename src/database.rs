@@ -1,14 +1,14 @@
 use alloy::primitives::{Address, Bytes, TxHash, U256};
+use chrono::{DateTime, Utc};
 use eyre::Result;
+use hex; // Ensure hex is imported if used in logs
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, Pool, Postgres, Row};
-use chrono::{DateTime, Utc};
-use tracing::info;
-use std::str::FromStr;
 use std::collections::HashMap;
-use tracing::{debug, warn};
-use hex; // Ensure hex is imported if used in logs
+use std::str::FromStr;
 use std::time::Duration;
+use tracing::info;
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct ChainParams {
@@ -102,8 +102,9 @@ impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::PgPool::connect_with(
             sqlx::postgres::PgConnectOptions::from_str(database_url)?
-                .ssl_mode(sqlx::postgres::PgSslMode::Require)
-        ).await?;
+                .ssl_mode(sqlx::postgres::PgSslMode::Require),
+        )
+        .await?;
 
         // Run migrations
         sqlx::migrate!("./migrations").run(&pool).await?;
@@ -130,12 +131,13 @@ impl Database {
                 FROM unnest($1::text[]) AS tx_hash
                 WHERE tx_hash NOT IN (SELECT tx_hash FROM finished_events)
                   AND tx_hash NOT IN (SELECT tx_hash FROM events)
-                "#
+                "#,
             )
             .bind(&tx_hashes)
             .fetch_all(&self.pool)
             .await?;
-            let valid_hashes: std::collections::HashSet<String> = rows.iter()
+            let valid_hashes: std::collections::HashSet<String> = rows
+                .iter()
                 .filter_map(|row| row.try_get::<String, _>("tx_hash").ok())
                 .collect();
             let orig_len = filtered_events.len();
@@ -157,7 +159,7 @@ impl Database {
                     $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
                 )
                 ON CONFLICT (tx_hash) DO NOTHING
-                "#
+                "#,
             )
             .bind(event.tx_hash.to_string())
             .bind(event.status.to_db_string()) // Always Processed from event_listener
@@ -179,19 +181,25 @@ impl Database {
         tx.commit().await?;
 
         if is_retarded && !filtered_events.is_empty() {
-            info!("{} retarded events added to events table", filtered_events.len());
+            info!(
+                "{} retarded events added to events table",
+                filtered_events.len()
+            );
         }
 
-        info!("Attempted to add batch of {} new events to database", events.len());
+        info!(
+            "Attempted to add batch of {} new events to database",
+            events.len()
+        );
 
         Ok(())
     }
 
     pub async fn get_ready_to_request_proof_events(
-        &self, 
-        delay_seconds: i64, 
-        batch_limit: i64
-    ) -> Result<Vec<EventUpdate>> { 
+        &self,
+        delay_seconds: i64,
+        batch_limit: i64,
+    ) -> Result<Vec<EventUpdate>> {
         // Re-added rate limiting check using sync_timestamps
         let should_proceed = query(
             r#"
@@ -203,7 +211,7 @@ impl Database {
                 END as should_proceed
             FROM sync_timestamps
             WHERE id = 1 -- Assuming a single row for global proof request timestamp
-            "#
+            "#,
         )
         .bind(delay_seconds)
         .fetch_one(&self.pool) // Use fetch_one, assuming the row always exists
@@ -211,13 +219,16 @@ impl Database {
         .try_get::<bool, _>("should_proceed")?;
 
         if !should_proceed {
-            debug!("Proof request delay ({}s) not met, skipping claim.", delay_seconds);
+            debug!(
+                "Proof request delay ({}s) not met, skipping claim.",
+                delay_seconds
+            );
             return Ok(Vec::new()); // Return empty if delay not met
         }
 
         // Use a transaction to ensure atomicity
         let mut tx = self.pool.begin().await?;
-        
+
         // Re-added UPDATE sync_timestamps set last_proof_requested_at = NOW()
         // This acts as a lock for this cycle
         query(
@@ -225,7 +236,7 @@ impl Database {
             UPDATE sync_timestamps
             SET last_proof_requested_at = NOW()
             WHERE id = 1
-            "#
+            "#,
         )
         .execute(tx.as_mut())
         .await?;
@@ -278,7 +289,7 @@ impl Database {
                     tx_hash, src_chain_id, dst_chain_id, msg_sender, market
             )
             SELECT * FROM claimed_events
-            "#
+            "#,
         )
         .bind(batch_limit) // Bind the batch limit parameter
         .fetch_all(tx.as_mut())
@@ -297,16 +308,24 @@ impl Database {
         for row in records {
             let tx_hash_str: String = row.try_get("tx_hash")?;
             let tx_hash = TxHash::from_str(&tx_hash_str)?;
-            
+
             // We know the status is ProofRequested because we just set it.
             // Only populate fields returned by the query.
             events.push(EventUpdate {
                 tx_hash,
                 status: EventStatus::ProofRequested, // Set status explicitly
-                src_chain_id: row.try_get::<Option<i32>, _>("src_chain_id")?.map(|id| id as u32),
-                dst_chain_id: row.try_get::<Option<i32>, _>("dst_chain_id")?.map(|id| id as u32),
-                msg_sender: row.try_get::<Option<String>, _>("msg_sender")?.map(|addr| addr.parse().unwrap()),
-                market: row.try_get::<Option<String>, _>("market")?.map(|addr| addr.parse().unwrap()),
+                src_chain_id: row
+                    .try_get::<Option<i32>, _>("src_chain_id")?
+                    .map(|id| id as u32),
+                dst_chain_id: row
+                    .try_get::<Option<i32>, _>("dst_chain_id")?
+                    .map(|id| id as u32),
+                msg_sender: row
+                    .try_get::<Option<String>, _>("msg_sender")?
+                    .map(|addr| addr.parse().unwrap()),
+                market: row
+                    .try_get::<Option<String>, _>("market")?
+                    .map(|addr| addr.parse().unwrap()),
                 // Other fields are Default::default()
                 ..Default::default()
             });
@@ -322,18 +341,17 @@ impl Database {
         target_dst_chain_id: u32,
         max_tx: i64, // Added max_tx limit parameter
     ) -> Result<Vec<EventUpdate>> {
-    
         // 1. & 2. Get last submission time for the target chain and check delay
         let last_submission_time: Option<DateTime<Utc>> = query_scalar(
-                "SELECT last_batch_submitted_at FROM chain_batch_sync WHERE dst_chain_id = $1"
-            )
-            .bind(target_dst_chain_id as i32)
-            .fetch_optional(&self.pool)
-            .await?;
-    
+            "SELECT last_batch_submitted_at FROM chain_batch_sync WHERE dst_chain_id = $1",
+        )
+        .bind(target_dst_chain_id as i32)
+        .fetch_optional(&self.pool)
+        .await?;
+
         let now = Utc::now();
         let required_delay = chrono::Duration::seconds(delay_seconds);
-    
+
         if let Some(last_submitted) = last_submission_time {
             if now.signed_duration_since(last_submitted) < required_delay {
                 debug!(
@@ -344,9 +362,10 @@ impl Database {
             }
         }
         // If timestamp is NULL (first time), proceed.
-    
+
         // 3. Find the oldest journal among ProofReceived events for the TARGET chain
-        let oldest_journal_data: Option<(Vec<u8>,)> = query_as(r#"
+        let oldest_journal_data: Option<(Vec<u8>,)> = query_as(
+            r#"
                 SELECT journal 
                 FROM events 
                 WHERE status = 'ProofReceived'::event_status 
@@ -354,35 +373,41 @@ impl Database {
                   AND journal IS NOT NULL 
                 ORDER BY received_at ASC 
                 LIMIT 1
-            "#)
-            .bind(target_dst_chain_id as i32)
-            .fetch_optional(&self.pool)
-            .await?;
-    
+            "#,
+        )
+        .bind(target_dst_chain_id as i32)
+        .fetch_optional(&self.pool)
+        .await?;
+
         let oldest_journal = match oldest_journal_data {
             Some((journal,)) => Bytes::from(journal),
             None => {
-                debug!("No ProofReceived events found with a journal for chain {}.", target_dst_chain_id);
+                debug!(
+                    "No ProofReceived events found with a journal for chain {}.",
+                    target_dst_chain_id
+                );
                 return Ok(Vec::new()); // No events to process for this chain
             }
         };
-    
+
         // 4. Start Transaction
         let mut tx = self.pool.begin().await?;
-    
+
         // 5. Update Timestamp in chain_batch_sync for the target chain
         let now_utc = Utc::now();
-        query(r#"
+        query(
+            r#"
             INSERT INTO chain_batch_sync (dst_chain_id, last_batch_submitted_at) 
             VALUES ($1, $2) 
             ON CONFLICT (dst_chain_id) DO UPDATE 
             SET last_batch_submitted_at = EXCLUDED.last_batch_submitted_at
-        "#)
+        "#,
+        )
         .bind(target_dst_chain_id as i32)
         .bind(now_utc)
         .execute(tx.as_mut())
         .await?;
-    
+
         // 6. Claim Events for the specific journal AND target chain, applying LIMIT
         let records = query(r#"
             WITH events_to_claim AS (
@@ -410,34 +435,49 @@ impl Database {
             .bind(max_tx) // $4: Bind the max_tx limit
             .fetch_all(tx.as_mut())
             .await?;
-    
+
         // 7. Commit Transaction
         tx.commit().await?;
-    
+
         // 8. Process and Return Claimed Events (Sort here in Rust)
         let mut events = Vec::new();
         if records.is_empty() {
-             warn!("Passed delay checks and updated timestamps, but claimed 0 events for chain {} / journal 0x{}. This might indicate a race condition or inconsistent state.", target_dst_chain_id, hex::encode(&oldest_journal));
+            warn!("Passed delay checks and updated timestamps, but claimed 0 events for chain {} / journal 0x{}. This might indicate a race condition or inconsistent state.", target_dst_chain_id, hex::encode(&oldest_journal));
             return Ok(events);
         }
-    
-        info!("Claimed {} (max {}) events for batch submission on chain {} (Journal: 0x{}...).", records.len(), max_tx, target_dst_chain_id, hex::encode(&oldest_journal[..std::cmp::min(8, oldest_journal.len())]));
-    
+
+        info!(
+            "Claimed {} (max {}) events for batch submission on chain {} (Journal: 0x{}...).",
+            records.len(),
+            max_tx,
+            target_dst_chain_id,
+            hex::encode(&oldest_journal[..std::cmp::min(8, oldest_journal.len())])
+        );
+
         for row in records {
             let tx_hash_str: String = row.try_get("tx_hash")?;
             let tx_hash = TxHash::from_str(&tx_hash_str)?;
-    
+
             // Safely parse potentially NULL fields
-            let msg_sender = row.try_get::<Option<String>, _>("msg_sender")?.and_then(|s| s.parse::<Address>().ok());
-            let market = row.try_get::<Option<String>, _>("market")?.and_then(|s| s.parse::<Address>().ok());
-            let amount: Option<U256> = row.try_get("amount").ok().and_then(|s| U256::from_str(s).ok());
+            let msg_sender = row
+                .try_get::<Option<String>, _>("msg_sender")?
+                .and_then(|s| s.parse::<Address>().ok());
+            let market = row
+                .try_get::<Option<String>, _>("market")?
+                .and_then(|s| s.parse::<Address>().ok());
+            let amount: Option<U256> = row
+                .try_get("amount")
+                .ok()
+                .and_then(|s| U256::from_str(s).ok());
 
             events.push(EventUpdate {
                 tx_hash,
                 status: EventStatus::BatchSubmitted, // Status is known
                 journal_index: row.try_get("journal_index")?, // Should exist
                 dst_chain_id: Some(target_dst_chain_id), // Known input
-                journal: row.try_get::<Option<Vec<u8>>, _>("journal")?.map(Bytes::from),
+                journal: row
+                    .try_get::<Option<Vec<u8>>, _>("journal")?
+                    .map(Bytes::from),
                 seal: row.try_get::<Option<Vec<u8>>, _>("seal")?.map(Bytes::from),
                 msg_sender,
                 market,
@@ -447,16 +487,18 @@ impl Database {
                 ..Default::default()
             });
         }
-    
+
         // Sort the results in Rust code after fetching
         events.sort_by_key(|e| e.journal_index.unwrap_or(0));
 
         Ok(events)
     }
 
-
     // New function to update events based on current block numbers
-    pub async fn update_events_to_ready_status(&self, current_block_map: &HashMap<u64, i32>) -> Result<()> {
+    pub async fn update_events_to_ready_status(
+        &self,
+        current_block_map: &HashMap<u64, i32>,
+    ) -> Result<()> {
         if current_block_map.is_empty() {
             info!("No current block numbers provided, skipping update.");
             return Ok(());
@@ -487,7 +529,10 @@ impl Database {
         .rows_affected();
 
         if rows_affected > 0 {
-            info!("Updated {} events to ReadyToRequestProof status based on current block numbers.", rows_affected);
+            info!(
+                "Updated {} events to ReadyToRequestProof status based on current block numbers.",
+                rows_affected
+            );
         } else {
             debug!("No events updated to ReadyToRequestProof status in this cycle.");
         }
@@ -549,7 +594,10 @@ impl Database {
         .rows_affected();
 
         if rows_affected == count as u64 {
-            info!("Successfully updated {} events with proof data and journal indices.", count);
+            info!(
+                "Successfully updated {} events with proof data and journal indices.",
+                count
+            );
         } else {
             warn!("Attempted to update {} events with proof data, but {} rows were affected. Some events might not have been in 'ProofRequested' state.", count, rows_affected);
         }
@@ -587,9 +635,9 @@ impl Database {
                 error = COALESCE($4, error)
             WHERE tx_hash = ANY($5::text[])
               AND status = 'BatchSubmitted'::event_status
-            "#
+            "#,
         )
-        .bind(&status_str)  // Use reference here
+        .bind(&status_str) // Use reference here
         .bind(batch_tx_hash)
         .bind(batch_included_at)
         .bind(error)
@@ -602,7 +650,10 @@ impl Database {
         tx.commit().await?;
 
         if rows_affected == count as u64 {
-            info!("Successfully updated batch status for {} events to {}", count, status_str);
+            info!(
+                "Successfully updated batch status for {} events to {}",
+                count, status_str
+            );
         } else {
             warn!(
                 "Attempted to update {} events, but {} rows were affected. Some events might not exist or not be in BatchSubmitted status.",
@@ -697,9 +748,15 @@ impl Database {
         let rows_affected = insert_result.rows_affected();
         if rows_affected == count as u64 {
             if is_retarded {
-                info!("Successfully migrated {} retarded events to finished_events with status {}", count, status_str);
+                info!(
+                    "Successfully migrated {} retarded events to finished_events with status {}",
+                    count, status_str
+                );
             } else {
-                info!("Successfully migrated {} events to finished_events with status {}", count, status_str);
+                info!(
+                    "Successfully migrated {} events to finished_events with status {}",
+                    count, status_str
+                );
             }
         } else {
             if is_retarded {
@@ -736,13 +793,15 @@ impl Database {
         // Convert chain params to a format usable in SQL
         let chain_param_pairs: Vec<(i32, i32, i64, i32, i32)> = chain_params
             .iter()
-            .map(|(chain_id, params)| (
-                *chain_id as i32,
-                params.max_volume,
-                params.time_interval.as_secs() as i64,
-                params.block_delay as i32,
-                params.reorg_protection as i32
-            ))
+            .map(|(chain_id, params)| {
+                (
+                    *chain_id as i32,
+                    params.max_volume,
+                    params.time_interval.as_secs() as i64,
+                    params.block_delay as i32,
+                    params.reorg_protection as i32,
+                )
+            })
             .collect();
 
         // Single atomic query that:
@@ -850,7 +909,13 @@ impl Database {
         Ok(())
     }
 
-    pub async fn reset_stuck_events(&self, finished_sample_size: i64, multiplier: f64, batch_limit: i64, max_retries: i64) -> Result<()> {
+    pub async fn reset_stuck_events(
+        &self,
+        finished_sample_size: i64,
+        multiplier: f64,
+        batch_limit: i64,
+        max_retries: i64,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Check if we have enough historical data first
@@ -859,7 +924,7 @@ impl Database {
             SELECT COUNT(*) >= $1
             FROM finished_events
             WHERE status = 'TxProcessSuccess'::event_status
-            "#
+            "#,
         )
         .bind(finished_sample_size)
         .fetch_one(&mut *tx)
@@ -996,7 +1061,7 @@ impl Database {
             WHERE e.tx_hash = fe.tx_hash
               AND e.status = 'BatchFailed'::event_status
               AND e.batch_submitted_at < NOW() - ($1::bigint || ' seconds')::interval
-            "#
+            "#,
         )
         .bind(batch_inclusion_timeout)
         .execute(&mut *tx)
@@ -1023,14 +1088,17 @@ impl Database {
                 status = 'ReadyToRequestProof'::event_status,
                 proof_requested_at = NULL
             WHERE status = 'ProofRequested'::event_status
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?
         .rows_affected();
 
         if rows_affected > 0 {
-            info!("Reset {} events from ProofRequested back to ReadyToRequestProof", rows_affected);
+            info!(
+                "Reset {} events from ProofRequested back to ReadyToRequestProof",
+                rows_affected
+            );
         } else {
             debug!("No events were reset from ProofRequested status");
         }
@@ -1044,13 +1112,13 @@ impl Database {
         chain_id: u64,
         primary_url: &str,
         fallback_url: &str,
-        reason: &str
+        reason: &str,
     ) -> Result<()> {
         query(
             r#"
             INSERT INTO node_status (chain_id, primary_url, fallback_url, reason)
             VALUES ($1, $2, $3, $4)
-            "#
+            "#,
         )
         .bind(chain_id as i32)
         .bind(primary_url)
@@ -1063,10 +1131,13 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_failed_tx(&self, max_retries: i64) -> Result<Vec<(u32, Address, U256, Vec<TxHash>)>> {
+    pub async fn get_failed_tx(
+        &self,
+        max_retries: i64,
+    ) -> Result<Vec<(u32, Address, U256, Vec<TxHash>)>> {
+        use alloy::primitives::{Address, TxHash, U256};
         use sqlx::Row;
         use std::str::FromStr;
-        use alloy::primitives::{Address, TxHash, U256};
 
         // Query: group by dst_chain_id and market, sum amounts, collect tx_hashes
         let rows = sqlx::query(
@@ -1081,7 +1152,7 @@ impl Database {
               AND event_type IN ('HostWithdraw', 'HostBorrow', 'ExtensionSupply')
               AND (resubmitted IS NULL OR resubmitted < $1)
             GROUP BY dst_chain_id, market
-            "#
+            "#,
         )
         .bind(max_retries)
         .fetch_all(&self.pool)
@@ -1113,7 +1184,10 @@ impl Database {
             // Parse tx_hashes
             let tx_hashes: Option<Vec<String>> = row.try_get("tx_hashes").ok();
             let tx_hashes = match tx_hashes {
-                Some(vec) => vec.into_iter().filter_map(|h| TxHash::from_str(&h).ok()).collect(),
+                Some(vec) => vec
+                    .into_iter()
+                    .filter_map(|h| TxHash::from_str(&h).ok())
+                    .collect(),
                 None => Vec::new(),
             };
             result.push((dst_chain_id, market, total_amount, tx_hashes));

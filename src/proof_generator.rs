@@ -1,22 +1,22 @@
+use alloy::eips::BlockNumberOrTag;
 use alloy::primitives::{Address, Bytes, TxHash, U256};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::transports::http::reqwest::Url;
-use alloy::eips::BlockNumberOrTag;
 use alloy_sol_types::SolValue;
 use eyre::Result;
+use hex;
 use sequencer::database::{Database, EventUpdate};
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
 use tracing::{debug, error, info, warn};
-use std::env;
 use uuid::Uuid;
-use hex;
 
-use malda_rs::viewcalls::get_proof_data_prove_sdk;
 use malda_rs::constants::*;
-use malda_rs::types::{SolidityDataType, TakeLastXBytes, abi};
+use malda_rs::types::{abi, SolidityDataType, TakeLastXBytes};
+use malda_rs::viewcalls::{get_proof_data_prove_boundless, get_proof_data_prove_sdk};
 
 #[derive(Debug)]
 pub struct ProofInfo {
@@ -61,15 +61,23 @@ impl ProofGenerator {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting proof generator, reading processed events from database...");
 
-        let proof_delay = Duration::from_secs(env::var("PROOF_GENERATOR_PROOF_REQUEST_DELAY").expect("PROOF_GENERATOR_PROOF_REQUEST_DELAY must be set in .env").parse::<u64>().unwrap());
+        let proof_delay = Duration::from_secs(
+            env::var("PROOF_GENERATOR_PROOF_REQUEST_DELAY")
+                .expect("PROOF_GENERATOR_PROOF_REQUEST_DELAY must be set in .env")
+                .parse::<u64>()
+                .unwrap(),
+        );
 
         loop {
             // Get processed events from database - they are claimed atomically now
-            let claimed_events = self.db.get_ready_to_request_proof_events(
-                proof_delay.as_secs() as i64, 
-                self.batch_size as i64
-            ).await?;
-            
+            let claimed_events = self
+                .db
+                .get_ready_to_request_proof_events(
+                    proof_delay.as_secs() as i64,
+                    self.batch_size as i64,
+                )
+                .await?;
+
             if claimed_events.is_empty() {
                 // info!("No events ready for proof request, waiting...");
                 sleep(proof_delay).await;
@@ -79,7 +87,10 @@ impl ProofGenerator {
             // Use claimed_events directly
             let events_to_process = claimed_events;
 
-            info!("Processing batch of {} events for proof generation", events_to_process.len());
+            info!(
+                "Processing batch of {} events for proof generation",
+                events_to_process.len()
+            );
 
             // Process the batch in a spawned task
             let max_retries = self.max_retries;
@@ -97,7 +108,8 @@ impl ProofGenerator {
                     l2_max_block_delay_secs,
                 };
 
-                if let Err(e) = proof_generator.process_batch(events_to_process).await { // Use events_to_process
+                if let Err(e) = proof_generator.process_batch(events_to_process).await {
+                    // Use events_to_process
                     error!("Failed to generate proofs for batch: {}", e);
                 }
             });
@@ -117,10 +129,10 @@ struct ProofGeneratorWorker {
 }
 
 /// Generates a dummy proof for testing purposes without making real blockchain calls or ZK proof generation.
-/// 
+///
 /// This function constructs the journal data directly from input parameters using the same logic
 /// as the validator, but returns dummy values for amounts and an empty seal.
-/// 
+///
 /// # Arguments
 /// * `users` - Vector of user address vectors, one per chain.
 /// * `markets` - Vector of market contract address vectors, one per chain.
@@ -128,7 +140,7 @@ struct ProofGeneratorWorker {
 /// * `chain_ids` - Vector of chain IDs to query.
 /// * `l1_inclusion` - Whether to include L1 data in the proof.
 /// * `fallback` - Whether to use fallback mode (unused in dummy mode).
-/// 
+///
 /// # Returns
 /// * `Result<ProofInfo, eyre::Error>` - Dummy proof information with constructed journal and empty seal.
 async fn generate_dummy_proof(
@@ -140,16 +152,16 @@ async fn generate_dummy_proof(
     _fallback: bool,
 ) -> Result<ProofInfo, eyre::Error> {
     let start_time = Instant::now();
-    
+
     // Construct journal data using the same logic as the validator
     let mut journal_data: Vec<Bytes> = Vec::new();
-    
+
     // Process each chain's data
     for (chain_idx, chain_id) in chain_ids.iter().enumerate() {
         let chain_users = &users[chain_idx];
         let chain_markets = &markets[chain_idx];
         let chain_target_ids = &target_chain_ids[chain_idx];
-        
+
         // Process each user/market/target_chain_id tuple for this chain
         for ((user, market), target_chain_id) in chain_users
             .iter()
@@ -159,7 +171,7 @@ async fn generate_dummy_proof(
             // Use dummy amounts (0) since we can't make real contract calls
             let dummy_amount_in = U256::from(1000000000000000000u64);
             let dummy_amount_out = U256::from(1000000000000000000u64);
-            
+
             // Construct the same input structure as in the validator
             let input = vec![
                 SolidityDataType::Address(*user),
@@ -170,28 +182,28 @@ async fn generate_dummy_proof(
                 SolidityDataType::NumberWithShift(U256::from(*target_chain_id), TakeLastXBytes(32)),
                 SolidityDataType::Bool(l1_inclusion),
             ];
-            
+
             // Encode using the same method as the validator
             let (bytes, _hash) = abi::encode_packed(&input);
             journal_data.push(bytes.into());
         }
     }
-    
+
     // Create dummy receipt with constructed journal and empty seal
     let journal = journal_data.abi_encode();
     let seal = Bytes::from(vec![]); // Empty seal since no real proof is generated
-    
+
     // Generate dummy statistics
     let total_transactions = users.iter().flatten().count();
     let dummy_cycles = total_transactions as u64 * 1000; // Reasonable dummy cycle count
-    
+
     // Generate UUID for the session
     let uuid = Uuid::new_v4().to_string();
-    
+
     // Use dummy timing values
     let stark_time = 1u64; // 1 second
     let snark_time = 2u64; // 2 seconds
-    
+
     let duration = start_time.elapsed();
     info!(
         "Generated dummy proof for {} transactions with {} cycles in {:?}",
@@ -202,7 +214,7 @@ async fn generate_dummy_proof(
         hex::encode(&journal),
         hex::encode(&seal)
     );
-    
+
     Ok(ProofInfo {
         journal: journal.into(),
         seal,
@@ -286,18 +298,23 @@ impl ProofGeneratorWorker {
         );
 
         // Generate single proof for all events
-        let proof_info = self.generate_proof_with_retry(
-            users.clone(),
-            markets.clone(),
-            dst_chain_ids.clone(),
-            src_chain_ids.clone(),
-        ).await?;
+        let proof_info = self
+            .generate_proof_with_retry(
+                users.clone(),
+                markets.clone(),
+                dst_chain_ids.clone(),
+                src_chain_ids.clone(),
+            )
+            .await?;
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
         info!("Source chains included in the proof: {:?}", src_chain_ids);
-        info!("Destination chains included in the proof: {:?}", dst_chain_ids);
+        info!(
+            "Destination chains included in the proof: {:?}",
+            dst_chain_ids
+        );
 
         // Create the mapping of TxHash to its final journal_index
         let updates_with_index: Vec<(TxHash, i32)> = sorted_events
@@ -305,18 +322,22 @@ impl ProofGeneratorWorker {
             .enumerate()
             .map(|(idx, event)| (event.tx_hash, idx as i32))
             .collect();
-        
+
         // Update database with proof data and journal indices using the specific function
         if !updates_with_index.is_empty() {
-            if let Err(e) = self.db.set_events_proof_received_with_index(
-                &updates_with_index, 
-                &proof_info.journal, 
-                &proof_info.seal,
-                &proof_info.uuid,
-                proof_info.stark_time,
-                proof_info.snark_time,
-                proof_info.total_cycles,
-            ).await {
+            if let Err(e) = self
+                .db
+                .set_events_proof_received_with_index(
+                    &updates_with_index,
+                    &proof_info.journal,
+                    &proof_info.seal,
+                    &proof_info.uuid,
+                    proof_info.stark_time,
+                    proof_info.snark_time,
+                    proof_info.total_cycles,
+                )
+                .await
+            {
                 error!("Failed to update events with proof data and index: {:?}", e);
                 // Consider if we should return error here or just log
             }
@@ -326,7 +347,12 @@ impl ProofGeneratorWorker {
     }
 
     // Check provider for block freshness
-    async fn is_provider_fresh(&self, rpc_url: &str, chain_id: u64, max_block_delay_secs: u64) -> bool {
+    async fn is_provider_fresh(
+        &self,
+        rpc_url: &str,
+        chain_id: u64,
+        max_block_delay_secs: u64,
+    ) -> bool {
         // Parse URL
         let url = match Url::parse(rpc_url) {
             Ok(url) => url,
@@ -335,10 +361,10 @@ impl ProofGeneratorWorker {
                 return false;
             }
         };
-        
+
         // Create provider
         let provider = ProviderBuilder::new().connect_http(url);
-        
+
         // Get latest block
         let block = match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
             Ok(Some(block)) => block,
@@ -347,23 +373,27 @@ impl ProofGeneratorWorker {
                 return false;
             }
             Err(e) => {
-                warn!("Failed to get latest block from provider at {}: {}", rpc_url, e);
+                warn!(
+                    "Failed to get latest block from provider at {}: {}",
+                    rpc_url, e
+                );
                 return false;
             }
         };
-        
+
         // Check block timestamp
         let block_timestamp: u64 = block.header.inner.timestamp.into();
         let current_time = chrono::Utc::now().timestamp() as u64;
-        
-        if current_time > block_timestamp && (current_time - block_timestamp) > max_block_delay_secs {
+
+        if current_time > block_timestamp && (current_time - block_timestamp) > max_block_delay_secs
+        {
             warn!(
                 "Provider's latest block for chain {} is too old: block_time={}, current_time={}, diff={}s, max_delay={}s",
                 chain_id, block_timestamp, current_time, current_time - block_timestamp, max_block_delay_secs
             );
             return false;
         }
-        
+
         // Provider is fresh
         true
     }
@@ -381,6 +411,53 @@ impl ProofGeneratorWorker {
             markets, src_chain_ids, dst_chain_ids
         );
 
+        // First, try boundless with onchain=true
+        info!("Attempting boundless proof generation with onchain=true");
+        match get_proof_data_prove_boundless(
+            users.clone(),
+            markets.clone(),
+            dst_chain_ids.clone(),
+            src_chain_ids.clone(),
+            false, // l1_inclusion
+            false, // fallback
+            true,  // onchain
+        )
+        .await
+        {
+            Ok((journal, seal)) => {
+                let tx_num = users.iter().flatten().count();
+                info!(
+                    "Successfully generated boundless proof for {} transactions",
+                    tx_num
+                );
+                debug!(
+                    "Boundless proof details - journal: 0x{}, seal: 0x{}",
+                    hex::encode(&journal),
+                    hex::encode(&seal)
+                );
+
+                return Ok(ProofInfo {
+                    journal,
+                    seal,
+                    uuid: "boundless".to_string(),
+                    stark_time: 0,
+                    snark_time: 0,
+                    total_cycles: 0,
+                });
+            }
+            Err(e) => {
+                warn!(
+                    "Boundless proof generation failed: {}. Falling back to SDK method",
+                    e
+                );
+                // Log additional details for debugging
+                if e.to_string().contains("CryptoProvider") {
+                    error!("CryptoProvider error detected - this may indicate a TLS/HTTPS configuration issue");
+                }
+            }
+        }
+
+        // Fall back to the original SDK method
         loop {
             // Check providers for all source chains involved
             let should_use_fallback = if attempts >= self.max_retries / 2 {
@@ -389,74 +466,88 @@ impl ProofGeneratorWorker {
             } else {
                 // Otherwise check provider freshness
                 let mut use_fallback = false;
-                
+
                 for &chain_id in &src_chain_ids {
-                    // Determine RPC URL for this chain
+                    // Determine RPC URL for this chain using the new unified function
                     let (rpc_url, max_block_delay_secs) = match chain_id {
                         // Ethereum mainnet
-                        id if id == ETHEREUM_CHAIN_ID => {
-                            (rpc_url_ethereum().to_string(), self.ethereum_max_block_delay_secs)
-                        }
+                        id if id == ETHEREUM_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("ETHEREUM", false, false).to_string(),
+                            self.ethereum_max_block_delay_secs,
+                        ),
                         // Ethereum Sepolia testnet
-                        id if id == ETHEREUM_SEPOLIA_CHAIN_ID => {
-                            (rpc_url_ethereum_sepolia().to_string(), self.ethereum_max_block_delay_secs)
-                        }
+                        id if id == ETHEREUM_SEPOLIA_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("ETHEREUM", false, true).to_string(),
+                            self.ethereum_max_block_delay_secs,
+                        ),
                         // Optimism mainnet
-                        id if id == OPTIMISM_CHAIN_ID => {
-                            (rpc_url_optimism().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == OPTIMISM_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("OPTIMISM", false, false).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         // Optimism Sepolia testnet
-                        id if id == OPTIMISM_SEPOLIA_CHAIN_ID => {
-                            (rpc_url_optimism_sepolia().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == OPTIMISM_SEPOLIA_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("OPTIMISM", false, true).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         // Linea mainnet
-                        id if id == LINEA_CHAIN_ID => {
-                            (rpc_url_linea().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == LINEA_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("LINEA", false, false).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         // Linea Sepolia testnet
-                        id if id == LINEA_SEPOLIA_CHAIN_ID => {
-                            (rpc_url_linea_sepolia().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == LINEA_SEPOLIA_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("LINEA", false, true).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         // Base mainnet
-                        id if id == BASE_CHAIN_ID => {
-                            (rpc_url_base().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == BASE_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("BASE", false, false).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         // Base Sepolia testnet
-                        id if id == BASE_SEPOLIA_CHAIN_ID => {
-                            (rpc_url_base_sepolia().to_string(), self.l2_max_block_delay_secs)
-                        }
+                        id if id == BASE_SEPOLIA_CHAIN_ID => (
+                            malda_rs::constants::get_rpc_url("BASE", false, true).to_string(),
+                            self.l2_max_block_delay_secs,
+                        ),
                         _ => {
-                            warn!("Unknown chain ID: {}, defaulting to fallback mode", chain_id);
+                            warn!(
+                                "Unknown chain ID: {}, defaulting to fallback mode",
+                                chain_id
+                            );
                             use_fallback = true;
                             break;
                         }
                     };
-                    
+
                     // Check if provider is fresh
-                    if !self.is_provider_fresh(&rpc_url, chain_id, max_block_delay_secs).await {
+                    if !self
+                        .is_provider_fresh(&rpc_url, chain_id, max_block_delay_secs)
+                        .await
+                    {
                         use_fallback = true;
                         break;
                     }
                 }
-                
+
                 use_fallback
             };
-            
+
             if should_use_fallback {
                 info!("Using fallback mode for proof generation due to provider issues or after {} failed attempts", attempts);
             } else {
                 info!("Using primary mode for proof generation");
             }
-            
+
             let start_time = Instant::now();
-            
+
             match get_proof_data_prove_sdk(
                 users.clone(),
                 markets.clone(),
                 dst_chain_ids.clone(),
                 src_chain_ids.clone(),
                 false,
-                should_use_fallback
+                should_use_fallback,
             )
             .await
             {
@@ -479,8 +570,14 @@ impl ProofGeneratorWorker {
                     let tx_num = users.iter().flatten().count();
                     info!(
                         "Generated proof for {} transactions with {} cycles in {:?}{}",
-                        tx_num, cycles, duration,
-                        if should_use_fallback { " (fallback mode)" } else { "" }
+                        tx_num,
+                        cycles,
+                        duration,
+                        if should_use_fallback {
+                            " (fallback mode)"
+                        } else {
+                            ""
+                        }
                     );
                     debug!(
                         "Proof details - journal: 0x{}, seal: 0x{}",

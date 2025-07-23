@@ -1,15 +1,15 @@
-use std::time::Duration;
+use alloy::primitives::{address, Address, U256};
 use eyre::Result;
-use sequencer::database::{Database, ChainParams};
+use reqwest::Client;
+use sequencer::constants::{mUSDC_market, mUSDT_market, mWBTC_market};
+use sequencer::database::{ChainParams, Database};
+use serde_json;
 use std::collections::HashMap;
-use alloy::primitives::{Address, address, U256};
+use std::str::FromStr;
+use std::time::Duration;
 use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
-use reqwest::Client;
-use serde_json;
-use std::str::FromStr;
-use sequencer::constants::{mUSDC_market, mUSDT_market, mWBTC_market};
 
 #[derive(Clone)]
 pub struct ResetTxManagerConfig {
@@ -51,14 +51,14 @@ impl ResetTxManager {
         // Spawn new task
         let config = self.config.clone();
         let db = self.db.clone();
-        
+
         let handle = tokio::spawn(async move {
             let manager = ResetTxManager {
                 config,
                 db,
                 task_handle: None,
             };
-            
+
             if let Err(e) = manager.run().await {
                 error!("Reset tx manager failed: {:?}", e);
             }
@@ -69,7 +69,10 @@ impl ResetTxManager {
     }
 
     async fn run(&self) -> Result<()> {
-        info!("Starting reset tx manager with sample size {} and multiplier {}", self.config.sample_size, self.config.multiplier);
+        info!(
+            "Starting reset tx manager with sample size {} and multiplier {}",
+            self.config.sample_size, self.config.multiplier
+        );
 
         let mut retry_count = 0;
         let max_retries = self.config.max_retries;
@@ -86,7 +89,11 @@ impl ResetTxManager {
                         return Ok(());
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
                 Err(e) => {
@@ -96,7 +103,11 @@ impl ResetTxManager {
                         return Err(e);
                     }
                     retry_count += 1;
-                    info!("Waiting {} seconds before reconnection attempt {}", retry_delay.as_secs(), retry_count);
+                    info!(
+                        "Waiting {} seconds before reconnection attempt {}",
+                        retry_delay.as_secs(),
+                        retry_count
+                    );
                     sleep(retry_delay).await;
                 }
             }
@@ -120,7 +131,10 @@ impl ResetTxManager {
         let output = if value.fract() == 0.0 {
             format!("{:.0}", value)
         } else {
-            format!("{:.*}", decimals as usize, value).trim_end_matches('0').trim_end_matches('.').to_string()
+            format!("{:.*}", decimals as usize, value)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
         };
 
         output
@@ -133,7 +147,10 @@ impl ResetTxManager {
         amount: U256,
     ) -> Result<()> {
         let client = Client::new();
-        let url = format!("{}/ondemandcompute", config.rebalancer_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/ondemandcompute",
+            config.rebalancer_url.trim_end_matches('/')
+        );
         let api_key = &config.api_key;
         let amount_str = Self::parse_amount(&market, &amount);
         let payload = serde_json::json!({
@@ -141,7 +158,12 @@ impl ResetTxManager {
             "amountRaw": amount_str,
             "dstChainId": dst_chain_id.to_string(),
         });
-        info!("Requested rebalance for market {} dst_chain_id {} amount {}", format!("{:#x}", market), dst_chain_id, amount);
+        info!(
+            "Requested rebalance for market {} dst_chain_id {} amount {}",
+            format!("{:#x}", market),
+            dst_chain_id,
+            amount
+        );
         let res = client
             .post(&url)
             .header("x-api-key", api_key)
@@ -150,7 +172,12 @@ impl ResetTxManager {
             .send()
             .await?;
         if res.status().is_success() {
-            info!("Rebalance request successful for market {} dst_chain_id {} amount {}", format!("{:#x}", market), dst_chain_id, amount);
+            info!(
+                "Rebalance request successful for market {} dst_chain_id {} amount {}",
+                format!("{:#x}", market),
+                dst_chain_id,
+                amount
+            );
         } else {
             let status = res.status();
             let text = res.text().await.unwrap_or_default();
@@ -174,7 +201,7 @@ impl ResetTxManager {
             let mut failed_interval = tokio::time::interval(poll_interval);
             loop {
                 failed_interval.tick().await;
-                
+
                 match db.get_failed_tx(max_retries_reset).await {
                     Ok(failed_txs) => {
                         debug!("Polled failed transactions: {} groups", failed_txs.len());
@@ -184,7 +211,10 @@ impl ResetTxManager {
                             }
                             let should_rebalance = Self::check_usd_value(&config, &market, &sum);
                             if should_rebalance {
-                                if let Err(e) = Self::request_rebalance(&config, market, dst_chain_id, sum).await {
+                                if let Err(e) =
+                                    Self::request_rebalance(&config, market, dst_chain_id, sum)
+                                        .await
+                                {
                                     error!("Failed to request rebalance: {:?}", e);
                                 }
                             } else {
@@ -210,12 +240,16 @@ impl ResetTxManager {
         loop {
             interval.tick().await;
 
-            match self.db.reset_stuck_events(
-                self.config.sample_size,
-                self.config.multiplier,
-                self.config.batch_limit, // batch_limit
-                self.config.max_retries_reset.clone(), // max_retries
-            ).await {
+            match self
+                .db
+                .reset_stuck_events(
+                    self.config.sample_size,
+                    self.config.multiplier,
+                    self.config.batch_limit,               // batch_limit
+                    self.config.max_retries_reset.clone(), // max_retries
+                )
+                .await
+            {
                 Ok(_) => {
                     debug!("Successfully reset stuck events");
                 }
@@ -233,11 +267,16 @@ impl ResetTxManager {
         let amount_f64 = amount.to_string().parse::<f64>().unwrap_or(0.0);
         let usd_value = amount_f64 * price;
         let minimum_met = usd_value >= config.minimum_usd_value;
-        info!("Checking USD value for market {} amount {} price {} usd_value {} minimum_met {}", format!("{:#x}", market), amount, price, usd_value, minimum_met);
+        info!(
+            "Checking USD value for market {} amount {} price {} usd_value {} minimum_met {}",
+            format!("{:#x}", market),
+            amount,
+            price,
+            usd_value,
+            minimum_met
+        );
         minimum_met
     }
-
-    
 
     fn get_price(market: &Address) -> f64 {
         // For now, just return 1.0 for all markets
