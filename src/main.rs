@@ -19,7 +19,10 @@ pub mod types;
 use crate::{config::*, events::*};
 
 mod event_listener;
-use event_listener::{EventConfig, EventListener};
+
+
+mod event_listener_simplified;
+
 
 mod proof_generator;
 use proof_generator::ProofGenerator;
@@ -181,36 +184,32 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
         handles.push(handle);
     }
 
-    // Start event listeners for all markets and chains
+    // Start simplified event listener for all chains, markets, and events
+    let mut all_event_configs = Vec::new();
+    
     for chain in config.get_all_chains() {
-        for market in &chain.markets {
-            for event in &chain.events {
-                info!(
-                    "Starting event listener for market={:?}, chain={}, event={}",
-                    market, chain.name, event
-                );
+        info!(
+            "Adding chain {} with {} markets and {} events to unified listener",
+            chain.name, chain.markets.len(), chain.events.len()
+        );
 
-                let event_config = create_event_config(chain, market, event, &config, false);
-                let retarded_event_config =
-                    create_event_config(chain, market, event, &config, true);
+        // Create normal config for this chain
+        let normal_config = create_simplified_event_config(chain, &config, false);
+        all_event_configs.push(normal_config);
 
-                let db_clone = db.clone();
-                let config_clone = config.clone();
-
-                let handle = tokio::spawn(async move {
-                    start_event_listeners(
-                        event_config,
-                        retarded_event_config,
-                        db_clone,
-                        config_clone.restart_config,
-                    )
-                    .await
-                });
-
-                handles.push(handle);
-            }
-        }
+        // Create retarded config for this chain
+        let retarded_config = create_simplified_event_config(chain, &config, true);
+        all_event_configs.push(retarded_config);
     }
+
+    info!("Starting unified event listener with {} configs", all_event_configs.len());
+    
+    let db_clone = db.clone();
+    let handle = tokio::spawn(async move {
+        event_listener_simplified::EventListener::new(all_event_configs, db_clone).await
+    });
+
+    handles.push(handle);
 
     // Start proof generator
     let db_clone_proof_gen = db.clone();
@@ -274,13 +273,11 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     Ok(())
 }
 
-fn create_event_config(
+fn create_simplified_event_config(
     chain: &ChainConfig,
-    market: &Address,
-    event: &str,
     config: &SequencerConfig,
     is_retarded: bool,
-) -> EventConfig {
+) -> event_listener_simplified::EventConfig {
     let event_config = &config.event_listener_config;
 
     let block_range_offset_from = if chain.is_l1 {
@@ -311,14 +308,10 @@ fn create_event_config(
         }
     };
 
-    EventConfig {
+    event_listener_simplified::EventConfig {
         primary_ws_url: chain.ws_url.clone(),
         fallback_ws_url: chain.fallback_ws_url.clone(),
-        market: *market,
-        event_signature: event.to_string(),
         chain_id: chain.chain_id as u64,
-        block_range_offset_from,
-        block_range_offset_to,
         max_retries: if is_retarded {
             event_config.retarded_max_retries
         } else {
@@ -335,7 +328,12 @@ fn create_event_config(
             event_config.poll_interval_secs
         },
         max_block_delay_secs: chain.max_block_delay_secs,
+        block_range_offset_from,
+        block_range_offset_to,
         is_retarded,
+        // Include all markets and events for this chain
+        markets: chain.markets.clone(),
+        events: chain.events.clone(),
     }
 }
 
@@ -403,29 +401,7 @@ async fn start_batch_event_listeners(
     }
 }
 
-async fn start_event_listeners(
-    normal_config: EventConfig,
-    retarded_config: EventConfig,
-    db: Database,
-    restart_config: RestartConfig,
-) -> Result<()> {
-    loop {
-        let mut normal_listener = EventListener::new(normal_config.clone(), db.clone());
-        let mut retarded_listener = EventListener::new(retarded_config.clone(), db.clone());
 
-        info!("Starting new event listener instance");
-
-        if let Err(e) = normal_listener.start().await {
-            error!("Event listener failed: {:?}", e);
-        }
-
-        if let Err(e) = retarded_listener.start().await {
-            error!("Retarded event listener failed: {:?}", e);
-        }
-
-        tokio::time::sleep(Duration::from_secs(restart_config.listener_delay_seconds)).await;
-    }
-}
 
 async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> Result<()> {
     // Start lane manager
