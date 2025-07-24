@@ -396,8 +396,6 @@ async fn start_batch_event_listeners(
 async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> Result<()> {
     // Start lane manager
     let lane_config = LaneManagerConfig {
-        max_retries: 5,
-        retry_delay_secs: 1,
         poll_interval_secs: 2,
         chain_params: config
             .get_all_chains()
@@ -423,15 +421,8 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
 
     let db_clone_lane = db.clone();
     tokio::spawn(async move {
-        let lane_manager = LaneManager::new(lane_config, db_clone_lane);
-
-        if let Err(e) = lane_manager.start().await {
+        if let Err(e) = LaneManager::new(lane_config, db_clone_lane).await {
             error!("Lane manager failed: {:?}", e);
-        }
-
-        // Keep the task alive
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
