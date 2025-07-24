@@ -114,6 +114,55 @@ pub const MINT_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x05, 0xdb, 0xe8, 0xa7];
 pub const REPAY_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x08, 0xfe, 0xe2, 0x63];
 pub const OUT_HERE_SELECTOR_FB4: &[u8] = &[0xb5, 0x11, 0xd3, 0xb1];
 
+// Unified event processing system
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventType {
+    HostBorrow,
+    HostWithdraw,
+    ExtensionMint,
+    ExtensionRepay,
+    Unknown,
+}
+
+impl EventType {
+    pub fn from_signature(signature: &[u8]) -> Self {
+        use alloy::primitives::keccak256;
+        
+        match signature {
+            sig if sig == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => EventType::HostBorrow,
+            sig if sig == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => EventType::HostWithdraw,
+            _ => EventType::Unknown,
+        }
+    }
+
+    pub fn from_method_selector(selector: &str) -> Self {
+        match selector {
+            MINT_EXTERNAL_SELECTOR => EventType::ExtensionMint,
+            REPAY_EXTERNAL_SELECTOR => EventType::ExtensionRepay,
+            _ => EventType::Unknown,
+        }
+    }
+
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            EventType::HostBorrow => "HostBorrow",
+            EventType::HostWithdraw => "HostWithdraw",
+            EventType::ExtensionMint => "ExtensionSupply",
+            EventType::ExtensionRepay => "ExtensionSupply",
+            EventType::Unknown => "Unknown",
+        }
+    }
+
+    pub fn target_function(&self) -> &'static str {
+        match self {
+            EventType::HostBorrow | EventType::HostWithdraw => "outHere",
+            EventType::ExtensionMint => "mintExternal",
+            EventType::ExtensionRepay => "repayExternal",
+            EventType::Unknown => "unknown",
+        }
+    }
+}
+
 // Add the parsing functions here
 pub fn parse_supplied_event(log: &Log) -> SuppliedEvent {
     let from = Address::from_slice(&log.topics()[1][12..]);

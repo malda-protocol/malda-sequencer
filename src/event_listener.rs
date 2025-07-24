@@ -1,33 +1,53 @@
+//! # Event Listener Module
+//! 
+//! This module provides a simplified, unified event listener for blockchain events across multiple chains.
+//! It processes events from various markets and chains in parallel, with fault isolation and efficient
+//! provider management.
+//! 
+//! ## Key Features:
+//! - **Unified Processing**: Single listener handles all chains, markets, and events
+//! - **Parallel Execution**: Independent tasks for each chain with fault isolation
+//! - **Provider Caching**: Efficient connection management to reduce RPC overhead
+//! - **Automatic Recovery**: Fallback provider support with freshness validation
+//! - **Event Classification**: Unified event type system for consistent processing
+//! 
+//! ## Architecture:
+//! ```
+//! EventListener::new()
+//! ├── Spawns parallel tasks for each EventConfig
+//! ├── Each task runs process_chain() independently
+//! ├── Provider caching and freshness validation
+//! ├── Block range calculation and log retrieval
+//! ├── Event parsing and database storage
+//! └── Continuous polling loop
+//! ```
+
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::{keccak256, Address},
+    primitives::{Address},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
 use chrono::Utc;
-use eyre::eyre;
-use eyre::{Result, WrapErr};
-use lazy_static::lazy_static;
+use eyre::{eyre, Result, WrapErr};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
 use tokio::time::interval;
-use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 use crate::events::{parse_supplied_event, parse_withdraw_on_extension_chain_event};
-use crate::{HOST_BORROW_ON_EXTENSION_CHAIN_SIG, HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG};
 use malda_rs::constants::*;
-
-// Import the chain ID constant from malda_rs
-use malda_rs::constants::LINEA_SEPOLIA_CHAIN_ID;
-
-use crate::events::{MINT_EXTERNAL_SELECTOR, REPAY_EXTERNAL_SELECTOR};
 use sequencer::database::{Database, EventStatus, EventUpdate};
 
-// Type alias for the provider type returned by ProviderBuilder::connect_ws()
+/// Simplified provider type with all necessary fillers for blockchain interaction
+/// 
+/// This type includes:
+/// - Identity filler for basic provider functionality
+/// - Gas filler for transaction gas estimation
+/// - Blob gas filler for EIP-4844 support
+/// - Nonce filler for transaction nonce management
+/// - Chain ID filler for network identification
 type ProviderType = alloy::providers::fillers::FillProvider<
     alloy::providers::fillers::JoinFill<
         alloy::providers::Identity,
@@ -45,438 +65,590 @@ type ProviderType = alloy::providers::fillers::FillProvider<
     alloy::providers::RootProvider<Ethereum>,
 >;
 
-lazy_static! {
-    pub static ref ETHEREUM_BLOCK_NUMBER: AtomicU64 = AtomicU64::new(0);
-}
-
+/// Configuration for event listening on a specific chain
+/// 
+/// This struct contains all necessary parameters for monitoring events on a blockchain:
+/// - Connection details (primary/fallback WebSocket URLs)
+/// - Chain-specific parameters (chain ID, polling intervals)
+/// - Block range configuration for event processing
+/// - Market addresses and event signatures to monitor
+/// - Retry and delay settings for reliability
 #[derive(Debug, Clone)]
 pub struct EventConfig {
+    /// Primary WebSocket URL for blockchain connection
     pub primary_ws_url: String,
+    /// Fallback WebSocket URL in case primary fails
     pub fallback_ws_url: String,
-    pub market: Address,
-    pub event_signature: String,
+    /// Unique identifier for the blockchain network
     pub chain_id: u64,
+    /// Maximum number of retry attempts for failed operations
     pub max_retries: u32,
+    /// Delay between retry attempts in seconds
     pub retry_delay_secs: u64,
+    /// Interval between polling cycles in seconds
     pub poll_interval_secs: u64,
+    /// Maximum allowed delay for block freshness in seconds
     pub max_block_delay_secs: u64,
+    /// Offset from current block for processing range start
     pub block_range_offset_from: u64,
+    /// Offset from current block for processing range end
     pub block_range_offset_to: u64,
+    /// Whether this is a "retarded" (delayed) listener configuration
     pub is_retarded: bool,
+    /// List of market contract addresses to monitor for events
+    pub markets: Vec<Address>,
+    /// List of event signatures to filter and process
+    pub events: Vec<String>,
 }
 
-#[derive(Clone)]
-pub struct EventListener {
+/// Manages the state for a single chain's event processing
+/// 
+/// This struct encapsulates all stateful information needed for processing events
+/// on a specific chain, including configuration, block tracking, provider caching,
+/// and polling intervals.
+struct ChainState {
+    /// Configuration for this chain's event processing
     config: EventConfig,
+    /// Last processed block number to maintain continuity
+    last_processed_block: u64,
+    /// Cached provider connection to reduce connection overhead
+    cached_provider: Option<ProviderType>,
+    /// Polling interval timer for this chain
+    interval: tokio::time::Interval,
+}
+
+impl ChainState {
+    /// Creates a new chain state with the given configuration
+    /// 
+    /// # Arguments
+    /// * `config` - The event configuration for this chain
+    /// 
+    /// # Returns
+    /// A new ChainState instance with initialized polling interval
+    fn new(config: EventConfig) -> Self {
+        let interval = interval(std::time::Duration::from_secs(config.poll_interval_secs));
+        
+        Self {
+            config,
+            last_processed_block: 0,
+            cached_provider: None,
+            interval,
+        }
+    }
+
+    /// Waits for the next polling cycle based on the configured interval
+    async fn wait_for_next_poll(&mut self) {
+        self.interval.tick().await;
+    }
+
+    /// Updates the last processed block number to maintain processing continuity
+    /// 
+    /// # Arguments
+    /// * `block` - The block number that was just processed
+    fn update_last_processed_block(&mut self, block: u64) {
+        self.last_processed_block = block;
+    }
+}
+
+/// Main event listener that processes blockchain events across multiple chains
+/// 
+/// This struct orchestrates the event listening process by:
+/// 1. Managing multiple chain configurations
+/// 2. Spawning parallel processing tasks
+/// 3. Coordinating database operations
+/// 4. Providing fault isolation between chains
+pub struct EventListener {
+    /// List of event configurations for different chains
+    configs: Vec<EventConfig>,
+    /// Database connection for event storage
     db: Database,
-    primary_provider: Option<ProviderType>,
 }
 
 impl EventListener {
-    pub fn new(config: EventConfig, db: Database) -> Self {
-        Self {
-            config,
-            db,
-            primary_provider: None,
+    /// Creates and starts a new event listener for multiple chains
+    /// 
+    /// This method initializes the event listener and immediately starts processing
+    /// events for all configured chains in parallel. Each chain runs independently,
+    /// ensuring that failures on one chain don't affect others.
+    /// 
+    /// # Arguments
+    /// * `configs` - Vector of event configurations for different chains
+    /// * `db` - Database connection for storing processed events
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    /// 
+    /// # Example
+    /// ```rust
+    /// let configs = vec![chain1_config, chain2_config];
+    /// let db = Database::new("connection_string").await?;
+    /// EventListener::new(configs, db).await?;
+    /// ```
+    pub async fn new(configs: Vec<EventConfig>, db: Database) -> Result<()> {
+        info!("Starting event listener for {} chains in parallel", configs.len());
+
+        // Create independent tasks for each chain configuration
+        let mut tasks = Vec::new();
+        
+        for config in configs {
+            let db_clone = db.clone();
+            let task = tokio::spawn(async move {
+                Self::process_chain(config, db_clone).await
+            });
+            tasks.push(task);
         }
+
+        // Wait for all chain processing tasks to complete (they run indefinitely)
+        futures::future::join_all(tasks).await;
+        
+        Ok(())
     }
 
-    pub async fn start(&mut self) -> Result<()> {
-        info!(
-            "Starting event listener for market={:?} chain={} event={}",
-            self.config.market, self.config.chain_id, self.config.event_signature
-        );
+    /// Processes events for a single chain in a continuous loop
+    /// 
+    /// This is the main processing function for each chain. It:
+    /// 1. Sets up the event filter for the chain's markets and events
+    /// 2. Enters a continuous polling loop
+    /// 3. Fetches fresh provider connections
+    /// 4. Calculates block ranges for event processing
+    /// 5. Retrieves and processes blockchain logs
+    /// 6. Updates the last processed block
+    /// 
+    /// # Arguments
+    /// * `config` - Event configuration for this chain
+    /// * `db` - Database connection for event storage
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    async fn process_chain(config: EventConfig, db: Database) -> Result<()> {
+        info!("Starting chain {} with {} markets and {} events", 
+              config.chain_id, config.markets.len(), config.events.len());
 
-        let mut retry_count = 0;
-        let max_retries = self.config.max_retries;
-        let retry_delay = Duration::from_secs(self.config.retry_delay_secs);
-
-        loop {
-            match self.run_event_listener().await {
-                Ok(_) => {
-                    warn!("Event listener stopped, attempting to reconnect...");
-                    if retry_count >= max_retries {
-                        error!("Max retries reached, giving up on reconnection");
-                        return Ok(());
-                    }
-                    retry_count += 1;
-                    info!(
-                        "Waiting {} seconds before reconnection attempt {}",
-                        retry_delay.as_secs(),
-                        retry_count
-                    );
-                    sleep(retry_delay).await;
-                }
-                Err(e) => {
-                    error!("Event listener error: {:?}", e);
-                    if retry_count >= max_retries {
-                        error!("Max retries reached, giving up on reconnection");
-                        return Err(e);
-                    }
-                    retry_count += 1;
-                    info!(
-                        "Waiting {} seconds before reconnection attempt {}",
-                        retry_delay.as_secs(),
-                        retry_count
-                    );
-                    sleep(retry_delay).await;
-                }
-            }
-        }
-    }
-
-    async fn run_event_listener(&mut self) -> Result<()> {
-        debug!("Setting up polling with filter");
+        // Create filter for all markets and events on this chain
         let filter = Filter::new()
-            .event(&self.config.event_signature)
-            .address(self.config.market);
+            .address(config.markets.clone())
+            .events(&config.events);
+        let mut chain_state = ChainState::new(config);
+        
+        info!("Started polling for chain {}", chain_state.config.chain_id);
 
-        // Track the latest block we've processed
-        let mut last_processed_block = 0u64;
-
-        // Poll interval in seconds
-        let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
-        let mut interval = interval(poll_interval);
-
-        info!("Started polling for events");
-
-        // Flag to track if we used fallback in the previous cycle
-        let mut used_fallback = false;
-
+        // Main processing loop - runs indefinitely
         loop {
-            interval.tick().await;
-
-            // Determine which provider to use for this polling cycle
-            let provider = match self.get_active_provider(used_fallback).await {
-                Ok((provider, is_fallback)) => {
-                    used_fallback = is_fallback;
-                    provider
-                }
-                Err(e) => {
-                    error!("Failed to get active provider: {:?}", e);
-                    continue;
-                }
-            };
-
-            // Get current block number
-            let current_block = match provider.get_block_number().await {
-                Ok(block) => block,
-                Err(e) => {
-                    error!("Provider failed to get block number: {:?}", e);
-                    used_fallback = true; // Force new primary provider on next cycle
-                    continue;
-                }
-            };
-
-            // Don't query if we're already up to date
-            if last_processed_block >= current_block {
-                debug!("No new blocks since last poll (block: {})", current_block);
+            // Wait for next polling cycle
+            chain_state.wait_for_next_poll().await;
+            
+            // Get a fresh provider connection (with caching)
+            let provider = Self::get_fresh_provider(&mut chain_state).await?;
+            
+            // Get current block number for range calculation
+            let current_block = provider.get_block_number().await
+                .map_err(|e| eyre!("Failed to get block number for chain {}: {:?}", chain_state.config.chain_id, e))?;
+            
+            // Skip if we're already at or past the current block
+            if chain_state.last_processed_block >= current_block {
                 continue;
             }
 
-            // Set the from_block to the next block after the last processed one
-            let from_block = if last_processed_block > 0 {
-                last_processed_block + 1
+            // Calculate block range for event processing
+            let from_block = if chain_state.last_processed_block > 0 {
+                chain_state.last_processed_block + 1
             } else {
-                current_block - self.config.block_range_offset_from
+                current_block - chain_state.config.block_range_offset_from
             };
-
-            debug!(
-                "Polling for logs from block {} to {}",
-                from_block, current_block
-            );
-
-            let mut block_timestamps = HashMap::new();
-
-            let to_block = current_block - self.config.block_range_offset_to;
-
-            // Get block timestamps
-            for block_number in from_block..=to_block {
-                let block = match provider
-                    .get_block_by_number(BlockNumberOrTag::Number(block_number))
-                    .await
-                {
-                    Ok(Some(block)) => block,
-                    Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
-                    Err(e) => return Err(eyre::eyre!("Failed to get block: {:?}", e)),
-                };
-
-                let timestamp = block.header.inner.timestamp;
-                block_timestamps.insert(block_number, timestamp);
+            let to_block = current_block - chain_state.config.block_range_offset_to;
+            
+            // Get block timestamps for event processing
+            let block_timestamps = Self::get_block_timestamps(&provider, from_block, to_block, &chain_state.config).await?;
+            
+            // Get and process blockchain logs
+            let logs = Self::get_logs(&provider, &filter, from_block, current_block, &chain_state.config).await?;
+            
+            // Process events if any logs were found
+            if !logs.is_empty() {
+                Self::process_logs(logs, &block_timestamps, &chain_state.config, &db).await?;
             }
 
-            // Update filter to include block range
-            let range_filter = filter
-                .clone()
-                .from_block(from_block)
-                .to_block(current_block);
+            // Update the last processed block for next iteration
+            chain_state.update_last_processed_block(to_block);
+        }
+    }
 
-            // Get logs
-            let logs = match provider.get_logs(&range_filter).await {
-                Ok(logs) => logs,
+    /// Gets a fresh provider connection with caching optimization
+    /// 
+    /// This method implements provider caching to reduce connection overhead:
+    /// 1. Checks if cached provider is still fresh
+    /// 2. Reuses cached provider if valid
+    /// 3. Creates new provider if cache is stale or empty
+    /// 4. Updates cache with new provider
+    /// 
+    /// # Arguments
+    /// * `chain_state` - Mutable reference to chain state for cache management
+    /// 
+    /// # Returns
+    /// * `Result<ProviderType>` - Fresh provider connection
+    async fn get_fresh_provider(chain_state: &mut ChainState) -> Result<ProviderType> {
+        // Try to reuse cached provider if it's still fresh
+        if let Some(provider) = &chain_state.cached_provider {
+            if Self::is_provider_fresh(provider, chain_state.config.max_block_delay_secs).await {
+                return Ok(provider.clone());
+            }
+        }
+
+        // Get new provider and update cache
+        let new_provider = Self::get_provider(&chain_state.config).await?;
+        chain_state.cached_provider = Some(new_provider.clone());
+        Ok(new_provider)
+    }
+
+    /// Retrieves block timestamps for a range of blocks
+    /// 
+    /// This method fetches block information for each block in the specified range
+    /// and extracts timestamps for event processing. It handles missing blocks
+    /// gracefully by logging errors and continuing.
+    /// 
+    /// # Arguments
+    /// * `provider` - Blockchain provider connection
+    /// * `from_block` - Starting block number (inclusive)
+    /// * `to_block` - Ending block number (inclusive)
+    /// * `config` - Event configuration for error context
+    /// 
+    /// # Returns
+    /// * `Result<HashMap<u64, u64>>` - Map of block numbers to timestamps
+    async fn get_block_timestamps(
+        provider: &ProviderType, 
+        from_block: u64, 
+        to_block: u64, 
+        config: &EventConfig
+    ) -> Result<HashMap<u64, u64>> {
+        let mut block_timestamps = HashMap::new();
+        
+        // Iterate through each block in the range
+        for block_number in from_block..=to_block {
+            let block = match provider
+                .get_block_by_number(BlockNumberOrTag::Number(block_number))
+                .await
+            {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    error!("Block {} not found on chain {}", block_number, config.chain_id);
+                    continue;
+                }
                 Err(e) => {
-                    error!("Provider failed to get logs: {:?}", e);
+                    error!("Failed to get block {} on chain {}: {:?}", block_number, config.chain_id, e);
                     continue;
                 }
             };
-
-            if logs.is_empty() {
-                debug!(
-                    "No new events found in blocks {} to {}",
-                    from_block, current_block
-                );
-                last_processed_block = current_block;
-                continue;
-            }
-
-            // Process all logs in parallel
-            let mut handles = Vec::new();
-
-            for log in logs {
-                let curr_timestamp = *block_timestamps
-                    .get(&log.block_number.unwrap_or_default())
-                    .unwrap_or(&0);
-                let self_clone = self.clone();
-                let handle = tokio::spawn(async move {
-                    match self_clone.process_event(log, curr_timestamp).await {
-                        Ok(event_update) => Some(event_update),
-                        Err(e) => {
-                            error!("Failed to process event: {:?}", e);
-                            None
-                        }
-                    }
-                });
-                handles.push(handle);
-            }
-
-            // Collect results
-            let mut pending_updates = Vec::new();
-            for handle in handles {
-                if let Ok(Some(event_update)) = handle.await {
-                    pending_updates.push(event_update);
-                }
-            }
-
-            // Write updates to database if any
-            if !pending_updates.is_empty() {
-                let count = pending_updates.len();
-                match self
-                    .db
-                    .add_new_events(&pending_updates, self.config.is_retarded)
-                    .await
-                {
-                    Ok(_) => info!(
-                        "Successfully added batch of {} new events to database",
-                        count
-                    ),
-                    Err(e) => error!("Failed to write events to database: {:?}", e),
-                }
-            }
-
-            // Update last processed block
-            last_processed_block = to_block;
+            block_timestamps.insert(block_number, block.header.inner.timestamp);
         }
+        
+        Ok(block_timestamps)
     }
 
-    // Updated helper method to determine which provider to use
-    async fn get_active_provider(
-        &mut self,
-        force_new_primary: bool,
-    ) -> Result<(ProviderType, bool)> {
-        // If we have a primary provider and don't need to force a new one, check if it's still valid
-        if !force_new_primary && self.primary_provider.is_some() {
-            let provider = self.primary_provider.as_ref().unwrap();
-
-            // Check if the primary provider is fresh enough
-            match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
-                Ok(Some(block)) => {
-                    // Check block timestamp
-                    let block_timestamp: u64 = block.header.inner.timestamp.into();
-                    let current_time = chrono::Utc::now().timestamp() as u64;
-                    let max_delay = self.config.max_block_delay_secs;
-
-                    if current_time > block_timestamp
-                        && (current_time - block_timestamp) > max_delay
-                    {
-                        warn!(
-                            "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s, trying fallback at {}",
-                            block_timestamp, current_time, current_time - block_timestamp, max_delay, self.config.fallback_ws_url
-                        );
-                        // Use fallback and mark primary as invalid
-                        self.primary_provider = None;
-                        return self.create_fallback_provider().await;
-                    }
-
-                    // Primary provider is good, use it
-                    debug!("Reusing existing primary provider");
-                    return Ok((provider.clone(), false));
-                }
-                _ => {
-                    // Primary provider failed, clear it and try creating a new one
-                    warn!("Existing primary provider failed to get latest block, creating new one");
-                    self.primary_provider = None;
-                }
-            }
-        }
-
-        // Create a new primary provider
-        let primary_ws_url: Url =
-            self.config.primary_ws_url.parse().wrap_err_with(|| {
-                format!("Invalid primary WSS URL: {}", self.config.primary_ws_url)
-            })?;
-
-        debug!("Connecting to primary provider at {}", primary_ws_url);
-        let primary_ws = WsConnect::new(primary_ws_url);
-        let primary_provider = match ProviderBuilder::new().connect_ws(primary_ws).await {
-            Ok(provider) => provider,
-            Err(e) => {
-                warn!(
-                    "Failed to connect to primary WebSocket: {:?}, trying fallback at {}",
-                    e, self.config.fallback_ws_url
-                );
-                return self.create_fallback_provider().await;
-            }
-        };
-
-        // Check if the primary provider is fresh enough
-        let block = match primary_provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
+    /// Retrieves blockchain logs for the specified filter and block range
+    /// 
+    /// This method queries the blockchain for logs matching the given filter
+    /// within the specified block range. It's the core method for fetching
+    /// raw event data from the blockchain.
+    /// 
+    /// # Arguments
+    /// * `provider` - Blockchain provider connection
+    /// * `filter` - Event filter defining what logs to retrieve
+    /// * `from_block` - Starting block number (inclusive)
+    /// * `to_block` - Ending block number (inclusive)
+    /// * `config` - Event configuration for error context
+    /// 
+    /// # Returns
+    /// * `Result<Vec<Log>>` - Vector of blockchain logs
+    async fn get_logs(
+        provider: &ProviderType,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+        config: &EventConfig
+    ) -> Result<Vec<Log>> {
+        provider.get_logs(&filter
+            .clone()
+            .from_block(from_block)
+            .to_block(to_block))
             .await
-        {
-            Ok(Some(block)) => block,
-            Ok(None) => {
-                warn!(
-                    "Primary provider returned no latest block, trying fallback at {}",
-                    self.config.fallback_ws_url
-                );
-                return self.create_fallback_provider().await;
-            }
-            Err(e) => {
-                warn!(
-                    "Primary provider failed to get latest block: {:?}, trying fallback at {}",
-                    e, self.config.fallback_ws_url
-                );
-                return self.create_fallback_provider().await;
-            }
-        };
+            .map_err(|e| eyre!("Failed to get logs for chain {}: {:?}", config.chain_id, e))
+    }
 
-        // Check if the block is fresh enough
-        let block_timestamp: u64 = block.header.inner.timestamp.into();
-        let current_time = chrono::Utc::now().timestamp() as u64;
-        let max_delay = self.config.max_block_delay_secs;
-
-        if current_time > block_timestamp && (current_time - block_timestamp) > max_delay {
-            warn!(
-                "Primary provider's latest block is too old: block_time={}, current_time={}, diff={}s, max_delay={}s, trying fallback at {}",
-                block_timestamp, current_time, current_time - block_timestamp, max_delay, self.config.fallback_ws_url
-            );
-            return self.create_fallback_provider().await;
+    /// Processes a batch of blockchain logs into database events
+    /// 
+    /// This method takes raw blockchain logs and converts them into structured
+    /// event updates for database storage. It handles event parsing, timestamp
+    /// assignment, and batch database operations.
+    /// 
+    /// # Arguments
+    /// * `logs` - Vector of blockchain logs to process
+    /// * `block_timestamps` - Map of block numbers to timestamps
+    /// * `config` - Event configuration for processing context
+    /// * `db` - Database connection for event storage
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    async fn process_logs(
+        logs: Vec<Log>,
+        block_timestamps: &HashMap<u64, u64>,
+        config: &EventConfig,
+        db: &Database
+    ) -> Result<()> {
+        let mut event_updates = Vec::new();
+        
+        // Process each log into a structured event update
+        for log in logs {
+            let timestamp = *block_timestamps
+                .get(&log.block_number.unwrap_or_default())
+                .unwrap_or(&0);
+            
+            if let Ok(event_update) = Self::process_event(config, log, timestamp).await {
+                event_updates.push(event_update);
+            }
         }
 
-        // Store the new primary provider
-        debug!("Using new primary provider");
-        self.primary_provider = Some(primary_provider.clone());
-        Ok((primary_provider, false))
+        // Batch save all processed events to database
+        if !event_updates.is_empty() {
+            Self::save_events_to_database(event_updates, config, db).await?;
+        }
+
+        Ok(())
     }
 
-    // Helper method to create fallback provider
-    async fn create_fallback_provider(&self) -> Result<(ProviderType, bool)> {
-        let fallback_ws_url: Url = self.config.fallback_ws_url.parse().wrap_err_with(|| {
-            format!("Invalid fallback WSS URL: {}", self.config.fallback_ws_url)
-        })?;
+    /// Saves processed events to the database
+    /// 
+    /// This method performs batch database operations to store processed events.
+    /// It handles both normal and retarded event configurations and provides
+    /// detailed logging for monitoring and debugging.
+    /// 
+    /// # Arguments
+    /// * `event_updates` - Vector of processed event updates to save
+    /// * `config` - Event configuration for context and retarded flag
+    /// * `db` - Database connection for storage
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    async fn save_events_to_database(
+        event_updates: Vec<EventUpdate>,
+        config: &EventConfig,
+        db: &Database
+    ) -> Result<()> {
+        if let Err(e) = db.add_new_events(&event_updates, config.is_retarded).await {
+            error!("Failed to save events to database for chain {}: {:?}", config.chain_id, e);
+            return Err(e);
+        }
+        
+        info!("Added {} new events to database for chain {}", event_updates.len(), config.chain_id);
+        Ok(())
+    }
 
-        info!("Connecting to fallback provider at {}", fallback_ws_url);
-        let fallback_ws = WsConnect::new(fallback_ws_url);
-        let fallback_provider = ProviderBuilder::new()
-            .connect_ws(fallback_ws)
+    /// Gets a provider connection with primary/fallback logic
+    /// 
+    /// This method implements provider selection logic:
+    /// 1. Attempts to connect to primary provider
+    /// 2. Validates provider freshness
+    /// 3. Falls back to secondary provider if primary fails
+    /// 4. Returns error if both providers are unavailable
+    /// 
+    /// # Arguments
+    /// * `config` - Event configuration containing provider URLs
+    /// 
+    /// # Returns
+    /// * `Result<ProviderType>` - Connected provider
+    async fn get_provider(config: &EventConfig) -> Result<ProviderType> {
+        // Try primary provider first
+        if let Ok(provider) = Self::connect_provider(&config.primary_ws_url).await {
+            if Self::is_provider_fresh(&provider, config.max_block_delay_secs).await {
+                return Ok(provider);
+            }
+        }
+
+        // Try fallback provider
+        let provider = Self::connect_provider(&config.fallback_ws_url).await?;
+        if Self::is_provider_fresh(&provider, config.max_block_delay_secs).await {
+            return Ok(provider);
+        }
+
+        Err(eyre!("Both primary and fallback providers are unavailable for chain {}", config.chain_id))
+    }
+
+    /// Establishes a WebSocket connection to a blockchain provider
+    /// 
+    /// This method creates a new WebSocket connection to the specified URL
+    /// and configures it with all necessary fillers for blockchain interaction.
+    /// 
+    /// # Arguments
+    /// * `url` - WebSocket URL to connect to
+    /// 
+    /// # Returns
+    /// * `Result<ProviderType>` - Connected provider
+    async fn connect_provider(url: &str) -> Result<ProviderType> {
+        let ws_url: Url = url.parse()
+            .wrap_err_with(|| format!("Invalid WSS URL: {}", url))?;
+        
+        let ws_connect = WsConnect::new(ws_url);
+        ProviderBuilder::new()
+            .connect_ws(ws_connect)
             .await
-            .wrap_err("Failed to connect to fallback WebSocket")?;
-
-        Ok((fallback_provider, true))
+            .wrap_err("Failed to connect to WebSocket")
     }
 
-    async fn process_event(&self, log: Log, timestamp: u64) -> Result<EventUpdate> {
-        let tx_hash = log
-            .transaction_hash
+    /// Validates if a provider is fresh (not too far behind current time)
+    /// 
+    /// This method checks if the provider's latest block is within the acceptable
+    /// delay window. This prevents using stale providers that might be out of sync.
+    /// 
+    /// # Arguments
+    /// * `provider` - Provider to validate
+    /// * `max_delay` - Maximum allowed delay in seconds
+    /// 
+    /// # Returns
+    /// * `bool` - True if provider is fresh, false otherwise
+    async fn is_provider_fresh(provider: &ProviderType, max_delay: u64) -> bool {
+        match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
+            Ok(Some(block)) => {
+                let block_timestamp: u64 = block.header.inner.timestamp.into();
+                let current_time = chrono::Utc::now().timestamp() as u64;
+                
+                // Provider is fresh if block time is current or within max delay
+                current_time <= block_timestamp || 
+                (current_time - block_timestamp) <= max_delay
+            }
+            _ => false
+        }
+    }
+
+    /// Processes a single blockchain log into a database event update
+    /// 
+    /// This method converts a raw blockchain log into a structured event update
+    /// suitable for database storage. It extracts transaction information, block
+    /// details, and event-specific data.
+    /// 
+    /// # Arguments
+    /// * `config` - Event configuration for chain context
+    /// * `log` - Blockchain log to process
+    /// * `timestamp` - Block timestamp for the log
+    /// 
+    /// # Returns
+    /// * `Result<EventUpdate>` - Processed event update
+    async fn process_event(config: &EventConfig, log: Log, timestamp: u64) -> Result<EventUpdate> {
+        let tx_hash = log.transaction_hash
             .ok_or_else(|| eyre!("No transaction hash"))?;
 
-        // Get the current block number
         let current_block = log.block_number.unwrap_or_default() as i32;
+        let market = log.address();
 
-        // Create event update with initial data
+        // Create base event update with common fields
         let mut event_update = EventUpdate {
             tx_hash,
-            src_chain_id: Some(self.config.chain_id.try_into().unwrap()),
-            market: Some(self.config.market),
+            src_chain_id: Some(config.chain_id.try_into().unwrap()),
+            market: Some(market),
             received_at_block: Some(current_block),
             received_block_timestamp: Some(timestamp as i64),
-            status: EventStatus::Received, // Set to Processed immediately
+            status: EventStatus::Received,
             received_at: Some(Utc::now()),
             ..Default::default()
         };
 
-        // Process the event based on chain ID
-        if self.config.chain_id == LINEA_SEPOLIA_CHAIN_ID || self.config.chain_id == LINEA_CHAIN_ID
-        {
-            // Process host chain events
-            let event = parse_withdraw_on_extension_chain_event(&log);
+        // Process event based on chain type (host vs extension)
+        Self::process_event_by_chain_type(config, &log, &mut event_update)?;
 
-            // Get the event signature from topic 0
-            let event_signature = &log.topics()[0];
-
-            // Determine event type based on the event signature
-            let (event_type, target_function) = if *event_signature
-                == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes())
-            {
-                ("HostBorrow", "outHere")
-            } else if *event_signature == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes())
-            {
-                ("HostWithdraw", "outHere")
-            } else {
-                info!("Unknown event signature: {}", event_signature);
-                return Err(eyre::eyre!("Unknown event signature: {}", event_signature));
-            };
-
-            event_update.msg_sender = Some(event.sender);
-            event_update.dst_chain_id = Some(event.dst_chain_id);
-            event_update.amount = Some(event.amount);
-            event_update.target_function = Some(target_function.to_string());
-            event_update.event_type = Some(event_type.to_string());
-        } else {
-            // Process extension chain events
-            let event = parse_supplied_event(&log);
-
-            // Validate method selector before processing
-            if event.linea_method_selector != MINT_EXTERNAL_SELECTOR
-                && event.linea_method_selector != REPAY_EXTERNAL_SELECTOR
-            {
-                return Err(eyre::eyre!(
-                    "Invalid method selector: {}",
-                    event.linea_method_selector
-                ));
-            }
-
-            let function_name = if event.linea_method_selector == MINT_EXTERNAL_SELECTOR {
-                "mintExternal"
-            } else {
-                "repayExternal"
-            };
-
-            event_update.msg_sender = Some(event.from);
-            event_update.src_chain_id = Some(event.src_chain_id);
-            event_update.dst_chain_id = Some(event.dst_chain_id);
-            event_update.amount = Some(event.amount);
-            event_update.target_function = Some(function_name.to_string());
-            event_update.event_type = Some("ExtensionSupply".to_string());
-        }
-
-        // Don't update database here - return the event update for batch processing
         Ok(event_update)
     }
-}
 
-impl Drop for EventListener {
-    fn drop(&mut self) {
-        if self.primary_provider.is_some() {}
+    /// Routes event processing based on chain type
+    /// 
+    /// This method determines whether the event is from a host chain (Linea)
+    /// or an extension chain and routes to the appropriate processing function.
+    /// 
+    /// # Arguments
+    /// * `config` - Event configuration containing chain ID
+    /// * `log` - Blockchain log to process
+    /// * `event_update` - Mutable event update to populate
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    fn process_event_by_chain_type(
+        config: &EventConfig, 
+        log: &Log, 
+        event_update: &mut EventUpdate
+    ) -> Result<()> {
+        // Route based on chain ID - Linea chains are host chains
+        match config.chain_id {
+            LINEA_SEPOLIA_CHAIN_ID | LINEA_CHAIN_ID => {
+                Self::process_host_chain_event(log, event_update)
+            }
+            _ => {
+                Self::process_extension_chain_event(log, event_update)
+            }
+        }
     }
-}
+
+    /// Processes events from host chains (Linea mainnet and testnet)
+    /// 
+    /// Host chain events are typically withdrawal events that indicate users
+    /// withdrawing assets from the host chain to extension chains. This method
+    /// parses the event data and populates the event update with host-specific
+    /// information.
+    /// 
+    /// # Arguments
+    /// * `log` - Blockchain log containing the event data
+    /// * `event_update` - Mutable event update to populate
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    fn process_host_chain_event(log: &Log, event_update: &mut EventUpdate) -> Result<()> {
+        let event = parse_withdraw_on_extension_chain_event(log);
+        let event_signature = &log.topics()[0];
+
+        // Use unified event type system for classification
+        let event_type = crate::events::EventType::from_signature(event_signature.as_slice());
+        
+        if event_type == crate::events::EventType::Unknown {
+            return Err(eyre!("Unknown host chain event signature: {}", hex::encode(event_signature)));
+        }
+
+        // Populate event update with host chain specific data
+        event_update.msg_sender = Some(event.sender);
+        event_update.dst_chain_id = Some(event.dst_chain_id);
+        event_update.amount = Some(event.amount);
+        event_update.target_function = Some(event_type.target_function().to_string());
+        event_update.event_type = Some(event_type.to_string().to_string());
+
+        Ok(())
+    }
+
+    /// Processes events from extension chains (non-Linea chains)
+    /// 
+    /// Extension chain events are typically supply/mint events that indicate
+    /// users supplying assets to the protocol on extension chains. This method
+    /// parses the event data and populates the event update with extension-specific
+    /// information.
+    /// 
+    /// # Arguments
+    /// * `log` - Blockchain log containing the event data
+    /// * `event_update` - Mutable event update to populate
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    fn process_extension_chain_event(log: &Log, event_update: &mut EventUpdate) -> Result<()> {
+        let event = parse_supplied_event(log);
+
+        // Use unified event type system for classification
+        let event_type = crate::events::EventType::from_method_selector(&event.linea_method_selector);
+        
+        if event_type == crate::events::EventType::Unknown {
+            return Err(eyre!("Invalid method selector: {}", event.linea_method_selector));
+        }
+
+        // Populate event update with extension chain specific data
+        event_update.msg_sender = Some(event.from);
+        event_update.src_chain_id = Some(event.src_chain_id);
+        event_update.dst_chain_id = Some(event.dst_chain_id);
+        event_update.amount = Some(event.amount);
+        event_update.target_function = Some(event_type.target_function().to_string());
+        event_update.event_type = Some(event_type.to_string().to_string());
+
+        Ok(())
+    }
+} 

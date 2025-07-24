@@ -1,11 +1,4 @@
-use alloy::{
-    network::EthereumWallet,
-    primitives::Address,
-    providers::{
-        fillers::{BlobGasFiller, ChainIdFiller, GasFiller, JoinFill, NonceFiller},
-        Identity, RootProvider,
-    },
-};
+use alloy::primitives::Address;
 
 use eyre::Result;
 use std::time::Duration;
@@ -16,12 +9,9 @@ pub mod constants;
 pub mod events;
 pub mod types;
 
-use crate::{config::*, events::*};
+use crate::config::*;
 
 mod event_listener;
-
-
-mod event_listener_simplified;
 
 
 mod proof_generator;
@@ -194,11 +184,11 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
         );
 
         // Create normal config for this chain
-        let normal_config = create_simplified_event_config(chain, &config, false);
+        let normal_config = create_event_config(chain, &config, false);
         all_event_configs.push(normal_config);
 
         // Create retarded config for this chain
-        let retarded_config = create_simplified_event_config(chain, &config, true);
+        let retarded_config = create_event_config(chain, &config, true);
         all_event_configs.push(retarded_config);
     }
 
@@ -206,7 +196,7 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     
     let db_clone = db.clone();
     let handle = tokio::spawn(async move {
-        event_listener_simplified::EventListener::new(all_event_configs, db_clone).await
+        event_listener::EventListener::new(all_event_configs, db_clone).await
     });
 
     handles.push(handle);
@@ -273,11 +263,11 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     Ok(())
 }
 
-fn create_simplified_event_config(
+fn create_event_config(
     chain: &ChainConfig,
     config: &SequencerConfig,
     is_retarded: bool,
-) -> event_listener_simplified::EventConfig {
+) -> event_listener::EventConfig {
     let event_config = &config.event_listener_config;
 
     let block_range_offset_from = if chain.is_l1 {
@@ -308,7 +298,7 @@ fn create_simplified_event_config(
         }
     };
 
-    event_listener_simplified::EventConfig {
+    event_listener::EventConfig {
         primary_ws_url: chain.ws_url.clone(),
         fallback_ws_url: chain.fallback_ws_url.clone(),
         chain_id: chain.chain_id as u64,
