@@ -1,120 +1,108 @@
 use crate::constants::*;
-use alloy::primitives::{address, Address};
+use alloy::primitives::Address;
 use eyre::Result;
 use sequencer::database::{ChainParams, Database};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::interval;
-use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
+
+/// Configuration for the lane manager
+/// 
+/// This struct contains all necessary parameters for the lane manager:
+/// - Polling intervals and retry settings
+/// - Chain parameters for each supported chain
+/// - Market addresses to monitor for price updates
 #[derive(Clone)]
 pub struct LaneManagerConfig {
-    pub max_retries: u32,
-    pub retry_delay_secs: u64,
+    /// Interval between lane status updates in seconds
     pub poll_interval_secs: u64,
+    /// Chain-specific parameters for lane management
     pub chain_params: HashMap<u32, ChainParams>,
+    /// Market addresses to fetch prices for
     pub market_addresses: Vec<Address>,
 }
 
-#[derive(Clone)]
-pub struct LaneManager {
-    config: LaneManagerConfig,
-    db: Database,
-}
+/// Manages lane status updates across multiple chains
+/// 
+/// The lane manager continuously monitors market prices and updates
+/// lane status in the database. It runs a simple polling loop that:
+/// 1. Fetches current market prices
+/// 2. Updates lane status in the database
+/// 3. Waits for the next polling cycle
+pub struct LaneManager;
 
 impl LaneManager {
-    pub fn new(config: LaneManagerConfig, db: Database) -> Self {
-        Self { config, db }
-    }
-
-    fn get_price(&self, market: &Address) -> f64 {
-        // For now, just return 1.0 for all markets
-        // TODO: Implement actual price fetching
-        if *market == mUSDC_market || *market == mUSDT_market {
-            return 1.0 / 1000000.0;
-        } else if *market == mWBTC_market {
-            return 100000.0 / 100000000.0;
-        } else {
-            return 2500.0 / 1000000000000000000.0;
-        }
-    }
-
-    pub async fn start(&self) -> Result<()> {
+    /// Creates and starts a new lane manager
+    /// 
+    /// This method initializes the lane manager and immediately starts
+    /// the polling loop. It runs indefinitely until an error occurs.
+    /// 
+    /// # Arguments
+    /// * `config` - Lane manager configuration
+    /// * `db` - Database connection for lane status updates
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    /// 
+    /// # Example
+    /// ```rust
+    /// let config = LaneManagerConfig { /* ... */ };
+    /// let db = Database::new("connection_string").await?;
+    /// LaneManager::new(config, db).await?;
+    /// ```
+    pub async fn new(config: LaneManagerConfig, db: Database) -> Result<()> {
         info!(
-            "Starting lane manager with {} chains configured",
-            self.config.chain_params.len()
+            "Starting lane manager with {} chains and {} markets",
+            config.chain_params.len(),
+            config.market_addresses.len()
         );
 
-        let mut retry_count = 0;
-        let max_retries = self.config.max_retries;
-        let retry_delay = Duration::from_secs(self.config.retry_delay_secs);
-        let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
+        let poll_interval = Duration::from_secs(config.poll_interval_secs);
         let mut interval = interval(poll_interval);
 
-        loop {
-            match self.run_lane_manager().await {
-                Ok(_) => {
-                    warn!("Lane manager stopped, attempting to reconnect...");
-                    if retry_count >= max_retries {
-                        error!("Max retries reached, giving up on reconnection");
-                        return Ok(());
-                    }
-                    retry_count += 1;
-                    info!(
-                        "Waiting {} seconds before reconnection attempt {}",
-                        retry_delay.as_secs(),
-                        retry_count
-                    );
-                    sleep(retry_delay).await;
-                }
-                Err(e) => {
-                    error!("Lane manager error: {:?}", e);
-                    if retry_count >= max_retries {
-                        error!("Max retries reached, giving up on reconnection");
-                        return Err(e);
-                    }
-                    retry_count += 1;
-                    info!(
-                        "Waiting {} seconds before reconnection attempt {}",
-                        retry_delay.as_secs(),
-                        retry_count
-                    );
-                    sleep(retry_delay).await;
-                }
-            }
-        }
-    }
-
-    async fn run_lane_manager(&self) -> Result<()> {
-        let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
-        let mut interval = interval(poll_interval);
-
-        info!("Started polling for events to process");
+        info!("Started polling for lane status updates");
 
         loop {
             interval.tick().await;
 
-            // Create market prices map using get_price function
-            let market_prices: HashMap<Address, f64> = self
-                .config
+            // Create market prices map
+            let market_prices: HashMap<Address, f64> = config
                 .market_addresses
                 .iter()
-                .map(|market| (*market, self.get_price(market)))
+                .map(|market| (*market, Self::get_price(market)))
                 .collect();
 
-            match self
-                .db
-                .update_lane_status(&self.config.chain_params, &market_prices)
-                .await
-            {
+            // Update lane status in database
+            match db.update_lane_status(&config.chain_params, &market_prices).await {
                 Ok(_) => {
-                    debug!("Successfully processed events");
+                    debug!("Successfully updated lane status");
                 }
                 Err(e) => {
-                    error!("Failed to process events: {:?}", e);
+                    error!("Failed to update lane status: {:?}", e);
                     return Err(e);
                 }
             }
+        }
+    }
+
+    /// Gets the current price for a market
+    /// 
+    /// This method returns hardcoded prices for different market types.
+    /// In a production environment, this would fetch real-time prices
+    /// from price feeds or exchanges.
+    /// 
+    /// # Arguments
+    /// * `market` - Market address to get price for
+    /// 
+    /// # Returns
+    /// * `f64` - Current market price
+    fn get_price(market: &Address) -> f64 {
+        // TODO: Implement actual price fetching from external sources
+        match *market {
+            m if m == mUSDC_market || m == mUSDT_market => 1.0 / 1000000.0,
+            m if m == mWBTC_market => 100000.0 / 100000000.0,
+            _ => 2500.0 / 1000000000000000000.0, // Default ETH price
         }
     }
 }
