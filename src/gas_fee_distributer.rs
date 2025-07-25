@@ -1,9 +1,9 @@
 //! # Gas Fee Distributer Module
-//! 
+//!
 //! This module provides a gas fee distributer that manages ETH balances across multiple chains,
 //! automatically harvesting gas fees from markets, distributing them to sequencers, and handling
 //! cross-chain rebalancing via bridge protocols like Accross.
-//! 
+//!
 //! ## Key Features:
 //! - **Multi-Chain Balance Monitoring**: Tracks ETH balances across multiple chains
 //! - **Automatic Gas Fee Harvesting**: Withdraws gas fees from market contracts
@@ -11,7 +11,7 @@
 //! - **Cross-Chain Rebalancing**: Bridges ETH between chains when needed
 //! - **Balance Thresholds**: Configurable minimum and target balance thresholds
 //! - **Bridge Integration**: Supports Accross protocol for cross-chain transfers
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! GasFeeDistributer::new()
@@ -22,7 +22,7 @@
 //! ├── Bridge Integration: Uses Accross protocol for transfers
 //! └── Balance Updates: Tracks all balance changes
 //! ```
-//! 
+//!
 //! ## Workflow:
 //! 1. **Initialization**: Sets up balance tracking for all chains and markets
 //! 2. **Balance Polling**: Continuously monitors distributor, sequencer, and market balances
@@ -56,23 +56,23 @@ pub const GAS_LIMIT: u64 = 100000u64;
 pub const WAIT_TIME: u64 = 24; // in seconds, two mainnet blocks
 
 /// Gas fee distributer that manages ETH balances across multiple chains
-/// 
+///
 /// This component handles the complete lifecycle of gas fee management:
 /// - Monitors balances across multiple chains and markets
 /// - Harvests gas fees from market contracts when thresholds are met
 /// - Distributes harvested fees to sequencer addresses
 /// - Performs cross-chain rebalancing via bridge protocols
 /// - Tracks settlement times for bridge transactions
-/// 
+///
 /// ## Balance Management
-/// 
+///
 /// - **Market Balances**: Tracks ETH balances for each market on each chain
 /// - **Distributor Balances**: Monitors distributor ETH balances
 /// - **Sequencer Balances**: Tracks sequencer ETH balances
 /// - **Threshold Management**: Uses configurable minimum and target balances
-/// 
+///
 /// ## Cross-Chain Operations
-/// 
+///
 /// - **Bridge Integration**: Uses Accross protocol for cross-chain transfers
 /// - **Settlement Tracking**: Monitors bridge settlement times
 /// - **Rebalancing Logic**: Automatically bridges ETH when needed
@@ -120,27 +120,27 @@ pub struct GasFeeDistributer {
 
 impl GasFeeDistributer {
     /// Creates and starts a new gas fee distributer
-    /// 
+    ///
     /// This method initializes the gas fee distributer and immediately starts
     /// the balance polling and distribution process. It sets up balance tracking
     /// for all configured chains and markets, then begins the continuous
     /// monitoring and distribution loop.
-    /// 
+    ///
     /// ## Initialization Process
-    /// 
+    ///
     /// 1. **Balance Tracking Setup**: Initializes balance tracking for all chains
     /// 2. **Market Balance Initialization**: Sets up market balance tracking
     /// 3. **Distributor Balance Setup**: Initializes distributor balance tracking
     /// 4. **Sequencer Balance Setup**: Initializes sequencer balance tracking
     /// 5. **Configuration Loading**: Loads Accross settlement time from environment
-    /// 
+    ///
     /// ## Continuous Operations
-    /// 
+    ///
     /// - **Balance Polling**: Continuously monitors all balances
     /// - **Gas Fee Harvesting**: Withdraws fees when thresholds are met
     /// - **Sequencer Distribution**: Sends fees to sequencers
     /// - **Cross-Chain Rebalancing**: Bridges ETH between chains
-    /// 
+    ///
     /// # Arguments
     /// * `chains` - List of chain IDs to monitor
     /// * `markets_per_chain` - Mapping of chain ID to market addresses
@@ -155,10 +155,10 @@ impl GasFeeDistributer {
     /// * `minimum_harvest_balance_per_chain` - Minimum harvest balance per chain
     /// * `bridge_fee_percentage` - Bridge fee percentage for cross-chain transfers
     /// * `min_amount_to_bridge` - Minimum amount to bridge
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let distributer = GasFeeDistributer::new(
@@ -197,7 +197,7 @@ impl GasFeeDistributer {
         let mut balances = HashMap::new();
         let mut distributor_balances = HashMap::new();
         let mut sequencer_balances = HashMap::new();
-        
+
         for &chain_id in &chains {
             let mut market_balances = HashMap::new();
             if let Some(markets) = markets_per_chain.get(&chain_id) {
@@ -209,14 +209,14 @@ impl GasFeeDistributer {
             distributor_balances.insert(chain_id, U256::from(0u64));
             sequencer_balances.insert(chain_id, U256::from(0u64));
         }
-        
+
         let cross_chain_rebalance = Vec::new();
         let accross_settlement_time = std::env::var("ACCROSS_SETTLEMENT_TIME")
             .expect("ACCROSS_SETTLEMENT_TIME must be set in .env")
             .parse()
             .expect("ACCROSS_SETTLEMENT_TIME must be a u64");
         let accross_timer = None;
-        
+
         let mut distributer = GasFeeDistributer {
             chains,
             markets_per_chain,
@@ -241,42 +241,42 @@ impl GasFeeDistributer {
 
         // Start the continuous polling and distribution process
         distributer.start_polling_balances().await;
-        
+
         Ok(())
     }
 
     /// Starts the continuous polling process for balances across all configured chains
-    /// 
+    ///
     /// This method sets up a polling interval and begins a loop that:
     /// 1. Polls balances for all configured chains
     /// 2. Updates the internal balance tracking structures
     /// 3. Distributes gas fees to sequencers when thresholds are met
     /// 4. Handles cross-chain rebalancing
-    /// 
+    ///
     /// The polling interval is controlled by `self.poll_interval_secs`.
     pub async fn start_polling_balances(&mut self) {
         let mut interval = time::interval(std::time::Duration::from_secs(self.poll_interval_secs));
-        
+
         loop {
             info!("Gas Fee Balances: {:?}", self.balances);
             interval.tick().await;
-            
+
             // Poll balances for all configured chains
             let chains_to_poll = self.chains.clone();
             for &chain_id in &chains_to_poll {
                 self.poll_chain_balances(chain_id).await;
             }
-            
+
             // Distribute gas fees after polling all chains
             self.distribute_gas_fees().await;
         }
     }
 
     /// Polls balances for a specific chain
-    /// 
+    ///
     /// This method updates distributor, sequencer, and market balances for a given chain
     /// using the provider helper for reliable connections.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to poll balances for
     async fn poll_chain_balances(&mut self, chain_id: u64) {
@@ -292,18 +292,21 @@ impl GasFeeDistributer {
         let provider_config = ProviderConfig {
             primary_url: rpc_url.clone(),
             fallback_url: rpc_url.clone(), // Use same URL as fallback for now
-            max_block_delay_secs: 300, // 5 minutes
+            max_block_delay_secs: 300,     // 5 minutes
             chain_id,
             use_websocket: false, // Use HTTP for balance polling
         };
 
         let mut provider_state = ProviderState::new(provider_config);
-        
+
         // Get fresh provider with fallback logic
         let (provider, _is_fallback) = match provider_state.get_fresh_provider().await {
             Ok(result) => result,
             Err(e) => {
-                error!("Failed to get fresh provider for chain {}: {:?}", chain_id, e);
+                error!(
+                    "Failed to get fresh provider for chain {}: {:?}",
+                    chain_id, e
+                );
                 return;
             }
         };
@@ -314,7 +317,10 @@ impl GasFeeDistributer {
                 self.distributor_balances.insert(chain_id, balance);
             }
             Err(e) => {
-                error!("Failed to get distributor balance on chain {}: {}", chain_id, e);
+                error!(
+                    "Failed to get distributor balance on chain {}: {}",
+                    chain_id, e
+                );
             }
         }
 
@@ -324,7 +330,10 @@ impl GasFeeDistributer {
                 self.sequencer_balances.insert(chain_id, balance);
             }
             Err(e) => {
-                error!("Failed to get sequencer balance on chain {}: {}", chain_id, e);
+                error!(
+                    "Failed to get sequencer balance on chain {}: {}",
+                    chain_id, e
+                );
             }
         }
 
@@ -338,7 +347,10 @@ impl GasFeeDistributer {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to get balance for market {:?} on chain {}: {}", market, chain_id, e);
+                        error!(
+                            "Failed to get balance for market {:?} on chain {}: {}",
+                            market, chain_id, e
+                        );
                     }
                 }
             }
@@ -346,7 +358,7 @@ impl GasFeeDistributer {
     }
 
     /// Distributes gas fees across configured chains
-    /// 
+    ///
     /// This method:
     /// 1. Identifies chains that need to withdraw gas fees (below minimum threshold)
     /// 2. For each chain, it calls `withdraw_gas_fees` to withdraw fees
@@ -382,7 +394,7 @@ impl GasFeeDistributer {
         // Cross-chain rebalance section
         // Wait for settlement time before starting cross-chain rebalance
         tokio::time::sleep(Duration::from_secs(WAIT_TIME)).await;
-        
+
         let mut rebalance_pairs = Vec::new();
         for &chain_id in &self.cross_chain_rebalance {
             for &other_chain_id in &self.chains {
@@ -411,7 +423,7 @@ impl GasFeeDistributer {
     }
 
     /// Withdraws gas fees from markets on a given chain
-    /// 
+    ///
     /// This method:
     /// 1. Creates a provider for the specified chain
     /// 2. Retrieves the minimum harvest balance for the chain
@@ -420,7 +432,7 @@ impl GasFeeDistributer {
     /// 4. For each market, it calls `IMaldaMarket::withdrawGasFees` to initiate the withdrawal
     /// 5. Sets gas parameters for the transaction
     /// 6. Sends the transaction and updates the distributor balance
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to withdraw gas fees from
     pub async fn withdraw_gas_fees(&mut self, chain_id: u64) {
@@ -503,13 +515,16 @@ impl GasFeeDistributer {
                 }
             }
             Err(e) => {
-                error!("Failed to update distributor balance on chain {}: {}", chain_id, e);
+                error!(
+                    "Failed to update distributor balance on chain {}: {}",
+                    chain_id, e
+                );
             }
         }
     }
 
     /// Sends ETH from the distributor to the sequencer on a given chain
-    /// 
+    ///
     /// This method:
     /// 1. Creates a provider for the specified chain
     /// 2. Retrieves distributor and sequencer balances for the chain
@@ -519,7 +534,7 @@ impl GasFeeDistributer {
     /// 6. Builds the transaction with appropriate gas parameters
     /// 7. Sends the transaction and updates balances
     /// 8. If the sequencer is still below minimum, adds to cross_chain_rebalance
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to send fees to sequencer on
     pub async fn send_to_sequencer(&mut self, chain_id: u64) {
@@ -577,7 +592,10 @@ impl GasFeeDistributer {
 
         // Skip if sequencer is already at or close to target
         if needed < _min_sequencer / U256::from(5u64) {
-            info!("Sequencer already at or above target (or close enough) on chain {}", chain_id);
+            info!(
+                "Sequencer already at or above target (or close enough) on chain {}",
+                chain_id
+            );
             return;
         }
 
@@ -632,7 +650,8 @@ impl GasFeeDistributer {
         tokio::time::sleep(Duration::from_secs(WAIT_TIME)).await;
 
         // Update balances after sending
-        self.update_balances_after_transaction(chain_id, &provider).await;
+        self.update_balances_after_transaction(chain_id, &provider)
+            .await;
 
         // Check if sequencer is still below minimum and add to cross-chain rebalance if needed
         let updated_seq = self
@@ -648,7 +667,7 @@ impl GasFeeDistributer {
     }
 
     /// Performs cross-chain gas distribution
-    /// 
+    ///
     /// This method:
     /// 1. Retrieves distributor and sequencer balances for the source chain
     /// 2. Retrieves distributor and sequencer balances for the target chain
@@ -656,7 +675,7 @@ impl GasFeeDistributer {
     /// 4. Calculates how much is needed on the target chain
     /// 5. Determines the amount to send
     /// 6. If the amount is sufficient, it calls `bridge_via_accross` to initiate the bridge
-    /// 
+    ///
     /// # Arguments
     /// * `src_chain_id` - Source chain ID for the cross-chain transfer
     /// * `target_chain_id` - Target chain ID for the cross-chain transfer
@@ -719,11 +738,12 @@ impl GasFeeDistributer {
             return;
         }
 
-        self.bridge_via_accross(src_chain_id, target_chain_id, to_send).await;
+        self.bridge_via_accross(src_chain_id, target_chain_id, to_send)
+            .await;
     }
 
     /// Bridges ETH between two chains via the Accross protocol
-    /// 
+    ///
     /// This method:
     /// 1. Determines the spoke pool address for the source chain
     /// 2. Creates a provider for the source chain
@@ -735,7 +755,7 @@ impl GasFeeDistributer {
     /// 8. Calls `IAccross::depositV3` to initiate the bridge
     /// 9. Sets gas parameters for the transaction
     /// 10. Sends the transaction and watches for confirmation
-    /// 
+    ///
     /// # Arguments
     /// * `src_chain_id` - Source chain ID for the bridge
     /// * `target_chain_id` - Target chain ID for the bridge
@@ -766,7 +786,9 @@ impl GasFeeDistributer {
         };
 
         // Create provider for the source chain
-        let provider = self.create_signed_provider_for_chain(src_chain_id, rpc_url).await;
+        let provider = self
+            .create_signed_provider_for_chain(src_chain_id, rpc_url)
+            .await;
         if provider.is_none() {
             return;
         }
@@ -805,7 +827,10 @@ impl GasFeeDistributer {
         let buffer = match contract.depositQuoteTimeBuffer().call().await {
             Ok(b) => b,
             Err(e) => {
-                error!("[BRIDGE] Failed to get depositQuoteTimeBuffer from contract: {}", e);
+                error!(
+                    "[BRIDGE] Failed to get depositQuoteTimeBuffer from contract: {}",
+                    e
+                );
                 return;
             }
         };
@@ -846,24 +871,29 @@ impl GasFeeDistributer {
 
         // Create the bridge transaction
         let call = contract.depositV3(
-            self.public_address,                                   // depositor
-            self.public_address,                                   // recipient (distributor on target chain)
-            wrapped_native_token_in,                              // inputToken (WETH address)
-            wrapped_native_token_out,                             // outputToken (WETH address)
-            amount,                                               // inputAmount
-            output_amount,                                        // outputAmount (amount minus fee)
-            target_chain_id_u256,                                 // destinationChainId
-            Address::ZERO,                                        // exclusiveRelayer
-            quote_timestamp,                                      // quoteTimestamp
-            fill_deadline,                                        // fillDeadline
-            exclusivity_deadline,                                 // exclusivityDeadline
-            Bytes::from_static(b""),                             // message
+            self.public_address,      // depositor
+            self.public_address,      // recipient (distributor on target chain)
+            wrapped_native_token_in,  // inputToken (WETH address)
+            wrapped_native_token_out, // outputToken (WETH address)
+            amount,                   // inputAmount
+            output_amount,            // outputAmount (amount minus fee)
+            target_chain_id_u256,     // destinationChainId
+            Address::ZERO,            // exclusiveRelayer
+            quote_timestamp,          // quoteTimestamp
+            fill_deadline,            // fillDeadline
+            exclusivity_deadline,     // exclusivityDeadline
+            Bytes::from_static(b""),  // message
         );
 
-        info!("[BRIDGE] Sending depositV3 transaction with msg.value={}...", amount);
+        info!(
+            "[BRIDGE] Sending depositV3 transaction with msg.value={}...",
+            amount
+        );
 
         // Set gas parameters for the transaction
-        let gas_params = self.get_gas_parameters_for_chain(src_chain_id, &provider).await;
+        let gas_params = self
+            .get_gas_parameters_for_chain(src_chain_id, &provider)
+            .await;
         if gas_params.is_none() {
             return;
         }
@@ -895,7 +925,10 @@ impl GasFeeDistributer {
                         error!("[BRIDGE] Bridge tx dropped or errored: {}", e);
                     }
                     Err(_) => {
-                        error!("[BRIDGE] Bridge tx watch timed out for tx_hash={:?}", tx_hash);
+                        error!(
+                            "[BRIDGE] Bridge tx watch timed out for tx_hash={:?}",
+                            tx_hash
+                        );
                     }
                 }
 
@@ -912,66 +945,83 @@ impl GasFeeDistributer {
     }
 
     /// Creates a provider for a given chain ID and RPC URL
-    /// 
+    ///
     /// This method:
     /// 1. Parses the RPC URL to create a `Url` object.
     /// 2. Creates a `ProviderConfig` for the chain.
     /// 3. Creates a `ProviderState` with the config.
     /// 4. Attempts to get a fresh provider from `ProviderState`.
     /// 5. Returns the provider if successful, otherwise returns `None`.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to create provider for
     /// * `rpc_url` - RPC URL for the chain
-    /// 
+    ///
     /// # Returns
     /// * `Option<ProviderType>` - A fresh provider for the chain, or `None` on error
-    async fn create_provider_for_chain(&self, chain_id: u64, rpc_url: &str) -> Option<ProviderType> {
+    async fn create_provider_for_chain(
+        &self,
+        chain_id: u64,
+        rpc_url: &str,
+    ) -> Option<ProviderType> {
         let Ok(url) = Url::parse(rpc_url) else {
-            error!("Failed to parse RPC URL for chain {}: {}", chain_id, rpc_url);
+            error!(
+                "Failed to parse RPC URL for chain {}: {}",
+                chain_id, rpc_url
+            );
             return None;
         };
 
         let provider_config = ProviderConfig {
             primary_url: url.to_string(),
             fallback_url: url.to_string(), // Use same URL as fallback for now
-            max_block_delay_secs: 300, // 5 minutes
+            max_block_delay_secs: 300,     // 5 minutes
             chain_id,
             use_websocket: false, // Use HTTP for balance polling
         };
 
         let mut provider_state = ProviderState::new(provider_config);
-        
+
         match provider_state.get_fresh_provider().await {
             Ok(result) => {
                 let (provider, _is_fallback) = result;
                 Some(provider)
             }
             Err(e) => {
-                error!("Failed to get fresh provider for chain {}: {:?}", chain_id, e);
+                error!(
+                    "Failed to get fresh provider for chain {}: {:?}",
+                    chain_id, e
+                );
                 None
             }
         }
     }
 
     /// Retrieves gas parameters (base fee and priority fee) for a given chain.
-    /// 
+    ///
     /// This method:
     /// 1. Gets the current gas price from the provider.
     /// 2. Calculates base fee and priority fee based on the chain ID.
     /// 3. Returns a tuple of `(base_fee_per_gas, priority_fee_per_gas)`.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to get gas parameters for
     /// * `provider` - Provider instance for the chain
-    /// 
+    ///
     /// # Returns
     /// * `Option<(u128, u128)>` - A tuple of base and priority fees, or `None` on error
-    async fn get_gas_parameters_for_chain(&self, chain_id: u64, provider: &ProviderType) -> Option<(u128, u128)> {
+    async fn get_gas_parameters_for_chain(
+        &self,
+        chain_id: u64,
+        provider: &ProviderType,
+    ) -> Option<(u128, u128)> {
         let base_fee_per_gas = match provider.get_gas_price().await {
             Ok(fee) => fee,
             Err(e) => {
-                error!("[GET_GAS_PARAMETERS_FOR_CHAIN] Failed to get gas price: {}", e);
+                error!(
+                    "[GET_GAS_PARAMETERS_FOR_CHAIN] Failed to get gas price: {}",
+                    e
+                );
                 return None;
             }
         };
@@ -988,12 +1038,12 @@ impl GasFeeDistributer {
     }
 
     /// Updates the distributor and sequencer balances for a given chain after a transaction.
-    /// 
+    ///
     /// This method:
     /// 1. Creates a provider for the chain.
     /// 2. Retrieves the current balances for distributor and sequencer.
     /// 3. Updates the internal balance tracking structures.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to update balances for
     /// * `provider` - Provider instance for the chain
@@ -1005,7 +1055,10 @@ impl GasFeeDistributer {
                 }
             }
             Err(e) => {
-                error!("Failed to update distributor balance on chain {}: {}", chain_id, e);
+                error!(
+                    "Failed to update distributor balance on chain {}: {}",
+                    chain_id, e
+                );
             }
         }
         match provider.get_balance(self.sequencer_address).await {
@@ -1015,25 +1068,35 @@ impl GasFeeDistributer {
                 }
             }
             Err(e) => {
-                error!("Failed to update sequencer balance on chain {}: {}", chain_id, e);
+                error!(
+                    "Failed to update sequencer balance on chain {}: {}",
+                    chain_id, e
+                );
             }
         }
     }
 
     /// Creates a signed provider for a given chain ID and RPC URL
-    /// 
+    ///
     /// This method creates a provider with signing capabilities for transaction submission.
     /// It uses the private key from the distributer configuration.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to create provider for
     /// * `rpc_url` - RPC URL for the chain
-    /// 
+    ///
     /// # Returns
     /// * `Option<ProviderType>` - A signed provider for the chain, or `None` on error
-    async fn create_signed_provider_for_chain(&self, chain_id: u64, rpc_url: &str) -> Option<ProviderType> {
+    async fn create_signed_provider_for_chain(
+        &self,
+        chain_id: u64,
+        rpc_url: &str,
+    ) -> Option<ProviderType> {
         let Ok(url) = Url::parse(rpc_url) else {
-            error!("Failed to parse RPC URL for chain {}: {}", chain_id, rpc_url);
+            error!(
+                "Failed to parse RPC URL for chain {}: {}",
+                chain_id, rpc_url
+            );
             return None;
         };
 
@@ -1052,23 +1115,25 @@ impl GasFeeDistributer {
     }
 
     /// Gets the wrapped native token address for a given chain ID
-    /// 
+    ///
     /// This method retrieves the wrapped native token (WETH) address for a given chain
     /// from environment variables.
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to get wrapped native token address for
-    /// 
+    ///
     /// # Returns
     /// * `Option<Address>` - Wrapped native token address, or `None` on error
     async fn get_wrapped_native_token_address(&self, chain_id: u64) -> Option<Address> {
         let wrapped_native_token = match chain_id {
             ETHEREUM_CHAIN_ID => env::var("ETHEREUM_WETH_ADDRESS")
                 .expect("ETHEREUM_WETH_ADDRESS must be set in .env"),
-            BASE_CHAIN_ID => env::var("BASE_WETH_ADDRESS")
-                .expect("BASE_WETH_ADDRESS must be set in .env"),
-            LINEA_CHAIN_ID => env::var("LINEA_WETH_ADDRESS")
-                .expect("LINEA_WETH_ADDRESS must be set in .env"),
+            BASE_CHAIN_ID => {
+                env::var("BASE_WETH_ADDRESS").expect("BASE_WETH_ADDRESS must be set in .env")
+            }
+            LINEA_CHAIN_ID => {
+                env::var("LINEA_WETH_ADDRESS").expect("LINEA_WETH_ADDRESS must be set in .env")
+            }
             _ => {
                 error!("Unsupported chain ID for WETH: {}", chain_id);
                 return None;

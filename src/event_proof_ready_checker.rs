@@ -1,9 +1,9 @@
 //! # Event Proof Ready Checker Module
-//! 
+//!
 //! This module provides a proof readiness checker that monitors block numbers
 //! across multiple chains and determines when events are ready for proof generation.
 //! It handles special cases like Ethereum block numbers via Optimism L1 block contracts.
-//! 
+//!
 //! ## Key Features:
 //! - **Multi-Chain Block Monitoring**: Tracks block numbers across multiple chains
 //! - **Proof Readiness Detection**: Determines when events are ready for proof generation
@@ -11,7 +11,7 @@
 //! - **Provider Fallback**: Uses provider helper for reliable blockchain connections
 //! - **Database Integration**: Updates event status in the database
 //! - **Concurrent Processing**: Handles multiple chains simultaneously
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! EventProofReadyChecker::new()
@@ -22,7 +22,7 @@
 //! ├── Provider Management: Uses provider helper for connections
 //! └── Concurrent Processing: Multiple chains processed in parallel
 //! ```
-//! 
+//!
 //! ## Workflow:
 //! 1. **Initialization**: Sets up block number tracking for all configured chains
 //! 2. **Block Monitoring**: Continuously polls block numbers from each chain
@@ -31,10 +31,7 @@
 //! 5. **Special Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
 //! 6. **Error Recovery**: Handles connection failures and provider fallbacks
 
-use alloy::{
-    primitives::Address,
-    providers::Provider,
-};
+use alloy::{primitives::Address, providers::Provider};
 use eyre::Result;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -44,10 +41,12 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
-use crate::types::IL1Block::new;
-use malda_rs::constants::{ETHEREUM_CHAIN_ID, OPTIMISM_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID};
-use sequencer::database::Database;
 use crate::provider_helper::{ProviderConfig, ProviderState};
+use crate::types::IL1Block::new;
+use malda_rs::constants::{
+    ETHEREUM_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID, OPTIMISM_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID,
+};
+use sequencer::database::Database;
 
 // Define a type for the block number map
 type BlockNumberMap = HashMap<u64, AtomicI32>;
@@ -58,7 +57,7 @@ lazy_static! {
 }
 
 /// Configuration for a single chain in the event proof ready checker
-/// 
+///
 /// This struct contains all necessary parameters for monitoring
 /// block numbers on a specific blockchain network, including
 /// RPC endpoints, chain type, and timing parameters.
@@ -78,22 +77,22 @@ pub struct ChainConfig {
 const L1_BLOCK_ADDRESS_OPTIMISM: &str = "0x4200000000000000000000000000000000000015";
 
 /// Manages block number tracking and event proof readiness across multiple chains
-/// 
+///
 /// The event proof ready checker continuously monitors block numbers on different
 /// chains and updates the database when events are ready for proof generation.
 /// It handles special cases like Ethereum block numbers via Optimism L1 block contracts.
-/// 
+///
 /// ## Key Responsibilities:
-/// 
+///
 /// - **Block Number Monitoring**: Tracks current block numbers for all configured chains
 /// - **Proof Readiness Detection**: Determines when events are ready for proof generation
 /// - **Database Integration**: Updates event status in the database
 /// - **Special Chain Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
 /// - **Provider Management**: Uses provider helper for reliable blockchain connections
 /// - **Concurrent Processing**: Handles multiple chains simultaneously
-/// 
+///
 /// ## Block Number Management:
-/// 
+///
 /// - **Thread-Safe Storage**: Uses atomic integers for thread-safe block number storage
 /// - **Global Access**: Provides global access to block numbers via lazy static
 /// - **Concurrent Updates**: Supports concurrent updates from multiple chains
@@ -102,33 +101,33 @@ pub struct EventProofReadyChecker;
 
 impl EventProofReadyChecker {
     /// Creates and starts a new event proof ready checker
-    /// 
+    ///
     /// This method initializes the checker and immediately starts
     /// the polling loop. It runs indefinitely until an error occurs.
-    /// 
+    ///
     /// ## Initialization Process:
-    /// 
+    ///
     /// 1. **Block Number Setup**: Initializes block number tracking for all chains
     /// 2. **Provider Configuration**: Sets up provider states for each chain
     /// 3. **Polling Loop**: Starts continuous block number monitoring
     /// 4. **Database Integration**: Connects to database for event status updates
-    /// 
+    ///
     /// ## Concurrent Operations:
-    /// 
+    ///
     /// - **Block Monitoring**: Continuously polls block numbers from each chain
     /// - **Readiness Detection**: Checks if events are ready for proof generation
     /// - **Database Updates**: Updates event status when ready
     /// - **Special Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
-    /// 
+    ///
     /// # Arguments
     /// * `db` - Database connection for event status updates
     /// * `poll_interval` - Interval between event readiness checks
     /// * `block_update_interval` - Interval between block number updates
     /// * `chain_configs` - Vector of chain configurations to monitor
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let db = Database::new("connection_string").await?;
@@ -141,7 +140,10 @@ impl EventProofReadyChecker {
         block_update_interval: Duration,
         chain_configs: Vec<ChainConfig>,
     ) -> Result<()> {
-        info!("Starting event proof ready checker with {} chains", chain_configs.len());
+        info!(
+            "Starting event proof ready checker with {} chains",
+            chain_configs.len()
+        );
 
         // Initialize the block number map with default values for all supported chains
         {
@@ -238,13 +240,16 @@ impl EventProofReadyChecker {
                 if let Ok((provider, _)) = state.get_fresh_provider().await {
                     if let Ok(block_number) = provider.get_block_number().await {
                         let block_number_i32 = block_number as i32;
-                        
+
                         // Update the block number in the map
                         {
                             let block_numbers = BLOCK_NUMBERS.lock().unwrap();
                             if let Some(atomic) = block_numbers.get(chain_id) {
                                 atomic.store(block_number_i32, Ordering::SeqCst);
-                                debug!("Updated block number for chain {}: {}", chain_id, block_number_i32);
+                                debug!(
+                                    "Updated block number for chain {}: {}",
+                                    chain_id, block_number_i32
+                                );
                                 current_block_map.insert(*chain_id, block_number_i32);
                             }
                         }

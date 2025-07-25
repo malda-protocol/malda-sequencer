@@ -1,9 +1,9 @@
 //! # Batch Event Listener Module
-//! 
+//!
 //! This module provides a batch event listener that monitors blockchain events for batch processing
 //! success and failure events across multiple chains. It handles both normal and retarded event
 //! processing with unified filtering and parallel chain processing.
-//! 
+//!
 //! ## Key Features:
 //! - **Multi-Chain Support**: Processes events across multiple chains in parallel
 //! - **Unified Event Filtering**: Single filter for both success and failure events
@@ -11,7 +11,7 @@
 //! - **Provider Management**: Uses provider helper for reliable blockchain connections
 //! - **Retry Logic**: Implements exponential backoff for connection failures
 //! - **Event Separation**: Automatically separates success/failure events by topic
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! BatchEventListener::new()
@@ -22,7 +22,7 @@
 //! ├── Database Updates: Update finished_events table
 //! └── Provider Management: Use provider helper for connections
 //! ```
-//! 
+//!
 //! ## Workflow:
 //! 1. **Initialization**: Creates tasks for each configured chain
 //! 2. **Parallel Processing**: Each chain runs in its own task
@@ -38,22 +38,23 @@ use alloy::{
     rpc::types::Filter,
 };
 use eyre::Result;
+use futures;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 use std::vec::Vec;
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info};
-use futures;
 
 use crate::events::{
-    parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG, BATCH_PROCESS_SUCCESS_SIG,
+    parse_batch_process_failed_event, parse_batch_process_success_event, BATCH_PROCESS_FAILED_SIG,
+    BATCH_PROCESS_SUCCESS_SIG,
 };
+use crate::provider_helper::{ProviderConfig, ProviderState, ProviderType};
 use alloy::primitives::keccak256;
 use sequencer::database::{Database, EventStatus};
-use crate::provider_helper::{ProviderConfig, ProviderState, ProviderType};
 
 /// Configuration for a single chain in the batch event listener
-/// 
+///
 /// This struct contains all necessary parameters for monitoring batch events
 /// on a specific chain, including connection details and processing settings.
 #[derive(Debug, Clone)]
@@ -75,7 +76,7 @@ pub struct ChainConfig {
 }
 
 /// Configuration for batch event listening on multiple chains
-/// 
+///
 /// This struct holds configurations for all chains that should be monitored
 /// by the batch event listener. Each chain will be processed in parallel.
 #[derive(Debug, Clone)]
@@ -85,21 +86,21 @@ pub struct BatchEventConfig {
 }
 
 /// Batch event listener that processes success/failure events across multiple chains
-/// 
+///
 /// This component monitors blockchain events for batch processing success and failure
 /// events. It operates with parallel processing for multiple chains and implements
 /// fault isolation - if one chain fails, others continue processing.
-/// 
+///
 /// ## Processing Strategy
-/// 
+///
 /// - **Parallel Processing**: Each chain runs in its own spawned task
 /// - **Unified Filtering**: Single filter captures both success and failure events
 /// - **Event Separation**: Logs are separated by topic[0] signature hash
 /// - **Database Updates**: Events are moved to finished_events table
 /// - **Retry Logic**: Exponential backoff for connection failures
-/// 
+///
 /// ## Error Handling
-/// 
+///
 /// - Individual chain failures don't affect other chains
 /// - Connection failures trigger retry with exponential backoff
 /// - Database errors are logged but don't stop processing
@@ -108,32 +109,32 @@ pub struct BatchEventListener;
 
 impl BatchEventListener {
     /// Creates and starts a batch event listener for multiple chains
-    /// 
+    ///
     /// This method initializes the batch event listener and spawns independent
     /// tasks for each configured chain. Each chain processes events independently
     /// with its own retry logic and fault isolation.
-    /// 
+    ///
     /// ## Parallel Processing
-    /// 
+    ///
     /// - Each chain runs in its own `tokio::spawn` task
     /// - Tasks run concurrently for optimal performance
     /// - Failures on one chain don't affect others
     /// - All tasks are awaited with `futures::future::join_all`
-    /// 
+    ///
     /// ## Fault Isolation
-    /// 
+    ///
     /// - Each chain has independent error handling
     /// - Connection failures are isolated per chain
     /// - Database errors don't propagate across chains
     /// - Provider issues are handled independently
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Batch event listener configuration with chain configs
     /// * `db` - Database connection for event updates
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let config = BatchEventConfig {
@@ -143,57 +144,59 @@ impl BatchEventListener {
     /// BatchEventListener::new(config, db).await?;
     /// ```
     pub async fn new(config: BatchEventConfig, db: Database) -> Result<()> {
-        info!("Starting batch event listener for {} chains", config.chain_configs.len());
+        info!(
+            "Starting batch event listener for {} chains",
+            config.chain_configs.len()
+        );
 
         let mut tasks = Vec::new();
-        
+
         // Spawn independent task for each chain
         for chain_config in config.chain_configs {
             let db_clone = db.clone();
-            let task = tokio::spawn(async move {
-                Self::process_chain(chain_config, db_clone).await
-            });
+            let task =
+                tokio::spawn(async move { Self::process_chain(chain_config, db_clone).await });
             tasks.push(task);
         }
 
         // Wait for all tasks to complete (they shouldn't unless there's an error)
         futures::future::join_all(tasks).await;
-        
+
         Ok(())
     }
 
     /// Processes events for a single chain
-    /// 
+    ///
     /// This function implements the core event processing logic for a single chain.
     /// It sets up a unified filter for both success and failure events, manages
     /// provider connections, and implements retry logic with exponential backoff.
-    /// 
+    ///
     /// ## Processing Flow
-    /// 
+    ///
     /// 1. **Filter Setup**: Creates unified filter for success/failure events
     /// 2. **Provider Management**: Uses provider helper for reliable connections
     /// 3. **Block Processing**: Processes blocks with configurable delay
     /// 4. **Event Processing**: Separates and processes events by type
     /// 5. **Database Updates**: Updates event status in the database
-    /// 
+    ///
     /// ## Retry Logic
-    /// 
+    ///
     /// - Implements exponential backoff starting at 1 second
     /// - Doubles delay on each retry attempt
     /// - Gives up after reaching max_retries (5 attempts)
     /// - Resets retry count on successful operations
-    /// 
+    ///
     /// ## Block Processing
-    /// 
+    ///
     /// - Processes blocks with configurable delay (block_delay)
     /// - Tracks last processed block to avoid duplicates
     /// - Handles chain reorganization gracefully
     /// - Processes blocks in ranges for efficiency
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Chain configuration with connection and processing settings
     /// * `db` - Database connection for event updates
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
     async fn process_chain(config: ChainConfig, db: Database) -> Result<()> {
@@ -299,7 +302,9 @@ impl BatchEventListener {
                     target_block,
                     &db,
                     &config,
-                ).await {
+                )
+                .await
+                {
                     error!("Failed to process block range: {:?}", e);
                     if retry_count >= max_retries {
                         error!("Max retries reached, giving up on reconnection");
@@ -325,24 +330,24 @@ impl BatchEventListener {
     }
 
     /// Processes events for a specific block range
-    /// 
+    ///
     /// This function handles the processing of events within a specific block range.
     /// It fetches logs using the unified filter, separates them by event type,
     /// and updates the database with the processed events.
-    /// 
+    ///
     /// ## Processing Steps
-    /// 
+    ///
     /// 1. **Log Fetching**: Gets all logs for the block range using unified filter
     /// 2. **Timestamp Collection**: Fetches block timestamps for event processing
     /// 3. **Event Separation**: Separates logs into success and failure events
     /// 4. **Database Updates**: Updates event status in the database
-    /// 
+    ///
     /// ## Error Handling
-    /// 
+    ///
     /// - Provider errors are propagated up for retry logic
     /// - Database errors are logged but don't stop processing
     /// - Invalid logs are skipped with debug logging
-    /// 
+    ///
     /// # Arguments
     /// * `provider` - Provider for blockchain access
     /// * `unified_filter` - Filter for both success and failure events
@@ -350,7 +355,7 @@ impl BatchEventListener {
     /// * `to_block` - Ending block number (inclusive)
     /// * `db` - Database connection for event updates
     /// * `config` - Chain configuration for processing context
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
     async fn process_block_range(
@@ -383,38 +388,56 @@ impl BatchEventListener {
         let (success_logs, failure_logs) = Self::separate_logs_by_event_type(&all_logs);
 
         // Process success events
-        Self::process_batch_events(&success_logs, &block_timestamps, db, config, EventStatus::TxProcessSuccess, "success").await;
+        Self::process_batch_events(
+            &success_logs,
+            &block_timestamps,
+            db,
+            config,
+            EventStatus::TxProcessSuccess,
+            "success",
+        )
+        .await;
 
         // Process failure events
-        Self::process_batch_events(&failure_logs, &block_timestamps, db, config, EventStatus::TxProcessFail, "failure").await;
+        Self::process_batch_events(
+            &failure_logs,
+            &block_timestamps,
+            db,
+            config,
+            EventStatus::TxProcessFail,
+            "failure",
+        )
+        .await;
 
         Ok(())
     }
 
     /// Separates logs by event type using topic[0] signature hash
-    /// 
+    ///
     /// This function analyzes the topic[0] of each log to determine whether it's
     /// a success or failure event. It uses keccak256 hashes of the event signatures
     /// for comparison.
-    /// 
+    ///
     /// ## Event Identification
-    /// 
+    ///
     /// - **Success Events**: Match `BATCH_PROCESS_SUCCESS_SIG` hash
     /// - **Failure Events**: Match `BATCH_PROCESS_FAILED_SIG` hash
     /// - **Unknown Events**: Logged for debugging but not processed
-    /// 
+    ///
     /// ## Hash Comparison
-    /// 
+    ///
     /// - Pre-computes signature hashes for efficiency
     /// - Compares topic[0] as byte slices
     /// - Handles missing topics gracefully
-    /// 
+    ///
     /// # Arguments
     /// * `logs` - All logs from the unified filter
-    /// 
+    ///
     /// # Returns
     /// * `(Vec<alloy::rpc::types::Log>, Vec<alloy::rpc::types::Log>)` - Success and failure logs
-    fn separate_logs_by_event_type(logs: &[alloy::rpc::types::Log]) -> (Vec<alloy::rpc::types::Log>, Vec<alloy::rpc::types::Log>) {
+    fn separate_logs_by_event_type(
+        logs: &[alloy::rpc::types::Log],
+    ) -> (Vec<alloy::rpc::types::Log>, Vec<alloy::rpc::types::Log>) {
         let mut success_logs = Vec::new();
         let mut failure_logs = Vec::new();
 
@@ -425,7 +448,7 @@ impl BatchEventListener {
         for log in logs {
             if let Some(topic0) = log.topics().get(0) {
                 let topic0_bytes = topic0.as_slice();
-                
+
                 // Compare topic[0] with pre-computed hashes
                 if topic0_bytes == success_sig_hash.as_slice() {
                     success_logs.push(log.clone());
@@ -441,29 +464,29 @@ impl BatchEventListener {
     }
 
     /// Gets block timestamps for a range of blocks
-    /// 
+    ///
     /// This function fetches block timestamps for a range of blocks, which are
     /// needed for event processing and database updates. It handles missing blocks
     /// and provider errors gracefully.
-    /// 
+    ///
     /// ## Block Fetching
-    /// 
+    ///
     /// - Fetches each block individually for timestamp extraction
     /// - Handles missing blocks with appropriate error messages
     /// - Continues processing on individual block failures
     /// - Returns HashMap for efficient timestamp lookup
-    /// 
+    ///
     /// ## Error Handling
-    /// 
+    ///
     /// - Missing blocks return specific error messages
     /// - Provider errors are propagated up
     /// - Individual block failures don't stop the entire range
-    /// 
+    ///
     /// # Arguments
     /// * `provider` - Provider for blockchain access
     /// * `from_block` - Starting block number (inclusive)
     /// * `to_block` - Ending block number (inclusive)
-    /// 
+    ///
     /// # Returns
     /// * `Result<HashMap<u64, u64>>` - Block number to timestamp mapping
     async fn get_block_timestamps(
@@ -496,31 +519,31 @@ impl BatchEventListener {
     }
 
     /// Processes batch events and updates database
-    /// 
+    ///
     /// This function processes a batch of events and updates the database with
     /// their status. It handles both success and failure events using pattern
     /// matching on the EventStatus parameter.
-    /// 
+    ///
     /// ## Event Processing
-    /// 
+    ///
     /// - **Success Events**: Extracts init_hash from success event logs
     /// - **Failure Events**: Extracts init_hash from failure event logs
     /// - **Timestamps**: Maps block numbers to timestamps for database updates
     /// - **Database Updates**: Moves events to finished_events table
-    /// 
+    ///
     /// ## Pattern Matching
-    /// 
+    ///
     /// Uses match statements to handle different event types:
     /// - `EventStatus::TxProcessSuccess`: Processes success events
     /// - `EventStatus::TxProcessFail`: Processes failure events
     /// - Other statuses: Logged as unsupported
-    /// 
+    ///
     /// ## Database Operations
-    /// 
+    ///
     /// - Updates event status in finished_events table
     /// - Handles retarded vs normal event processing
     /// - Logs success/failure of database operations
-    /// 
+    ///
     /// # Arguments
     /// * `logs` - Event logs to process
     /// * `block_timestamps` - Block timestamp mapping for event processing
@@ -538,16 +561,14 @@ impl BatchEventListener {
     ) {
         // Extract transaction hashes based on event type
         let events: Vec<TxHash> = match event_status {
-            EventStatus::TxProcessSuccess => {
-                logs.iter()
-                    .map(|log| parse_batch_process_success_event(log).init_hash)
-                    .collect()
-            }
-            EventStatus::TxProcessFail => {
-                logs.iter()
-                    .map(|log| parse_batch_process_failed_event(log).init_hash)
-                    .collect()
-            }
+            EventStatus::TxProcessSuccess => logs
+                .iter()
+                .map(|log| parse_batch_process_success_event(log).init_hash)
+                .collect(),
+            EventStatus::TxProcessFail => logs
+                .iter()
+                .map(|log| parse_batch_process_failed_event(log).init_hash)
+                .collect(),
             _ => {
                 error!("Unsupported event status: {:?}", event_status);
                 return;
@@ -561,22 +582,20 @@ impl BatchEventListener {
 
         // Extract timestamps based on event type
         let timestamps: Vec<i64> = match event_status {
-            EventStatus::TxProcessSuccess => {
-                logs.iter()
-                    .map(|log| {
-                        let event = parse_batch_process_success_event(log);
-                        *block_timestamps.get(&event.block_number).unwrap_or(&0) as i64
-                    })
-                    .collect()
-            }
-            EventStatus::TxProcessFail => {
-                logs.iter()
-                    .map(|log| {
-                        let event = parse_batch_process_failed_event(log);
-                        *block_timestamps.get(&event.block_number).unwrap_or(&0) as i64
-                    })
-                    .collect()
-            }
+            EventStatus::TxProcessSuccess => logs
+                .iter()
+                .map(|log| {
+                    let event = parse_batch_process_success_event(log);
+                    *block_timestamps.get(&event.block_number).unwrap_or(&0) as i64
+                })
+                .collect(),
+            EventStatus::TxProcessFail => logs
+                .iter()
+                .map(|log| {
+                    let event = parse_batch_process_failed_event(log);
+                    *block_timestamps.get(&event.block_number).unwrap_or(&0) as i64
+                })
+                .collect(),
             _ => {
                 error!("Unsupported event status: {:?}", event_status);
                 return;
@@ -592,12 +611,7 @@ impl BatchEventListener {
 
         // Update database with processed events
         if let Err(e) = db
-            .update_finished_events(
-                &events,
-                event_status,
-                &timestamps,
-                config.is_retarded,
-            )
+            .update_finished_events(&events, event_status, &timestamps, config.is_retarded)
             .await
         {
             error!("Failed to update {} events: {:?}", event_type_name, e);
@@ -611,21 +625,21 @@ impl BatchEventListener {
     }
 
     /// Creates provider state for the batch event listener
-    /// 
+    ///
     /// This function creates a ProviderState instance configured for WebSocket
     /// connections, which is optimal for event listening due to real-time
     /// subscription capabilities.
-    /// 
+    ///
     /// ## Configuration
-    /// 
+    ///
     /// - **WebSocket Connection**: Uses WebSocket for real-time event monitoring
     /// - **Primary/Fallback URLs**: Configures both primary and fallback connections
     /// - **Chain-Specific Settings**: Uses chain-specific delay and ID settings
     /// - **Provider Helper Integration**: Leverages shared provider management logic
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Chain configuration with connection details
-    /// 
+    ///
     /// # Returns
     /// * `ProviderState` - Configured provider state for this chain
     fn create_provider_state(config: &ChainConfig) -> ProviderState {

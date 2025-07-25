@@ -1,16 +1,16 @@
 //! # Main Sequencer Module
-//! 
+//!
 //! This module serves as the entry point for the Malda sequencer system. It orchestrates
 //! the startup and coordination of all sequencer components, including event listeners,
 //! proof generators, transaction managers, and auxiliary services.
-//! 
+//!
 //! ## Key Features:
 //! - **System Initialization**: Sets up logging, crypto providers, and environment
 //! - **Configuration Management**: Loads and validates sequencer configuration
 //! - **Component Orchestration**: Starts all sequencer components in parallel
 //! - **Database Management**: Initializes database connections and resets events
 //! - **Graceful Shutdown**: Handles shutdown signals and cleanup
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! Main Function Flow
@@ -22,14 +22,14 @@
 //! ├── Start Components: All sequencer components in parallel
 //! └── Wait for Shutdown: Graceful shutdown handling
 //! ```
-//! 
+//!
 //! ## Component Startup Order:
 //! 1. **Batch Event Listener**: Monitors batch processing events
 //! 2. **Event Listener**: Monitors blockchain events across all chains
 //! 3. **Proof Generator**: Generates ZK proofs for events
 //! 4. **Transaction Manager**: Submits transactions to destination chains
 //! 5. **Auxiliary Components**: Lane manager, proof checker, reset manager, gas distributor
-//! 
+//!
 //! ## Error Handling:
 //! - Configuration errors are propagated to main
 //! - Database initialization errors are handled gracefully
@@ -50,7 +50,6 @@ pub mod types;
 use crate::config::*;
 
 mod event_listener;
-
 
 mod proof_generator;
 use proof_generator::ProofGenerator;
@@ -78,11 +77,11 @@ mod gas_fee_distributer;
 mod provider_helper;
 
 /// Main entry point for the Malda sequencer system
-/// 
+///
 /// This function orchestrates the complete startup sequence for the sequencer,
 /// including system initialization, configuration loading, database setup,
 /// and starting all sequencer components in parallel.
-/// 
+///
 /// ## Workflow:
 /// 1. **System Initialization**: Set up logging, crypto providers, and environment
 /// 2. **Configuration Loading**: Load and validate sequencer configuration
@@ -91,12 +90,12 @@ mod provider_helper;
 /// 5. **Database Setup**: Initialize database connection and reset events
 /// 6. **Component Startup**: Start all sequencer components in parallel
 /// 7. **Shutdown Handling**: Wait for shutdown signal and cleanup
-/// 
+///
 /// ## Error Handling:
 /// - Returns `Result<(), Box<dyn std::error::Error>>` for comprehensive error handling
 /// - Configuration errors are propagated to caller
 /// - Component failures are logged but don't stop the system
-/// 
+///
 /// ## Example:
 /// ```rust
 /// #[tokio::main]
@@ -109,46 +108,46 @@ mod provider_helper;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 1: Initialize system dependencies (logging, crypto, environment)
     initialize_system()?;
-    
+
     // Step 2: Load and validate sequencer configuration
     let config = load_configuration()?;
-    
+
     // Step 3: Print configuration summary for deployment scripts
     print_configuration_summary(&config);
-    
+
     // Step 4: Log detailed configuration information for debugging
     log_configuration_details(&config);
-    
+
     // Step 5: Initialize database connection and reset events
     let db = initialize_database(&config).await?;
-    
+
     // Step 6: Start all sequencer components in parallel
     start_all_sequencer_components(config, db).await?;
-    
+
     // Step 7: Wait for shutdown signal and cleanup
     wait_for_shutdown().await;
-    
+
     Ok(())
 }
 
 /// Initialize system dependencies and logging infrastructure
-/// 
+///
 /// This function sets up the foundational components required for the sequencer
 /// to operate, including the crypto provider, logging system, and environment
 /// variables.
-/// 
+///
 /// ## Initialization Steps:
 /// 1. **Crypto Provider**: Install rustls crypto provider for secure connections
 /// 2. **Logging System**: Configure tracing subscriber with file/line info
 /// 3. **Environment Variables**: Load .env file for configuration
-/// 
+///
 /// ## Error Handling:
 /// - Crypto provider installation failures are fatal (expect)
 /// - Environment loading is optional (dotenv::dotenv().ok())
-/// 
+///
 /// # Returns
 /// * `Result<()>` - Success or error status
-/// 
+///
 /// # Example
 /// ```rust
 /// initialize_system()?;
@@ -158,7 +157,7 @@ fn initialize_system() -> Result<()> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
-    
+
     // Configure tracing subscriber with detailed logging
     tracing_subscriber::fmt()
         .with_env_filter("info")
@@ -170,29 +169,29 @@ fn initialize_system() -> Result<()> {
 
     // Load environment variables from .env file (optional)
     dotenv::dotenv().ok();
-    
+
     Ok(())
 }
 
 /// Load and validate sequencer configuration
-/// 
+///
 /// This function loads the sequencer configuration from environment variables
 /// and validates that all required settings are present and correct.
-/// 
+///
 /// ## Configuration Sources:
 /// - Environment variables (loaded from .env file)
 /// - Chain-specific configurations
 /// - Database connection settings
 /// - Component-specific parameters
-/// 
+///
 /// ## Validation:
 /// - Ensures all required environment variables are set
 /// - Validates chain configurations
 /// - Checks database connection parameters
-/// 
+///
 /// # Returns
 /// * `Result<SequencerConfig>` - Validated configuration or error
-/// 
+///
 /// # Example
 /// ```rust
 /// let config = load_configuration()?;
@@ -202,24 +201,24 @@ fn load_configuration() -> Result<SequencerConfig> {
 }
 
 /// Print configuration summary to stdout for deployment scripts
-/// 
+///
 /// This function outputs a formatted configuration summary to stdout,
 /// which is used by deployment scripts to verify the sequencer setup.
 /// The output includes environment, database, and chain information.
-/// 
+///
 /// ## Output Format:
 /// - Environment type (development/production)
 /// - Database connection string
 /// - Chain configurations with markets and events
 /// - Market addresses and event types per chain
-/// 
+///
 /// ## Usage:
 /// This output is typically captured by deployment scripts to verify
 /// that the sequencer is configured correctly before starting.
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to the sequencer configuration
-/// 
+///
 /// # Example
 /// ```rust
 /// print_configuration_summary(&config);
@@ -229,7 +228,7 @@ fn print_configuration_summary(config: &SequencerConfig) {
     println!("  Environment: {:?}", config.environment);
     println!("  Database: {}", config.database_url);
     println!("  Chains:");
-    
+
     // Print detailed information for each configured chain
     for chain in config.get_all_chains() {
         println!("    - {} (ID: {})", chain.name, chain.chain_id);
@@ -254,24 +253,24 @@ fn print_configuration_summary(config: &SequencerConfig) {
 }
 
 /// Log detailed configuration information for debugging
-/// 
+///
 /// This function logs comprehensive configuration details using the tracing
 /// system, providing detailed information for debugging and monitoring
 /// the sequencer startup process.
-/// 
+///
 /// ## Logged Information:
 /// - Environment type and startup mode
 /// - Total number of configured chains
 /// - Per-chain details (name, ID, type, markets, events)
 /// - Configuration validation status
-/// 
+///
 /// ## Log Levels:
 /// - Uses `info!` level for configuration details
 /// - Provides structured logging for easy parsing
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to the sequencer configuration
-/// 
+///
 /// # Example
 /// ```rust
 /// log_configuration_details(&config);
@@ -309,27 +308,27 @@ fn log_configuration_details(config: &SequencerConfig) {
 }
 
 /// Initialize database connection and reset events
-/// 
+///
 /// This function establishes a connection to the PostgreSQL database and
 /// performs initial setup tasks, including resetting events that were
 /// in progress when the sequencer was last stopped.
-/// 
+///
 /// ## Database Operations:
 /// 1. **Connection Setup**: Establishes connection pool with SSL
 /// 2. **Migration**: Runs any pending database migrations
 /// 3. **Event Reset**: Resets events from 'ProofRequested' to 'ReadyToRequestProof'
-/// 
+///
 /// ## Error Handling:
 /// - Database connection failures are propagated
 /// - Migration failures are handled gracefully
 /// - Event reset failures are logged but don't stop startup
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to the sequencer configuration
-/// 
+///
 /// # Returns
 /// * `Result<Database>` - Database connection or error
-/// 
+///
 /// # Example
 /// ```rust
 /// let db = initialize_database(&config).await?;
@@ -337,43 +336,43 @@ fn log_configuration_details(config: &SequencerConfig) {
 async fn initialize_database(config: &SequencerConfig) -> Result<Database> {
     // Create database connection with SSL support
     let db = Database::new(&config.database_url).await?;
-    
+
     // Reset events that were in progress when sequencer was stopped
     db.sequencer_start_events_reset().await?;
-    
+
     Ok(db)
 }
 
 /// Start all sequencer components in parallel
-/// 
+///
 /// This function orchestrates the startup of all sequencer components,
 /// starting them in parallel to maximize efficiency. Each component
 /// runs independently and failures in one component don't affect others.
-/// 
+///
 /// ## Component Startup Order:
 /// 1. **Batch Event Listener**: Monitors batch processing events
 /// 2. **Event Listener**: Monitors blockchain events across all chains
 /// 3. **Proof Generator**: Generates ZK proofs for events
 /// 4. **Transaction Manager**: Submits transactions to destination chains
 /// 5. **Auxiliary Components**: Lane manager, proof checker, reset manager, gas distributor
-/// 
+///
 /// ## Parallel Execution:
 /// - All components start simultaneously
 /// - Each component runs in its own tokio task
 /// - Handles are collected for graceful shutdown
-/// 
+///
 /// ## Error Handling:
 /// - Component failures are logged but don't stop other components
 /// - Database is shared across all components
 /// - Configuration is cloned for each component
-/// 
+///
 /// # Arguments
 /// * `config` - Sequencer configuration (consumed)
 /// * `db` - Database connection (consumed)
-/// 
+///
 /// # Returns
 /// * `Result<()>` - Success or error status
-/// 
+///
 /// # Example
 /// ```rust
 /// start_all_sequencer_components(config, db).await?;
@@ -395,26 +394,26 @@ async fn start_all_sequencer_components(config: SequencerConfig, db: Database) -
 }
 
 /// Start batch event listener for all chains
-/// 
+///
 /// This function creates and starts the batch event listener component,
 /// which monitors batch processing success and failure events across
 /// all configured chains in parallel.
-/// 
+///
 /// ## Configuration:
 /// - Creates both normal and retarded configurations for each chain
 /// - Uses WebSocket connections for real-time event monitoring
 /// - Configures batch submitter addresses and block delays
-/// 
+///
 /// ## Parallel Processing:
 /// - Each chain processes events independently
 /// - Failures in one chain don't affect others
 /// - Uses unified configuration for efficiency
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to sequencer configuration
 /// * `db` - Reference to database connection
 /// * `handles` - Mutable reference to task handles vector
-/// 
+///
 /// # Example
 /// ```rust
 /// start_batch_event_listener(&config, &db, &mut handles).await;
@@ -425,12 +424,15 @@ async fn start_batch_event_listener(
     handles: &mut Vec<tokio::task::JoinHandle<Result<(), eyre::Report>>>,
 ) {
     info!("Starting unified batch event listener for all chains");
-    
+
     let mut batch_chain_configs = Vec::new();
-    
+
     // Create configurations for each chain (normal and retarded)
     for chain in config.get_all_chains() {
-        info!("Adding chain {} to unified batch event listener", chain.name);
+        info!(
+            "Adding chain {} to unified batch event listener",
+            chain.name
+        );
 
         // Create normal batch config for this chain
         let normal_batch_config = batch_event_listener::ChainConfig {
@@ -464,34 +466,33 @@ async fn start_batch_event_listener(
 
     // Spawn batch event listener task
     let db_clone = db.clone();
-    let handle = tokio::spawn(async move {
-        BatchEventListener::new(unified_batch_config, db_clone).await
-    });
+    let handle =
+        tokio::spawn(async move { BatchEventListener::new(unified_batch_config, db_clone).await });
 
     handles.push(handle);
 }
 
 /// Start event listener for all chains, markets, and events
-/// 
+///
 /// This function creates and starts the event listener component,
 /// which monitors blockchain events across all configured chains,
 /// markets, and event types in a unified manner.
-/// 
+///
 /// ## Event Monitoring:
 /// - Monitors events from all configured markets on all chains
 /// - Handles both normal and retarded event processing
 /// - Uses unified filtering for efficiency
-/// 
+///
 /// ## Configuration:
 /// - Creates event configurations for each chain
 /// - Includes all markets and events for each chain
 /// - Configures polling intervals and retry logic
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to sequencer configuration
 /// * `db` - Reference to database connection
 /// * `handles` - Mutable reference to task handles vector
-/// 
+///
 /// # Example
 /// ```rust
 /// start_event_listener(&config, &db, &mut handles).await;
@@ -502,12 +503,14 @@ async fn start_event_listener(
     handles: &mut Vec<tokio::task::JoinHandle<Result<(), eyre::Report>>>,
 ) {
     let mut all_event_configs = Vec::new();
-    
+
     // Create event configurations for each chain
     for chain in config.get_all_chains() {
         info!(
             "Adding chain {} with {} markets and {} events to unified listener",
-            chain.name, chain.markets.len(), chain.events.len()
+            chain.name,
+            chain.markets.len(),
+            chain.events.len()
         );
 
         // Create normal config for this chain
@@ -519,8 +522,11 @@ async fn start_event_listener(
         all_event_configs.push(retarded_config);
     }
 
-    info!("Starting unified event listener with {} configs", all_event_configs.len());
-    
+    info!(
+        "Starting unified event listener with {} configs",
+        all_event_configs.len()
+    );
+
     // Spawn event listener task
     let db_clone = db.clone();
     let handle = tokio::spawn(async move {
@@ -531,39 +537,39 @@ async fn start_event_listener(
 }
 
 /// Start proof generator component
-/// 
+///
 /// This function creates and starts the proof generator component,
 /// which generates ZK proofs for events that are ready for proof
 /// generation. The component handles both L1 and L2 chain events.
-/// 
+///
 /// ## Proof Generation:
 /// - Monitors events in 'ProofRequested' status
 /// - Generates ZK proofs using the RISC0 framework
 /// - Handles both boundless and SDK proof types
 /// - Updates events with proof data and journal indices
-/// 
+///
 /// ## Configuration:
 /// - Configures retry logic and batch limits
 /// - Sets up L1 and L2 block delay parameters
 /// - Handles proof generation timeouts
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to sequencer configuration
 /// * `db` - Reference to database connection
-/// 
+///
 /// # Example
 /// ```rust
 /// start_proof_generator(&config, &db).await;
 /// ```
 async fn start_proof_generator(config: &SequencerConfig, db: &Database) {
     let db_clone = db.clone();
-    
+
     // Extract proof generation configuration
     let max_retries = config.proof_config.max_retries;
     let retry_delay = config.proof_config.retry_delay;
     let batch_limit = config.proof_config.batch_limit;
     let dummy_mode = config.proof_config.dummy_mode;
-    
+
     // Calculate block delays for L1 and L2 chains
     let l1_max_block_delay = config
         .get_l1_chains()
@@ -594,26 +600,26 @@ async fn start_proof_generator(config: &SequencerConfig, db: &Database) {
 }
 
 /// Start transaction manager component
-/// 
+///
 /// This function creates and starts the transaction manager component,
 /// which submits transactions to destination chains for events that
 /// have completed proof generation and are ready for execution.
-/// 
+///
 /// ## Transaction Management:
 /// - Monitors events in 'BatchIncluded' status
 /// - Submits transactions to destination chains
 /// - Handles gas estimation and transaction retries
 /// - Updates event status based on transaction results
-/// 
+///
 /// ## Configuration:
 /// - Creates chain-specific transaction configurations
 /// - Configures gas estimation and retry logic
 /// - Sets up transaction timeouts and limits
-/// 
+///
 /// # Arguments
 /// * `config` - Reference to sequencer configuration
 /// * `db` - Reference to database connection
-/// 
+///
 /// # Example
 /// ```rust
 /// start_transaction_manager(&config, &db).await;
@@ -632,21 +638,21 @@ async fn start_transaction_manager(config: &SequencerConfig, db: &Database) {
 }
 
 /// Wait for shutdown signal and perform cleanup
-/// 
+///
 /// This function waits for a shutdown signal (Ctrl+C) and then
 /// performs any necessary cleanup operations before the sequencer
 /// terminates.
-/// 
+///
 /// ## Shutdown Process:
 /// 1. **Signal Handling**: Waits for Ctrl+C signal
 /// 2. **Logging**: Logs shutdown message
 /// 3. **Cleanup**: Allows components to finish gracefully
-/// 
+///
 /// ## Signal Handling:
 /// - Uses tokio::signal::ctrl_c() for cross-platform compatibility
 /// - Handles graceful shutdown of all components
 /// - Ensures database connections are closed properly
-/// 
+///
 /// # Example
 /// ```rust
 /// wait_for_shutdown().await;
@@ -654,7 +660,7 @@ async fn start_transaction_manager(config: &SequencerConfig, db: &Database) {
 async fn wait_for_shutdown() {
     // Wait for Ctrl+C signal
     tokio::signal::ctrl_c().await.unwrap();
-    
+
     // Log shutdown message
     info!("Shutting down sequencer...");
 }
@@ -753,10 +759,6 @@ fn create_transaction_config(config: &SequencerConfig) -> TransactionConfig {
     TransactionConfig { chain_configs }
 }
 
-
-
-
-
 async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> Result<()> {
     // Start lane manager
     let lane_config = LaneManagerConfig {
@@ -820,7 +822,9 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
             poll_interval,
             block_update_interval,
             proof_checker_chain_configs,
-        ).await {
+        )
+        .await
+        {
             error!("Event proof ready checker failed: {:?}", e);
         }
     });
@@ -892,7 +896,9 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
                 .clone(),
             gas_fee_distributer_config.bridge_fee_percentage,
             gas_fee_distributer_config.min_amount_to_bridge,
-        ).await {
+        )
+        .await
+        {
             error!("Gas fee distributer failed: {:?}", e);
         }
     });
