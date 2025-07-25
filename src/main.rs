@@ -449,24 +449,8 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
 
     let db_clone_reset = db.clone();
     tokio::spawn(async move {
-        let mut current_manager = None;
-        loop {
-            let mut new_manager =
-                ResetTxManager::new(reset_tx_manager_config.clone(), db_clone_reset.clone());
-            info!("Starting new reset tx manager instance");
-
-            if let Err(e) = new_manager.start().await {
-                error!("Reset tx manager failed: {:?}", e);
-            }
-
-            tokio::time::sleep(Duration::from_secs(1)).await;
-
-            if let Some(manager) = current_manager.take() {
-                drop(manager);
-            }
-
-            current_manager = Some(new_manager);
-            tokio::time::sleep(Duration::from_secs(600)).await;
+        if let Err(e) = ResetTxManager::new(reset_tx_manager_config, db_clone_reset).await {
+            error!("Reset tx manager failed: {:?}", e);
         }
     });
 
