@@ -2,12 +2,12 @@
 //! 
 //! This module provides a simplified, unified event listener for blockchain events across multiple chains.
 //! It processes events from various markets and chains in parallel, with fault isolation and efficient
-//! provider management.
+//! provider management using the shared provider helper.
 //! 
 //! ## Key Features:
 //! - **Unified Processing**: Single listener handles all chains, markets, and events
 //! - **Parallel Execution**: Independent tasks for each chain with fault isolation
-//! - **Provider Caching**: Efficient connection management to reduce RPC overhead
+//! - **Shared Provider Management**: Uses common provider helper for efficient connection management
 //! - **Automatic Recovery**: Fallback provider support with freshness validation
 //! - **Event Classification**: Unified event type system for consistent processing
 //! 
@@ -16,7 +16,7 @@
 //! EventListener::new()
 //! ├── Spawns parallel tasks for each EventConfig
 //! ├── Each task runs process_chain() independently
-//! ├── Provider caching and freshness validation
+//! ├── Uses ProviderState for provider management
 //! ├── Block range calculation and log retrieval
 //! ├── Event parsing and database storage
 //! └── Continuous polling loop
@@ -24,46 +24,20 @@
 
 use alloy::{
     eips::BlockNumberOrTag,
-    network::Ethereum,
     primitives::{Address},
-    providers::{Provider, ProviderBuilder, WsConnect},
+    providers::Provider,
     rpc::types::{Filter, Log},
-    transports::http::reqwest::Url,
 };
 use chrono::Utc;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{eyre, Result};
 use std::collections::HashMap;
 use tokio::time::interval;
 use tracing::{error, info};
 
 use crate::events::{parse_supplied_event, parse_withdraw_on_extension_chain_event};
+use crate::provider_helper::{ProviderConfig, ProviderState, ProviderType};
 use malda_rs::constants::*;
 use sequencer::database::{Database, EventStatus, EventUpdate};
-
-/// Simplified provider type with all necessary fillers for blockchain interaction
-/// 
-/// This type includes:
-/// - Identity filler for basic provider functionality
-/// - Gas filler for transaction gas estimation
-/// - Blob gas filler for EIP-4844 support
-/// - Nonce filler for transaction nonce management
-/// - Chain ID filler for network identification
-type ProviderType = alloy::providers::fillers::FillProvider<
-    alloy::providers::fillers::JoinFill<
-        alloy::providers::Identity,
-        alloy::providers::fillers::JoinFill<
-            alloy::providers::fillers::GasFiller,
-            alloy::providers::fillers::JoinFill<
-                alloy::providers::fillers::BlobGasFiller,
-                alloy::providers::fillers::JoinFill<
-                    alloy::providers::fillers::NonceFiller,
-                    alloy::providers::fillers::ChainIdFiller,
-                >,
-            >,
-        >,
-    >,
-    alloy::providers::RootProvider<Ethereum>,
->;
 
 /// Configuration for event listening on a specific chain
 /// 
@@ -104,15 +78,15 @@ pub struct EventConfig {
 /// Manages the state for a single chain's event processing
 /// 
 /// This struct encapsulates all stateful information needed for processing events
-/// on a specific chain, including configuration, block tracking, provider caching,
+/// on a specific chain, including configuration, block tracking, provider management,
 /// and polling intervals.
 struct ChainState {
     /// Configuration for this chain's event processing
     config: EventConfig,
     /// Last processed block number to maintain continuity
     last_processed_block: u64,
-    /// Cached provider connection to reduce connection overhead
-    cached_provider: Option<ProviderType>,
+    /// Provider state for this chain (using shared provider helper)
+    provider_state: ProviderState,
     /// Polling interval timer for this chain
     interval: tokio::time::Interval,
 }
@@ -124,14 +98,23 @@ impl ChainState {
     /// * `config` - The event configuration for this chain
     /// 
     /// # Returns
-    /// A new ChainState instance with initialized polling interval
+    /// A new ChainState instance with initialized polling interval and provider state
     fn new(config: EventConfig) -> Self {
         let interval = interval(std::time::Duration::from_secs(config.poll_interval_secs));
+        
+        // Create provider configuration for this chain
+        let provider_config = ProviderConfig {
+            primary_url: config.primary_ws_url.clone(),
+            fallback_url: config.fallback_ws_url.clone(),
+            max_block_delay_secs: config.max_block_delay_secs,
+            chain_id: config.chain_id,
+            use_websocket: true, // Event listener uses WebSocket connections
+        };
         
         Self {
             config,
             last_processed_block: 0,
-            cached_provider: None,
+            provider_state: ProviderState::new(provider_config),
             interval,
         }
     }
@@ -157,12 +140,7 @@ impl ChainState {
 /// 2. Spawning parallel processing tasks
 /// 3. Coordinating database operations
 /// 4. Providing fault isolation between chains
-pub struct EventListener {
-    /// List of event configurations for different chains
-    configs: Vec<EventConfig>,
-    /// Database connection for event storage
-    db: Database,
-}
+pub struct EventListener;
 
 impl EventListener {
     /// Creates and starts a new event listener for multiple chains
@@ -209,7 +187,7 @@ impl EventListener {
     /// This is the main processing function for each chain. It:
     /// 1. Sets up the event filter for the chain's markets and events
     /// 2. Enters a continuous polling loop
-    /// 3. Fetches fresh provider connections
+    /// 3. Uses shared provider helper for fresh provider connections
     /// 4. Calculates block ranges for event processing
     /// 5. Retrieves and processes blockchain logs
     /// 6. Updates the last processed block
@@ -237,8 +215,8 @@ impl EventListener {
             // Wait for next polling cycle
             chain_state.wait_for_next_poll().await;
             
-            // Get a fresh provider connection (with caching)
-            let provider = Self::get_fresh_provider(&mut chain_state).await?;
+            // Get a fresh provider connection using shared provider helper
+            let (provider, _is_fallback) = chain_state.provider_state.get_fresh_provider().await?;
             
             // Get current block number for range calculation
             let current_block = provider.get_block_number().await
@@ -271,33 +249,6 @@ impl EventListener {
             // Update the last processed block for next iteration
             chain_state.update_last_processed_block(to_block);
         }
-    }
-
-    /// Gets a fresh provider connection with caching optimization
-    /// 
-    /// This method implements provider caching to reduce connection overhead:
-    /// 1. Checks if cached provider is still fresh
-    /// 2. Reuses cached provider if valid
-    /// 3. Creates new provider if cache is stale or empty
-    /// 4. Updates cache with new provider
-    /// 
-    /// # Arguments
-    /// * `chain_state` - Mutable reference to chain state for cache management
-    /// 
-    /// # Returns
-    /// * `Result<ProviderType>` - Fresh provider connection
-    async fn get_fresh_provider(chain_state: &mut ChainState) -> Result<ProviderType> {
-        // Try to reuse cached provider if it's still fresh
-        if let Some(provider) = &chain_state.cached_provider {
-            if Self::is_provider_fresh(provider, chain_state.config.max_block_delay_secs).await {
-                return Ok(provider.clone());
-            }
-        }
-
-        // Get new provider and update cache
-        let new_provider = Self::get_provider(&chain_state.config).await?;
-        chain_state.cached_provider = Some(new_provider.clone());
-        Ok(new_provider)
     }
 
     /// Retrieves block timestamps for a range of blocks
@@ -440,82 +391,6 @@ impl EventListener {
         
         info!("Added {} new events to database for chain {}", event_updates.len(), config.chain_id);
         Ok(())
-    }
-
-    /// Gets a provider connection with primary/fallback logic
-    /// 
-    /// This method implements provider selection logic:
-    /// 1. Attempts to connect to primary provider
-    /// 2. Validates provider freshness
-    /// 3. Falls back to secondary provider if primary fails
-    /// 4. Returns error if both providers are unavailable
-    /// 
-    /// # Arguments
-    /// * `config` - Event configuration containing provider URLs
-    /// 
-    /// # Returns
-    /// * `Result<ProviderType>` - Connected provider
-    async fn get_provider(config: &EventConfig) -> Result<ProviderType> {
-        // Try primary provider first
-        if let Ok(provider) = Self::connect_provider(&config.primary_ws_url).await {
-            if Self::is_provider_fresh(&provider, config.max_block_delay_secs).await {
-                return Ok(provider);
-            }
-        }
-
-        // Try fallback provider
-        let provider = Self::connect_provider(&config.fallback_ws_url).await?;
-        if Self::is_provider_fresh(&provider, config.max_block_delay_secs).await {
-            return Ok(provider);
-        }
-
-        Err(eyre!("Both primary and fallback providers are unavailable for chain {}", config.chain_id))
-    }
-
-    /// Establishes a WebSocket connection to a blockchain provider
-    /// 
-    /// This method creates a new WebSocket connection to the specified URL
-    /// and configures it with all necessary fillers for blockchain interaction.
-    /// 
-    /// # Arguments
-    /// * `url` - WebSocket URL to connect to
-    /// 
-    /// # Returns
-    /// * `Result<ProviderType>` - Connected provider
-    async fn connect_provider(url: &str) -> Result<ProviderType> {
-        let ws_url: Url = url.parse()
-            .wrap_err_with(|| format!("Invalid WSS URL: {}", url))?;
-        
-        let ws_connect = WsConnect::new(ws_url);
-        ProviderBuilder::new()
-            .connect_ws(ws_connect)
-            .await
-            .wrap_err("Failed to connect to WebSocket")
-    }
-
-    /// Validates if a provider is fresh (not too far behind current time)
-    /// 
-    /// This method checks if the provider's latest block is within the acceptable
-    /// delay window. This prevents using stale providers that might be out of sync.
-    /// 
-    /// # Arguments
-    /// * `provider` - Provider to validate
-    /// * `max_delay` - Maximum allowed delay in seconds
-    /// 
-    /// # Returns
-    /// * `bool` - True if provider is fresh, false otherwise
-    async fn is_provider_fresh(provider: &ProviderType, max_delay: u64) -> bool {
-        match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
-            Ok(Some(block)) => {
-                let block_timestamp: u64 = block.header.inner.timestamp.into();
-                let current_time = chrono::Utc::now().timestamp() as u64;
-                
-                // Provider is fresh if block time is current or within max delay
-                current_time <= block_timestamp || 
-                (current_time - block_timestamp) <= max_delay
-            }
-            _ => false
-        }
     }
 
     /// Processes a single blockchain log into a database event update
