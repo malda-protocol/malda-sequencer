@@ -38,7 +38,6 @@ use event_proof_ready_checker::EventProofReadyChecker;
 
 mod gas_fee_distributer;
 mod provider_helper;
-use gas_fee_distributer::GasFeeDistributer;
 
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
 
@@ -477,7 +476,7 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
     let sequencer_address = config.sequencer_address;
 
     tokio::spawn(async move {
-        let mut gas_fee_distributer = GasFeeDistributer::new(
+        if let Err(e) = gas_fee_distributer::GasFeeDistributer::new(
             chains,
             markets_per_chain,
             rpc_urls,
@@ -499,13 +498,8 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
                 .clone(),
             gas_fee_distributer_config.bridge_fee_percentage,
             gas_fee_distributer_config.min_amount_to_bridge,
-        );
-
-        gas_fee_distributer.start_polling_balances().await;
-
-        // Keep the task alive (in case start_polling_balances returns)
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+        ).await {
+            error!("Gas fee distributer failed: {:?}", e);
         }
     });
 
