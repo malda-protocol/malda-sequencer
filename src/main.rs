@@ -37,6 +37,7 @@ mod event_proof_ready_checker;
 use event_proof_ready_checker::EventProofReadyChecker;
 
 mod gas_fee_distributer;
+mod provider_helper;
 use gas_fee_distributer::GasFeeDistributer;
 
 pub const UNIX_SOCKET_PATH: &str = "/tmp/sequencer.sock";
@@ -452,20 +453,13 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
     );
 
     tokio::spawn(async move {
-        let mut proof_checker = EventProofReadyChecker::new(
+        if let Err(e) = EventProofReadyChecker::new(
             db_clone_proof,
             poll_interval,
             block_update_interval,
             proof_checker_chain_configs,
-        );
-
-        if let Err(e) = proof_checker.start().await {
+        ).await {
             error!("Event proof ready checker failed: {:?}", e);
-        }
-
-        // Keep the task alive
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
