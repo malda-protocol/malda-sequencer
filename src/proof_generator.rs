@@ -126,6 +126,8 @@ pub struct ProofGeneratorConfig {
     pub ethereum_max_block_delay_secs: u64,
     /// Maximum allowed delay for L2 block freshness in seconds
     pub l2_max_block_delay_secs: u64,
+    /// Whether to enable dummy proof generation mode
+    pub dummy_mode: bool,
 }
 
 /// Main proof generator that processes events and generates proofs
@@ -502,71 +504,87 @@ impl ProofGenerator {
     ) -> Result<ProofInfo> {
         debug!("Starting proof generation for {} source chains", src_chain_ids.len());
 
-        // Try boundless proof generation first (preferred method)
-        if let Ok(proof_info) = Self::try_boundless_proof(
-            users.clone(),
-            markets.clone(),
-            dst_chain_ids.clone(),
-            src_chain_ids.clone(),
-        ).await {
-            return Ok(proof_info);
-        }
-
-        // Fall back to SDK method with retry logic if boundless fails
-        let mut attempts = 0;
-        loop {
-            // Determine whether to use fallback mode based on provider status
-            let should_use_fallback = Self::should_use_fallback(
-                &src_chain_ids,
-                attempts,
-                config.max_retries,
-                config.ethereum_max_block_delay_secs,
-                config.l2_max_block_delay_secs,
-            ).await;
-
-            if should_use_fallback {
-                info!("Using fallback mode for proof generation (attempt {})", attempts);
-            } else {
-                info!("Using primary mode for proof generation (attempt {})", attempts);
-            }
-
-            let start_time = Instant::now();
-
-            // Attempt SDK proof generation
-            match get_proof_data_prove_sdk(
+        // Check if dummy mode is enabled via configuration
+        if config.dummy_mode {
+            // Use dummy proof generation when dummy mode is enabled (default)
+            info!("Dummy proof mode enabled, using dummy proof generation");
+            generate_dummy_proof(
+                users,
+                markets,
+                dst_chain_ids,
+                src_chain_ids,
+                false, // l1_inclusion
+                false, // fallback
+            ).await
+        } else {
+            info!("Dummy proof mode disabled, using real proof generation");
+            
+            // Try boundless proof generation first (preferred method)
+            if let Ok(proof_info) = Self::try_boundless_proof(
                 users.clone(),
                 markets.clone(),
                 dst_chain_ids.clone(),
                 src_chain_ids.clone(),
-                false, // l1_inclusion
-                should_use_fallback,
-            )
-            .await
-            {
-                Ok(proof_info) => {
-                    let duration = start_time.elapsed();
-                    let proof_result = Self::create_proof_info_from_sdk(proof_info)?;
-                    
-                    // Log performance statistics
-                    let tx_num = users.clone().iter().flatten().count();
-            info!(
-                        "Generated proof for {} transactions with {} cycles in {:?}{}",
-                        tx_num,
-                        proof_result.total_cycles,
-                        duration,
-                        if should_use_fallback { " (fallback mode)" } else { "" }
-                    );
+            ).await {
+                return Ok(proof_info);
+            }
 
-                    return Ok(proof_result);
+            // Fall back to SDK method with retry logic if boundless fails
+            let mut attempts = 0;
+            loop {
+                // Determine whether to use fallback mode based on provider status
+                let should_use_fallback = Self::should_use_fallback(
+                    &src_chain_ids,
+                    attempts,
+                    config.max_retries,
+                    config.ethereum_max_block_delay_secs,
+                    config.l2_max_block_delay_secs,
+                ).await;
+
+                if should_use_fallback {
+                    info!("Using fallback mode for proof generation (attempt {})", attempts);
+                } else {
+                    info!("Using primary mode for proof generation (attempt {})", attempts);
                 }
-                Err(e) if attempts < config.max_retries => {
-                    attempts += 1;
-                    warn!("Proof generation attempt {} failed: {}. Retrying...", attempts, e);
-                    sleep(config.retry_delay).await;
-                }
-                Err(e) => {
-                    error!("Failed to generate proof after {} attempts: {}", attempts, e);
-                    return Err(eyre!("Failed to generate proof after {} attempts: {}", attempts, e));
+
+                let start_time = Instant::now();
+
+                // Attempt SDK proof generation
+                match get_proof_data_prove_sdk(
+                    users.clone(),
+                    markets.clone(),
+                    dst_chain_ids.clone(),
+                    src_chain_ids.clone(),
+                    false, // l1_inclusion
+                    should_use_fallback,
+                )
+                .await
+                {
+                    Ok(proof_info) => {
+                        let duration = start_time.elapsed();
+                        let proof_result = Self::create_proof_info_from_sdk(proof_info)?;
+                        
+                        // Log performance statistics
+                        let tx_num = users.clone().iter().flatten().count();
+                        info!(
+                            "Generated proof for {} transactions with {} cycles in {:?}{}",
+                            tx_num,
+                            proof_result.total_cycles,
+                            duration,
+                            if should_use_fallback { " (fallback mode)" } else { "" }
+                        );
+
+                        return Ok(proof_result);
+                    }
+                    Err(e) if attempts < config.max_retries => {
+                        attempts += 1;
+                        warn!("Proof generation attempt {} failed: {}. Retrying...", attempts, e);
+                        sleep(config.retry_delay).await;
+                    }
+                    Err(e) => {
+                        error!("Failed to generate proof after {} attempts: {}", attempts, e);
+                        return Err(eyre!("Failed to generate proof after {} attempts: {}", attempts, e));
+                    }
                 }
             }
         }

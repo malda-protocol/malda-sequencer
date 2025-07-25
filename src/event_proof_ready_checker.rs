@@ -1,3 +1,36 @@
+//! # Event Proof Ready Checker Module
+//! 
+//! This module provides a proof readiness checker that monitors block numbers
+//! across multiple chains and determines when events are ready for proof generation.
+//! It handles special cases like Ethereum block numbers via Optimism L1 block contracts.
+//! 
+//! ## Key Features:
+//! - **Multi-Chain Block Monitoring**: Tracks block numbers across multiple chains
+//! - **Proof Readiness Detection**: Determines when events are ready for proof generation
+//! - **Special Chain Handling**: Handles L1/L2 chain differences and Optimism L1 blocks
+//! - **Provider Fallback**: Uses provider helper for reliable blockchain connections
+//! - **Database Integration**: Updates event status in the database
+//! - **Concurrent Processing**: Handles multiple chains simultaneously
+//! 
+//! ## Architecture:
+//! ```
+//! EventProofReadyChecker::new()
+//! ├── Block Number Monitoring: Tracks current block numbers per chain
+//! ├── Proof Readiness Check: Determines when events are ready for proofs
+//! ├── Database Updates: Updates event status in the database
+//! ├── Special Chain Handling: Handles L1/L2 differences
+//! ├── Provider Management: Uses provider helper for connections
+//! └── Concurrent Processing: Multiple chains processed in parallel
+//! ```
+//! 
+//! ## Workflow:
+//! 1. **Initialization**: Sets up block number tracking for all configured chains
+//! 2. **Block Monitoring**: Continuously polls block numbers from each chain
+//! 3. **Readiness Detection**: Checks if events are ready for proof generation
+//! 4. **Database Updates**: Updates event status when ready
+//! 5. **Special Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
+//! 6. **Error Recovery**: Handles connection failures and provider fallbacks
+
 use alloy::{
     primitives::Address,
     providers::Provider,
@@ -12,8 +45,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info};
 
 use crate::types::IL1Block::new;
-use crate::constants::{ETHEREUM_CHAIN_ID, OPTIMISM_CHAIN_ID};
-use malda_rs::constants::{ETHEREUM_SEPOLIA_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID};
+use malda_rs::constants::{ETHEREUM_CHAIN_ID, OPTIMISM_CHAIN_ID, ETHEREUM_SEPOLIA_CHAIN_ID, OPTIMISM_SEPOLIA_CHAIN_ID};
 use sequencer::database::Database;
 use crate::provider_helper::{ProviderConfig, ProviderState};
 
@@ -28,7 +60,8 @@ lazy_static! {
 /// Configuration for a single chain in the event proof ready checker
 /// 
 /// This struct contains all necessary parameters for monitoring
-/// block numbers on a specific blockchain network.
+/// block numbers on a specific blockchain network, including
+/// RPC endpoints, chain type, and timing parameters.
 #[derive(Clone)]
 pub struct ChainConfig {
     /// Unique identifier for the blockchain network
@@ -37,8 +70,6 @@ pub struct ChainConfig {
     pub rpc_url: String,
     /// Fallback RPC URL in case primary fails
     pub fallback_rpc_url: String,
-    /// Whether this is an L2 chain (used for special handling)
-    pub is_l2: bool,
     /// Maximum allowed delay for block freshness in seconds
     pub max_block_delay_secs: u64,
 }
@@ -51,6 +82,22 @@ const L1_BLOCK_ADDRESS_OPTIMISM: &str = "0x4200000000000000000000000000000000000
 /// The event proof ready checker continuously monitors block numbers on different
 /// chains and updates the database when events are ready for proof generation.
 /// It handles special cases like Ethereum block numbers via Optimism L1 block contracts.
+/// 
+/// ## Key Responsibilities:
+/// 
+/// - **Block Number Monitoring**: Tracks current block numbers for all configured chains
+/// - **Proof Readiness Detection**: Determines when events are ready for proof generation
+/// - **Database Integration**: Updates event status in the database
+/// - **Special Chain Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
+/// - **Provider Management**: Uses provider helper for reliable blockchain connections
+/// - **Concurrent Processing**: Handles multiple chains simultaneously
+/// 
+/// ## Block Number Management:
+/// 
+/// - **Thread-Safe Storage**: Uses atomic integers for thread-safe block number storage
+/// - **Global Access**: Provides global access to block numbers via lazy static
+/// - **Concurrent Updates**: Supports concurrent updates from multiple chains
+/// - **Fallback Support**: Uses provider helper for reliable connections with fallback
 pub struct EventProofReadyChecker;
 
 impl EventProofReadyChecker {
@@ -58,6 +105,20 @@ impl EventProofReadyChecker {
     /// 
     /// This method initializes the checker and immediately starts
     /// the polling loop. It runs indefinitely until an error occurs.
+    /// 
+    /// ## Initialization Process:
+    /// 
+    /// 1. **Block Number Setup**: Initializes block number tracking for all chains
+    /// 2. **Provider Configuration**: Sets up provider states for each chain
+    /// 3. **Polling Loop**: Starts continuous block number monitoring
+    /// 4. **Database Integration**: Connects to database for event status updates
+    /// 
+    /// ## Concurrent Operations:
+    /// 
+    /// - **Block Monitoring**: Continuously polls block numbers from each chain
+    /// - **Readiness Detection**: Checks if events are ready for proof generation
+    /// - **Database Updates**: Updates event status when ready
+    /// - **Special Handling**: Manages L1/L2 chain differences and Optimism L1 blocks
     /// 
     /// # Arguments
     /// * `db` - Database connection for event status updates
@@ -98,7 +159,7 @@ impl EventProofReadyChecker {
                 fallback_url: config.fallback_rpc_url.clone(),
                 max_block_delay_secs: config.max_block_delay_secs,
                 chain_id: config.chain_id,
-                use_websocket: false, // Event proof ready checker uses HTTP connections
+                use_websocket: false, // Use HTTP for block number polling
             };
             provider_states.insert(config.chain_id, ProviderState::new(provider_config));
         }
@@ -211,23 +272,6 @@ impl EventProofReadyChecker {
             // Sleep for poll interval before checking for events again
             tokio::time::sleep(poll_interval).await;
             iteration_count += 1;
-        }
-    }
-
-    /// Gets the current block number for a specific chain
-    /// 
-    /// This method retrieves the cached block number for the specified chain.
-    /// 
-    /// # Arguments
-    /// * `chain_id` - Chain ID to get block number for
-    /// 
-    /// # Returns
-    /// * `i32` - Current block number (0 if not available)
-    pub fn get_block_number(chain_id: u64) -> i32 {
-        if let Some(atomic) = BLOCK_NUMBERS.lock().unwrap().get(&chain_id) {
-            atomic.load(Ordering::SeqCst)
-        } else {
-            0
         }
     }
 }

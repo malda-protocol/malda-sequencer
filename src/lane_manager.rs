@@ -100,8 +100,8 @@ impl LaneManager {
     fn get_price(market: &Address) -> f64 {
         // TODO: Implement actual price fetching from external sources
         match *market {
-            m if m == mUSDC_market || m == mUSDT_market => 1.0 / 1000000.0,
-            m if m == mWBTC_market => 100000.0 / 100000000.0,
+            m if m == M_USDC_MARKET || m == M_USDT_MARKET => 1.0 / 1000000.0,
+            m if m == M_WBTC_MARKET => 100000.0 / 100000000.0,
             _ => 2500.0 / 1000000000000000000.0, // Default ETH price
         }
     }
