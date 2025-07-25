@@ -8,11 +8,12 @@
 //! - **Provider Freshness Validation**: Check if providers are up-to-date
 //! - **Primary/Fallback Logic**: Automatic fallback when primary provider fails
 //! - **Connection Management**: Efficient provider connection handling
+//! - **Multi-Protocol Support**: HTTP and WebSocket connections
 
 use alloy::{
     eips::BlockNumberOrTag,
     network::EthereumWallet,
-    providers::{Provider, ProviderBuilder},
+    providers::{Provider, ProviderBuilder, WsConnect},
     signers::local::PrivateKeySigner,
     transports::http::reqwest::Url,
 };
@@ -62,6 +63,8 @@ pub struct ProviderConfig {
     pub max_block_delay_secs: u64,
     /// Chain ID for error context and logging
     pub chain_id: u64,
+    /// Whether to use WebSocket connections (true) or HTTP connections (false)
+    pub use_websocket: bool,
 }
 
 /// Manages provider state for a single chain
@@ -115,7 +118,7 @@ impl ProviderState {
         }
 
         // Try primary provider
-        match Self::create_provider(&self.config.primary_url).await {
+        match Self::create_provider(&self.config.primary_url, self.config.use_websocket).await {
             Ok(provider) => {
                 if Self::is_provider_fresh(&provider, self.config.max_block_delay_secs).await {
                     debug!("Using new primary provider for chain {}", self.config.chain_id);
@@ -132,7 +135,7 @@ impl ProviderState {
         }
 
         // Try fallback provider
-        let fallback_provider = Self::create_provider(&self.config.fallback_url).await?;
+        let fallback_provider = Self::create_provider(&self.config.fallback_url, self.config.use_websocket).await?;
         if Self::is_provider_fresh(&fallback_provider, self.config.max_block_delay_secs).await {
             info!("Using fallback provider for chain {}", self.config.chain_id);
             self.cached_primary = None; // Clear primary cache when using fallback
@@ -170,25 +173,41 @@ impl ProviderState {
 
     /// Creates a new provider connection to the specified URL
     /// 
-    /// This method creates a new HTTP connection to the specified URL
-    /// and configures it with all necessary fillers for blockchain interaction.
+    /// This method creates a new connection to the specified URL using either
+    /// HTTP or WebSocket protocol based on the configuration. It configures
+    /// the provider with all necessary fillers for blockchain interaction.
     /// 
     /// # Arguments
     /// * `url` - RPC URL to connect to
+    /// * `use_websocket` - Whether to use WebSocket (true) or HTTP (false) connection
     /// 
     /// # Returns
     /// * `Result<ProviderType>` - Connected provider
-    async fn create_provider(url: &str) -> Result<ProviderType> {
-        let rpc_url: Url = url.parse()
-            .wrap_err_with(|| format!("Invalid RPC URL: {}", url))?;
-        
+    async fn create_provider(url: &str, use_websocket: bool) -> Result<ProviderType> {
         // Use a dummy private key since we only need view calls
         let dummy_key = "0000000000000000000000000000000000000000000000000000000000000001";
         let signer: PrivateKeySigner = dummy_key.parse().expect("should parse private key");
         let wallet = EthereumWallet::from(signer);
 
-        Ok(ProviderBuilder::new()
-            .wallet(wallet)
-            .connect_http(rpc_url))
+        if use_websocket {
+            // Create WebSocket connection
+            let ws_url: Url = url.parse()
+                .wrap_err_with(|| format!("Invalid WebSocket URL: {}", url))?;
+            
+            let ws_connect = WsConnect::new(ws_url);
+            ProviderBuilder::new()
+                .wallet(wallet)
+                .connect_ws(ws_connect)
+                .await
+                .wrap_err("Failed to connect to WebSocket")
+        } else {
+            // Create HTTP connection
+            let rpc_url: Url = url.parse()
+                .wrap_err_with(|| format!("Invalid HTTP URL: {}", url))?;
+            
+            Ok(ProviderBuilder::new()
+                .wallet(wallet)
+                .connect_http(rpc_url))
+        }
     }
 } 

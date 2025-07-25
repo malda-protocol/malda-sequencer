@@ -98,6 +98,7 @@ impl EventProofReadyChecker {
                 fallback_url: config.fallback_rpc_url.clone(),
                 max_block_delay_secs: config.max_block_delay_secs,
                 chain_id: config.chain_id,
+                use_websocket: false, // Event proof ready checker uses HTTP connections
             };
             provider_states.insert(config.chain_id, ProviderState::new(provider_config));
         }
