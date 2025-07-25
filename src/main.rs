@@ -219,22 +219,16 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
         .unwrap_or(12000000000);
 
     tokio::spawn(async move {
-        let mut proof_generator = ProofGenerator::new(
+        let proof_config = proof_generator::ProofGeneratorConfig {
             max_retries,
             retry_delay,
-            db_clone_proof_gen,
-            batch_limit,
-            l1_max_block_delay,
-            l2_max_block_delay,
-        );
+            batch_size: batch_limit,
+            ethereum_max_block_delay_secs: l1_max_block_delay,
+            l2_max_block_delay_secs: l2_max_block_delay,
+        };
 
-        if let Err(e) = proof_generator.start().await {
+        if let Err(e) = ProofGenerator::new(proof_config, db_clone_proof_gen).await {
             error!("Proof generator failed: {:?}", e);
-        }
-
-        // Keep the task alive
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
@@ -243,15 +237,8 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
     let db_clone_tx = db.clone();
 
     tokio::spawn(async move {
-        let mut transaction_manager = TransactionManager::new(transaction_config, db_clone_tx);
-
-        if let Err(e) = transaction_manager.start().await {
+        if let Err(e) = TransactionManager::new(transaction_config, db_clone_tx).await {
             error!("Transaction manager failed: {:?}", e);
-        }
-
-        // Keep the task alive
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
