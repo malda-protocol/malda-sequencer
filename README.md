@@ -9,12 +9,10 @@ A high-performance blockchain sequencer that processes cross-chain events, gener
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [Database Setup](#database-setup)
 - [Environment Variables](#environment-variables)
 - [Deployment](#deployment)
-- [Development](#development)
 - [Monitoring](#monitoring)
-- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 
 ## Overview
 
@@ -66,7 +64,7 @@ The Malda Sequencer is a sophisticated blockchain infrastructure component that:
 4. **Batch Event Listener**: Monitors batch processing events
 5. **Lane Manager**: Manages volume limits and lane status
 6. **Gas Fee Distributer**: Handles ETH balance management and cross-chain rebalancing
-7. **Reset Transaction Manager**: Manages transaction resets and rebalancing
+7. **Reset Transaction Manager**: Manages transaction resets and asset rebalancing
 
 ## Prerequisites
 
@@ -81,8 +79,8 @@ The Malda Sequencer is a sophisticated blockchain infrastructure component that:
 ### External Dependencies
 
 - **Bonsai API**: For ZK proof generation (production)
-- **Alchemy/Infura**: For RPC endpoints
-- **Pinata**: For IPFS storage (optional)
+- **Alchemy**: For RPC endpoints (primary provider)
+- **Your own node**: For fallback RPC endpoints (optional)
 
 ### Rust Dependencies
 
@@ -143,23 +141,23 @@ Create `.env.testnet` and `.env.mainnet` files:
 ENVIRONMENT=testnet
 DATABASE_URL=postgres://username:password@host:port/database
 
-# Chain RPC URLs (testnet)
+# Chain RPC URLs (testnet) - Primary Provider (Alchemy)
 RPC_URL_LINEA_SEPOLIA=https://linea-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_ETHEREUM_SEPOLIA=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_OPTIMISM_SEPOLIA=https://opt-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 
-# WebSocket URLs (testnet)
+# WebSocket URLs (testnet) - Primary Provider
 WS_URL_LINEA_SEPOLIA=wss://linea-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_ETHEREUM_SEPOLIA=wss://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_OPTIMISM_SEPOLIA=wss://opt-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_BASE_SEPOLIA=wss://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 
-# Fallback URLs (testnet)
-RPC_URL_LINEA_SEPOLIA_FALLBACK=https://linea-sepolia.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_ETHEREUM_SEPOLIA_FALLBACK=https://eth-sepolia.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_OPTIMISM_SEPOLIA_FALLBACK=https://opt-sepolia.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_BASE_SEPOLIA_FALLBACK=https://base-sepolia.infura.io/v3/YOUR_INFURA_KEY
+# Fallback URLs (testnet) - Your own node or backup provider
+RPC_URL_LINEA_SEPOLIA_FALLBACK=https://your-node.linea-sepolia.com
+RPC_URL_ETHEREUM_SEPOLIA_FALLBACK=https://your-node.eth-sepolia.com
+RPC_URL_OPTIMISM_SEPOLIA_FALLBACK=https://your-node.opt-sepolia.com
+RPC_URL_BASE_SEPOLIA_FALLBACK=https://your-node.base-sepolia.com
 
 # Transaction-specific RPC URLs (testnet)
 RPC_URL_LINEA_SEPOLIA_TRANSACTION=https://rpc.sepolia.linea.build
@@ -263,23 +261,23 @@ SEQUENCER_REQUEST_OPTIMISM_SEPOLIA_FALLBACK=http://127.0.0.1:9545/gossip_getSequ
 ENVIRONMENT=mainnet
 DATABASE_URL=postgres://username:password@host:port/database
 
-# Chain RPC URLs (mainnet)
+# Chain RPC URLs (mainnet) - Primary Provider (Alchemy)
 RPC_URL_LINEA=https://linea-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_ETHEREUM=https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_OPTIMISM=https://opt-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 RPC_URL_BASE=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 
-# WebSocket URLs (mainnet)
+# WebSocket URLs (mainnet) - Primary Provider
 WS_URL_LINEA=wss://linea-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_ETHEREUM=wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_OPTIMISM=wss://opt-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 WS_URL_BASE=wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 
-# Fallback URLs (mainnet)
-RPC_URL_LINEA_FALLBACK=https://linea-mainnet.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_ETHEREUM_FALLBACK=https://eth-mainnet.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_OPTIMISM_FALLBACK=https://opt-mainnet.infura.io/v3/YOUR_INFURA_KEY
-RPC_URL_BASE_FALLBACK=https://base-mainnet.infura.io/v3/YOUR_INFURA_KEY
+# Fallback URLs (mainnet) - Your own node or backup provider
+RPC_URL_LINEA_FALLBACK=https://your-node.linea-mainnet.com
+RPC_URL_ETHEREUM_FALLBACK=https://your-node.eth-mainnet.com
+RPC_URL_OPTIMISM_FALLBACK=https://your-node.opt-mainnet.com
+RPC_URL_BASE_FALLBACK=https://your-node.base-mainnet.com
 
 # Transaction-specific RPC URLs (mainnet)
 RPC_URL_LINEA_TRANSACTION=https://rpc.linea.build
@@ -294,8 +292,7 @@ RPC_URL_BASE_TRANSACTION=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 
 **RPC Providers:**
 - **Alchemy**: Primary RPC provider for all chains
-- **Infura**: Fallback RPC provider
-- **Chain-specific RPCs**: Linea, Base, Optimism public RPCs
+- **Your own node**: Fallback RPC provider (recommended for production)
 
 **ZK Proof Services:**
 - **Bonsai API**: For production ZK proof generation
@@ -305,51 +302,6 @@ RPC_URL_BASE_TRANSACTION=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 **Database:**
 - **PostgreSQL**: Hosted or self-hosted
 - **SSL Support**: Required for secure connections
-
-## Database Setup
-
-### 1. PostgreSQL Installation
-
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install postgresql postgresql-contrib
-
-# macOS
-brew install postgresql
-```
-
-### 2. Database Creation
-
-```bash
-# Create database and user
-sudo -u postgres psql
-
-CREATE DATABASE malda_sequencer;
-CREATE USER sequencer_user WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE malda_sequencer TO sequencer_user;
-\q
-```
-
-### 3. Run Migrations
-
-```bash
-# Install sqlx CLI
-cargo install sqlx-cli
-
-# Run migrations
-sqlx migrate run --database-url "postgres://sequencer_user:your_password@localhost/malda_sequencer"
-```
-
-### 4. Database Schema
-
-The database includes several key tables:
-
-- **`events`**: Main event tracking table
-- **`finished_events`**: Completed events archive
-- **`chain_batch_sync`**: Batch synchronization tracking
-- **`volume_flow`**: Volume tracking per chain
-- **`node_status`**: Provider health monitoring
 
 ## Environment Variables
 
@@ -366,9 +318,9 @@ Each chain requires these variables:
 
 | Pattern | Description | Example |
 |---------|-------------|---------|
-| `RPC_URL_[CHAIN]` | Primary RPC URL | `https://linea-mainnet.g.alchemy.com/v2/...` |
-| `RPC_URL_[CHAIN]_FALLBACK` | Fallback RPC URL | `https://linea-mainnet.infura.io/v3/...` |
-| `WS_URL_[CHAIN]` | WebSocket URL | `wss://linea-mainnet.g.alchemy.com/v2/...` |
+| `RPC_URL_[CHAIN]` | Primary RPC URL (Alchemy) | `https://linea-mainnet.g.alchemy.com/v2/...` |
+| `RPC_URL_[CHAIN]_FALLBACK` | Fallback RPC URL (Your node) | `https://your-node.linea-mainnet.com` |
+| `WS_URL_[CHAIN]` | WebSocket URL (Alchemy) | `wss://linea-mainnet.g.alchemy.com/v2/...` |
 | `RPC_URL_[CHAIN]_TRANSACTION` | Transaction-specific RPC | `https://rpc.linea.build` |
 
 ### Supported Chains
@@ -405,102 +357,69 @@ Each chain requires these variables:
 
 ## Deployment
 
-### 1. Manual Deployment
+### Using Deployment Scripts (Recommended)
+
+The repository includes comprehensive deployment scripts that handle all setup automatically:
+
+#### 1. Quick Setup
 
 ```bash
-# Set environment
-export ENVIRONMENT=testnet
+# 1. Set your database URL in scripts/deploy.sh
+# Edit the DATABASE_URL variable in the script
 
-# Run database migrations
-sqlx migrate run --database-url "$DATABASE_URL"
+# 2. Set your Bonsai API key in scripts/deploy.sh  
+# Edit the BONSAI_API_KEY variable in the script
 
-# Build and run
-cargo build --release
-./target/release/sequencer
-```
-
-### 2. Using Deployment Scripts
-
-The repository includes deployment scripts for easy setup:
-
-```bash
-# Deploy to testnet
+# 3. Deploy to testnet
 ./scripts/deploy.sh testnet
 
-# Deploy to mainnet
+# 4. Deploy to mainnet
 ./scripts/deploy.sh mainnet
 
-# Clean build and deploy
+# 5. Clean build and deploy
 ./scripts/deploy.sh testnet --clean
 ```
 
-### 3. Testing Configuration
+#### 2. What the Deployment Script Does
+
+The `scripts/deploy.sh` script automatically:
+
+1. **Environment Detection**: Loads the appropriate `.env.testnet` or `.env.mainnet` file
+2. **Database Setup**: 
+   - Connects to your PostgreSQL database
+   - Runs all database migrations automatically
+   - Creates necessary tables and indexes
+3. **Build Process**: 
+   - Performs clean build in release mode
+   - Optimizes for production performance
+4. **Process Management**:
+   - Stops any existing sequencer process
+   - Starts the sequencer in background
+   - Saves process ID for management
+5. **Logging**: 
+   - Creates timestamped log files
+   - Provides real-time log access
+6. **Health Checks**:
+   - Verifies database connectivity
+   - Confirms process startup
+   - Displays configuration summary
+
+#### 3. Testing Configuration
 
 Test your configuration before deployment:
 
 ```bash
-# Test configuration
+# Test which chains would be enabled
 ./scripts/test_config.sh
 
-# This will show which chains would be enabled
+# This will show which chains are configured and ready
 ```
 
-### 4. Database Cleanup
-
-If you need to reset the database:
+#### 4. Database Management
 
 ```bash
 # Clean database (WARNING: This will delete all data)
 ./scripts/clean_db.sh
-```
-
-## Development
-
-### 1. Local Development
-
-```bash
-# Set environment for development
-export ENVIRONMENT=testnet
-export RUST_LOG=debug
-
-# Run in debug mode
-cargo run
-
-# Run with specific log level
-RUST_LOG=info cargo run
-```
-
-### 2. Testing
-
-```bash
-# Run tests
-cargo test
-
-# Run with verbose output
-cargo test -- --nocapture
-```
-
-### 3. Code Quality
-
-```bash
-# Check for warnings
-cargo check
-
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
-```
-
-### 4. Configuration Testing
-
-```bash
-# Test configuration without running
-cargo check
-
-# Validate environment variables
-./scripts/test_config.sh
 ```
 
 ## Monitoring
@@ -537,85 +456,6 @@ ps aux | grep sequencer
 cat logs/sequencer.pid
 ```
 
-### 4. Health Checks
-
-The sequencer provides several health indicators:
-
-- **Database connectivity**: Automatic reconnection
-- **RPC provider health**: Fallback to backup providers
-- **Event processing**: Real-time event monitoring
-- **Proof generation**: Success/failure tracking
-
-## Troubleshooting
-
-### Common Issues
-
-#### 1. Database Connection Issues
-
-```bash
-# Test database connection
-psql "$DATABASE_URL" -c "\q"
-
-# Check if migrations are up to date
-sqlx migrate info --database-url "$DATABASE_URL"
-```
-
-#### 2. RPC Provider Issues
-
-```bash
-# Test RPC endpoints
-curl -X POST -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  https://linea-mainnet.g.alchemy.com/v2/YOUR_API_KEY
-```
-
-#### 3. ZK Proof Issues
-
-```bash
-# Check Bonsai API status
-curl -H "Authorization: Bearer $BONSAI_API_KEY" \
-  "$BONSAI_API_URL/status"
-
-# Enable dummy mode for testing
-export PROOF_GENERATOR_DUMMY_MODE=true
-```
-
-#### 4. Memory Issues
-
-```bash
-# Monitor memory usage
-htop
-
-# Check for memory leaks
-valgrind --tool=memcheck ./target/release/sequencer
-```
-
-### Debug Mode
-
-Enable debug logging for detailed troubleshooting:
-
-```bash
-# Set debug logging
-export RUST_LOG=debug
-
-# Run with debug output
-RUST_LOG=debug cargo run
-```
-
-### Performance Optimization
-
-1. **Database Indexing**: Ensure proper indexes on frequently queried columns
-2. **Connection Pooling**: Configure appropriate connection pool sizes
-3. **Batch Processing**: Adjust batch sizes based on system resources
-4. **Memory Management**: Monitor memory usage and adjust accordingly
-
-### Security Considerations
-
-1. **Private Keys**: Never commit private keys to version control
-2. **API Keys**: Use environment variables for all API keys
-3. **Database Security**: Use SSL connections and strong passwords
-4. **Network Security**: Restrict database access to trusted IPs
-
 ## Contributing
 
 ### Development Workflow
@@ -629,7 +469,6 @@ RUST_LOG=debug cargo run
 ### Code Standards
 
 - Follow Rust formatting: `cargo fmt`
-- Run clippy checks: `cargo clippy`
 - Add tests for new functionality
 - Update documentation for API changes
 
