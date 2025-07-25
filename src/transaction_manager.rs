@@ -672,22 +672,6 @@ impl TransactionManager {
         Err(eyre::eyre!(error_msg))
     }
 
-    /// Adjusts gas price based on retry count
-    /// 
-    /// # Arguments
-    /// * `base_price` - Base gas price
-    /// * `retry_count` - Current retry count
-    /// * `increase_percentage` - Percentage increase per retry
-    /// 
-    /// # Returns
-    /// * `u128` - Adjusted gas price
-    fn adjust_gas_price_for_retry(
-        base_price: u128,
-        retry_count: u128,
-        increase_percentage: u128,
-    ) -> u128 {
-        base_price * (1 + retry_count) * (100 + increase_percentage) / 100
-    }
 
     /// Gets provider for a specific chain with proper signing credentials
     /// 

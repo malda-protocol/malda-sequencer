@@ -55,10 +55,6 @@ pub struct EventConfig {
     pub fallback_ws_url: String,
     /// Unique identifier for the blockchain network
     pub chain_id: u64,
-    /// Maximum number of retry attempts for failed operations
-    pub max_retries: u32,
-    /// Delay between retry attempts in seconds
-    pub retry_delay_secs: u64,
     /// Interval between polling cycles in seconds
     pub poll_interval_secs: u64,
     /// Maximum allowed delay for block freshness in seconds

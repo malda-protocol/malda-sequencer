@@ -31,7 +31,7 @@
 use alloy::primitives::{Address, U256};
 use eyre::Result;
 use reqwest::Client;
-use sequencer::constants::{mUSDC_market, mUSDT_market, mWBTC_market};
+use sequencer::constants::{M_USDC_MARKET, M_USDT_MARKET, M_WBTC_MARKET};
 use sequencer::database::Database;
 use serde_json;
 use std::time::Duration;
@@ -193,9 +193,9 @@ impl ResetTxManager {
     /// * `String` - Formatted amount string with correct decimals
     fn parse_amount(market: &Address, amount: &U256) -> String {
         // Determine decimal precision based on market type
-        let decimals = if *market == mUSDC_market || *market == mUSDT_market {
+        let decimals = if *market == M_USDC_MARKET || *market == M_USDT_MARKET {
             6
-        } else if *market == mWBTC_market {
+        } else if *market == M_WBTC_MARKET {
             8
         } else {
             18
@@ -437,9 +437,9 @@ impl ResetTxManager {
     fn get_price(market: &Address) -> f64 {
         // TODO: Implement actual price fetching from external APIs
         // For now, return hardcoded prices based on market type
-        if *market == mUSDC_market || *market == mUSDT_market {
+        if *market == M_USDC_MARKET || *market == M_USDT_MARKET {
             return 1.0 / 1000000.0; // $1.00 for stablecoins
-        } else if *market == mWBTC_market {
+        } else if *market == M_WBTC_MARKET {
             return 100000.0 / 100000000.0; // $100,000 for WBTC
         } else {
             return 2500.0 / 1000000000000000000.0; // $2,500 for other tokens (e.g., ETH)
