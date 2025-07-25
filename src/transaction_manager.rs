@@ -1,13 +1,13 @@
 //! # Transaction Manager Module
-//! 
+//!
 //! ## Overview
-//! 
+//!
 //! The Transaction Manager processes proven events and submits them as batch transactions
 //! to the blockchain. It handles transaction submission, gas estimation, retry logic,
 //! and status tracking for each supported chain.
-//! 
+//!
 //! ## Architecture
-//! 
+//!
 //! ```
 //! TransactionManager::new()
 //! ├── Parallel chain processing
@@ -26,26 +26,26 @@
 //!     ├── BatchIncluded on success
 //!     └── BatchFailed on error
 //! ```
-//! 
+//!
 //! ## Key Features
-//! 
+//!
 //! - **Multi-Chain Support**: Processes transactions for multiple chains in parallel
 //! - **Batch Processing**: Groups events into efficient batch transactions
 //! - **Gas Optimization**: Dynamic gas estimation and price adjustment
 //! - **Retry Logic**: Exponential backoff with configurable retries
 //! - **Status Tracking**: Updates event status based on transaction results
 //! - **Provider Integration**: Uses shared provider helper for reliability
-//! 
+//!
 //! ## Transaction Flow
-//! 
+//!
 //! 1. **Event Retrieval**: Polls database for proven events ready for submission
 //! 2. **Batch Creation**: Groups events by chain and creates batch transaction
 //! 3. **Gas Estimation**: Estimates gas requirements with chain-specific logic
 //! 4. **Transaction Submission**: Submits transaction with retry logic
 //! 5. **Confirmation**: Waits for transaction confirmation and updates status
-//! 
+//!
 //! ## Configuration
-//! 
+//!
 //! Each chain has its own configuration:
 //! - `max_retries`: Maximum retry attempts for failed transactions
 //! - `retry_delay`: Delay between retry attempts
@@ -123,29 +123,29 @@ pub struct TransactionManager;
 
 impl TransactionManager {
     /// Creates and starts a new transaction manager
-    /// 
+    ///
     /// This method initializes the transaction manager and immediately starts processing
     /// proven events for all configured chains in parallel.
-    /// 
+    ///
     /// ## Workflow
-    /// 
+    ///
     /// 1. **Initialization**: Sets up logging and configuration
     /// 2. **Parallel Processing**: Creates a task for each chain
     /// 3. **Event Polling**: Continuously polls for proven events
     /// 4. **Batch Submission**: Submits batch transactions with retry logic
     /// 5. **Status Updates**: Updates event status based on results
-    /// 
+    ///
     /// ## Error Handling
-    /// 
+    ///
     /// - Individual chain failures don't stop other chains
     /// - Failed transactions are marked as BatchFailed
     /// - Successful transactions are marked as BatchIncluded
     /// - Database errors are logged but don't stop processing
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Transaction configuration for all chains
     /// * `db` - Database connection for event retrieval and updates
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status (errors are logged but don't stop processing)
     pub async fn new(config: TransactionConfig, db: Database) -> Result<()> {
@@ -173,23 +173,23 @@ impl TransactionManager {
     }
 
     /// Processes events for a specific chain
-    /// 
+    ///
     /// This method continuously polls for proven events for the given chain and
     /// processes them in batches. It handles the complete workflow from event
     /// retrieval to transaction submission and status updates.
-    /// 
+    ///
     /// ## Processing Steps
-    /// 
+    ///
     /// 1. **Event Retrieval**: Gets proven events ready for submission
     /// 2. **Batch Processing**: Creates and submits batch transactions
     /// 3. **Status Updates**: Updates event status based on results
     /// 4. **Error Handling**: Handles failures gracefully
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID to process events for
     /// * `config` - Transaction configuration
     /// * `db` - Database connection
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
     async fn process_chain(chain_id: u32, config: &TransactionConfig, db: &Database) -> Result<()> {
@@ -222,7 +222,8 @@ impl TransactionManager {
                             }
                             Err(e) => {
                                 error!("Failed to process batch for chain {}: {}", chain_id, e);
-                                Self::update_batch_status_failure(db, &events, &e.to_string()).await;
+                                Self::update_batch_status_failure(db, &events, &e.to_string())
+                                    .await;
                             }
                         }
                     } else {
@@ -247,12 +248,12 @@ impl TransactionManager {
     }
 
     /// Retrieves proven events ready for processing for a specific chain
-    /// 
+    ///
     /// # Arguments
     /// * `db` - Database connection
     /// * `chain_config` - Chain-specific configuration
     /// * `chain_id` - Chain ID to get events for
-    /// 
+    ///
     /// # Returns
     /// * `Result<Vec<EventUpdate>>` - Events ready for processing
     async fn get_proven_events_for_chain(
@@ -269,7 +270,7 @@ impl TransactionManager {
     }
 
     /// Updates batch status to success (BatchIncluded)
-    /// 
+    ///
     /// # Arguments
     /// * `db` - Database connection
     /// * `events` - Events to update
@@ -290,7 +291,7 @@ impl TransactionManager {
     }
 
     /// Updates batch status to failure (BatchFailed)
-    /// 
+    ///
     /// # Arguments
     /// * `db` - Database connection
     /// * `events` - Events to update
@@ -313,23 +314,23 @@ impl TransactionManager {
     }
 
     /// Processes a batch of events for a specific chain
-    /// 
+    ///
     /// This method handles the complete batch processing workflow including
     /// batch creation, gas estimation, transaction submission, and confirmation.
-    /// 
+    ///
     /// ## Processing Steps
-    /// 
+    ///
     /// 1. **Batch Creation**: Creates batch message from events
     /// 2. **Gas Estimation**: Estimates gas requirements with chain-specific logic
     /// 3. **Transaction Submission**: Submits transaction with retry logic
     /// 4. **Confirmation**: Waits for transaction confirmation
-    /// 
+    ///
     /// # Arguments
     /// * `chain_config` - Chain-specific configuration
     /// * `db` - Database connection
     /// * `events` - Events to process
     /// * `chain_id` - Chain ID being processed
-    /// 
+    ///
     /// # Returns
     /// * `Result<TxHash>` - Transaction hash of successful submission
     async fn process_chain_batch(
@@ -382,12 +383,12 @@ impl TransactionManager {
     }
 
     /// Creates a batch message from events
-    /// 
+    ///
     /// # Arguments
     /// * `events` - Events to include in the batch
     /// * `chain_id` - Chain ID for selector determination
     /// * `batch_submitter` - Batch submitter address
-    /// 
+    ///
     /// # Returns
     /// * `Result<BatchProcessMsg>` - Created batch message
     fn create_batch_message(
@@ -431,17 +432,18 @@ impl TransactionManager {
     }
 
     /// Gets the appropriate selector for a chain and event
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID
     /// * `event` - Event to get selector for
-    /// 
+    ///
     /// # Returns
     /// * `Result<FixedBytes<4>>` - Function selector
     fn get_selector_for_chain(chain_id: u32, event: &EventUpdate) -> Result<FixedBytes<4>> {
         match chain_id {
             chain_id
-                if chain_id == LINEA_CHAIN_ID as u32 || chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 =>
+                if chain_id == LINEA_CHAIN_ID as u32
+                    || chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 =>
             {
                 match event.target_function.as_deref().unwrap_or("outHere") {
                     "outHere" => Ok(FixedBytes::from_slice(OUT_HERE_SELECTOR_FB4)),
@@ -458,14 +460,14 @@ impl TransactionManager {
     }
 
     /// Submits transaction with retry logic
-    /// 
+    ///
     /// # Arguments
     /// * `chain_config` - Chain-specific configuration
     /// * `msg` - Batch message to submit
     /// * `sequencer` - Sequencer address
     /// * `batch_submitter` - Batch submitter address
     /// * `chain_id` - Chain ID
-    /// 
+    ///
     /// # Returns
     /// * `Result<TxHash>` - Transaction hash
     async fn submit_transaction_with_retry(
@@ -493,29 +495,33 @@ impl TransactionManager {
             );
 
             // Create the action for this attempt
-            let action = batch_submitter_contract.batchProcess(msg.clone()).from(sequencer);
+            let action = batch_submitter_contract
+                .batchProcess(msg.clone())
+                .from(sequencer);
 
             // Estimate gas for this attempt with proper error handling
-            let gas_estimation_result = if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
-                linea_estimate_gas(&provider, action.calldata().to_vec()).await
-            } else {
-                // For non-Linea chains, estimate gas and get base fee
-                let gas_result = action.estimate_gas().await;
-                let base_fee_result = provider.get_gas_price().await;
+            let gas_estimation_result =
+                if chain_id == LINEA_SEPOLIA_CHAIN_ID as u32 || chain_id == LINEA_CHAIN_ID as u32 {
+                    linea_estimate_gas(&provider, action.calldata().to_vec()).await
+                } else {
+                    // For non-Linea chains, estimate gas and get base fee
+                    let gas_result = action.estimate_gas().await;
+                    let base_fee_result = provider.get_gas_price().await;
 
-                // Combine results with proper error handling
-                match (gas_result, base_fee_result) {
-                    (Ok(gas_limit), Ok(base_fee_per_gas)) => {
-                        let gas_limit = gas_limit * 120 / 100; // 20% buffer
-                        let priority_fee_per_gas = base_fee_per_gas;
-                        Ok((gas_limit, base_fee_per_gas, priority_fee_per_gas))
+                    // Combine results with proper error handling
+                    match (gas_result, base_fee_result) {
+                        (Ok(gas_limit), Ok(base_fee_per_gas)) => {
+                            let gas_limit = gas_limit * 120 / 100; // 20% buffer
+                            let priority_fee_per_gas = base_fee_per_gas;
+                            Ok((gas_limit, base_fee_per_gas, priority_fee_per_gas))
+                        }
+                        (Err(e), _) => Err(eyre::eyre!("Failed to estimate gas: {}", e)),
+                        (_, Err(e)) => Err(eyre::eyre!("Failed to get gas price: {}", e)),
                     }
-                    (Err(e), _) => Err(eyre::eyre!("Failed to estimate gas: {}", e)),
-                    (_, Err(e)) => Err(eyre::eyre!("Failed to get gas price: {}", e)),
-                }
-            };
+                };
 
-            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match gas_estimation_result {
+            let (gas_limit, max_fee_per_gas, max_priority_fee_per_gas) = match gas_estimation_result
+            {
                 Ok(result) => result,
                 Err(e) => {
                     error!("Gas estimation failed for chain {}: {}", chain_id, e);
@@ -526,8 +532,14 @@ impl TransactionManager {
                 }
             };
 
-            let adjusted_max_fee = max_fee_per_gas * (1 + retry_count) * (100 + chain_config.gas_percentage_increase_per_retry) / 100;
-            let adjusted_priority_fee = max_priority_fee_per_gas * (1 + retry_count) * (100 + chain_config.gas_percentage_increase_per_retry) / 100;
+            let adjusted_max_fee = max_fee_per_gas
+                * (1 + retry_count)
+                * (100 + chain_config.gas_percentage_increase_per_retry)
+                / 100;
+            let adjusted_priority_fee = max_priority_fee_per_gas
+                * (1 + retry_count)
+                * (100 + chain_config.gas_percentage_increase_per_retry)
+                / 100;
 
             // Send the transaction and get pending transaction with proper error handling
             info!(
@@ -556,7 +568,9 @@ impl TransactionManager {
                     if error_str.to_lowercase().contains("nonce too low") {
                         info!("Received 'nonce too low' error for chain {}, indicating previous transaction was included", chain_id);
                         if let Some(prev_hash) = tx_hash {
-                            if let Ok(Some(receipt)) = provider.get_transaction_receipt(prev_hash).await {
+                            if let Ok(Some(receipt)) =
+                                provider.get_transaction_receipt(prev_hash).await
+                            {
                                 if receipt.status() == true {
                                     info!("Previous transaction was successful for chain {}: hash={:?}", chain_id, receipt.transaction_hash);
                                     return Ok(prev_hash);
@@ -568,7 +582,10 @@ impl TransactionManager {
                         }
                     }
 
-                    error!("Transaction submission failed for chain {}: {}", chain_id, e);
+                    error!(
+                        "Transaction submission failed for chain {}: {}",
+                        chain_id, e
+                    );
                     last_error = Some(error_str);
                     sleep(chain_config.retry_delay).await;
                     retry_count += 1;
@@ -611,7 +628,10 @@ impl TransactionManager {
                         return Ok(hash);
                     } else {
                         // Transaction reverted
-                        error!("Transaction reverted for chain {}: hash={:?}", chain_id, hash);
+                        error!(
+                            "Transaction reverted for chain {}: hash={:?}",
+                            chain_id, hash
+                        );
                         break;
                     }
                 }
@@ -644,7 +664,10 @@ impl TransactionManager {
                                 );
                                 return Ok(hash);
                             } else {
-                                error!("Transaction was included but reverted for chain {}: hash={:?}", chain_id, hash);
+                                error!(
+                                    "Transaction was included but reverted for chain {}: hash={:?}",
+                                    chain_id, hash
+                                );
                                 break;
                             }
                         }
@@ -672,13 +695,12 @@ impl TransactionManager {
         Err(eyre::eyre!(error_msg))
     }
 
-
     /// Gets provider for a specific chain with proper signing credentials
-    /// 
+    ///
     /// # Arguments
     /// * `chain_id` - Chain ID
     /// * `chain_config` - Chain-specific configuration
-    /// 
+    ///
     /// # Returns
     /// * `Result<ProviderType>` - Provider for the chain
     async fn get_provider_for_chain(
@@ -686,34 +708,33 @@ impl TransactionManager {
         chain_config: &ChainConfig,
     ) -> Result<ProviderType> {
         use alloy::{
-            network::EthereumWallet,
-            providers::ProviderBuilder,
-            signers::local::PrivateKeySigner,
+            network::EthereumWallet, providers::ProviderBuilder, signers::local::PrivateKeySigner,
             transports::http::reqwest::Url,
         };
 
         // Get the sequencer private key from environment
         let private_key = std::env::var("SEQUENCER_PRIVATE_KEY")
             .expect("SEQUENCER_PRIVATE_KEY must be set in .env");
-        
-        let signer: PrivateKeySigner = private_key.parse()
+
+        let signer: PrivateKeySigner = private_key
+            .parse()
             .map_err(|e| eyre::eyre!("Failed to parse sequencer private key: {}", e))?;
         let wallet = EthereumWallet::from(signer);
 
         // Parse the RPC URL
-        let rpc_url: Url = chain_config.rpc_url.parse()
+        let rpc_url: Url = chain_config
+            .rpc_url
+            .parse()
             .map_err(|e| eyre::eyre!("Invalid RPC URL for chain {}: {}", chain_id, e))?;
 
         // Create provider with proper signing credentials
-        let provider = ProviderBuilder::new()
-            .wallet(wallet)
-            .connect_http(rpc_url);
+        let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url);
 
         Ok(provider)
     }
 
     /// Gets batch submitter address from environment
-    /// 
+    ///
     /// # Returns
     /// * `Address` - Batch submitter address
     fn get_batch_submitter_address() -> Address {
@@ -725,7 +746,7 @@ impl TransactionManager {
     }
 
     /// Gets sequencer address from environment
-    /// 
+    ///
     /// # Returns
     /// * `Address` - Sequencer address
     fn get_sequencer_address() -> Address {
@@ -741,7 +762,7 @@ impl TransactionManager {
 async fn linea_estimate_gas(provider: &ProviderType, data: Vec<u8>) -> Result<(u64, u128, u128)> {
     let batch_submitter = TransactionManager::get_batch_submitter_address();
     let sequencer = TransactionManager::get_sequencer_address();
-    
+
     // Create the request parameters for linea_estimateGas
     let params = serde_json::json!({
         "from": format!("{:?}", sequencer),
@@ -789,7 +810,7 @@ async fn linea_estimate_gas(provider: &ProviderType, data: Vec<u8>) -> Result<(u
         (100 + default_increase_percentage) * (base_fee_per_gas + priority_fee_per_gas) / 100;
     let increased_priority_fee_per_gas =
         (100 + default_increase_percentage) * priority_fee_per_gas / 100;
-    
+
     Ok((
         increased_gas_limit,
         increased_base_fee_per_gas,

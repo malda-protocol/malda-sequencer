@@ -8,7 +8,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info};
 
 /// Configuration for the lane manager
-/// 
+///
 /// This struct contains all necessary parameters for the lane manager:
 /// - Polling intervals and retry settings
 /// - Chain parameters for each supported chain
@@ -24,7 +24,7 @@ pub struct LaneManagerConfig {
 }
 
 /// Manages lane status updates across multiple chains
-/// 
+///
 /// The lane manager continuously monitors market prices and updates
 /// lane status in the database. It runs a simple polling loop that:
 /// 1. Fetches current market prices
@@ -34,17 +34,17 @@ pub struct LaneManager;
 
 impl LaneManager {
     /// Creates and starts a new lane manager
-    /// 
+    ///
     /// This method initializes the lane manager and immediately starts
     /// the polling loop. It runs indefinitely until an error occurs.
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Lane manager configuration
     /// * `db` - Database connection for lane status updates
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let config = LaneManagerConfig { /* ... */ };
@@ -74,7 +74,10 @@ impl LaneManager {
                 .collect();
 
             // Update lane status in database
-            match db.update_lane_status(&config.chain_params, &market_prices).await {
+            match db
+                .update_lane_status(&config.chain_params, &market_prices)
+                .await
+            {
                 Ok(_) => {
                     debug!("Successfully updated lane status");
                 }
@@ -87,14 +90,14 @@ impl LaneManager {
     }
 
     /// Gets the current price for a market
-    /// 
+    ///
     /// This method returns hardcoded prices for different market types.
     /// In a production environment, this would fetch real-time prices
     /// from price feeds or exchanges.
-    /// 
+    ///
     /// # Arguments
     /// * `market` - Market address to get price for
-    /// 
+    ///
     /// # Returns
     /// * `f64` - Current market price
     fn get_price(market: &Address) -> f64 {

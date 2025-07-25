@@ -1,8 +1,8 @@
 //! # Provider Helper Module
-//! 
+//!
 //! This module provides common provider management functionality that can be shared
 //! across different components that need to interact with blockchain providers.
-//! 
+//!
 //! ## Features:
 //! - **Provider Creation**: Standardized provider creation with all necessary fillers
 //! - **Provider Freshness Validation**: Check if providers are up-to-date
@@ -21,7 +21,7 @@ use eyre::{eyre, Result, WrapErr};
 use tracing::{debug, info, warn};
 
 /// Standard provider type with all necessary fillers for blockchain interaction
-/// 
+///
 /// This type includes:
 /// - Identity filler for basic provider functionality
 /// - Gas filler for transaction gas estimation
@@ -50,7 +50,7 @@ pub type ProviderType = alloy::providers::fillers::FillProvider<
 >;
 
 /// Configuration for provider management
-/// 
+///
 /// This struct contains the necessary parameters for managing
 /// primary and fallback providers with freshness validation.
 #[derive(Clone)]
@@ -68,7 +68,7 @@ pub struct ProviderConfig {
 }
 
 /// Manages provider state for a single chain
-/// 
+///
 /// This struct encapsulates the provider management state including
 /// cached providers and fallback usage tracking.
 pub struct ProviderState {
@@ -82,10 +82,10 @@ pub struct ProviderState {
 
 impl ProviderState {
     /// Creates a new provider state with the given configuration
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Provider configuration
-    /// 
+    ///
     /// # Returns
     /// A new ProviderState instance
     pub fn new(config: ProviderConfig) -> Self {
@@ -97,14 +97,14 @@ impl ProviderState {
     }
 
     /// Gets a fresh provider connection with caching and fallback logic
-    /// 
+    ///
     /// This method implements the complete provider selection logic:
     /// 1. Checks if cached primary provider is still fresh
     /// 2. Reuses cached provider if valid
     /// 3. Creates new primary provider if needed
     /// 4. Falls back to secondary provider if primary fails
     /// 5. Updates cache and state accordingly
-    /// 
+    ///
     /// # Returns
     /// * `Result<(ProviderType, bool)>` - Provider and whether fallback was used
     pub async fn get_fresh_provider(&mut self) -> Result<(ProviderType, bool)> {
@@ -112,7 +112,10 @@ impl ProviderState {
         if !self.used_fallback && self.cached_primary.is_some() {
             let provider = self.cached_primary.as_ref().unwrap();
             if Self::is_provider_fresh(provider, self.config.max_block_delay_secs).await {
-                debug!("Reusing cached primary provider for chain {}", self.config.chain_id);
+                debug!(
+                    "Reusing cached primary provider for chain {}",
+                    self.config.chain_id
+                );
                 return Ok((provider.clone(), false));
             }
         }
@@ -121,21 +124,31 @@ impl ProviderState {
         match Self::create_provider(&self.config.primary_url, self.config.use_websocket).await {
             Ok(provider) => {
                 if Self::is_provider_fresh(&provider, self.config.max_block_delay_secs).await {
-                    debug!("Using new primary provider for chain {}", self.config.chain_id);
+                    debug!(
+                        "Using new primary provider for chain {}",
+                        self.config.chain_id
+                    );
                     self.cached_primary = Some(provider.clone());
                     self.used_fallback = false;
                     return Ok((provider, false));
                 } else {
-                    warn!("Primary provider for chain {} is not fresh, trying fallback", self.config.chain_id);
+                    warn!(
+                        "Primary provider for chain {} is not fresh, trying fallback",
+                        self.config.chain_id
+                    );
                 }
             }
             Err(e) => {
-                warn!("Failed to create primary provider for chain {}: {:?}, trying fallback", self.config.chain_id, e);
+                warn!(
+                    "Failed to create primary provider for chain {}: {:?}, trying fallback",
+                    self.config.chain_id, e
+                );
             }
         }
 
         // Try fallback provider
-        let fallback_provider = Self::create_provider(&self.config.fallback_url, self.config.use_websocket).await?;
+        let fallback_provider =
+            Self::create_provider(&self.config.fallback_url, self.config.use_websocket).await?;
         if Self::is_provider_fresh(&fallback_provider, self.config.max_block_delay_secs).await {
             info!("Using fallback provider for chain {}", self.config.chain_id);
             self.cached_primary = None; // Clear primary cache when using fallback
@@ -143,18 +156,21 @@ impl ProviderState {
             return Ok((fallback_provider, true));
         }
 
-        Err(eyre!("Both primary and fallback providers are unavailable for chain {}", self.config.chain_id))
+        Err(eyre!(
+            "Both primary and fallback providers are unavailable for chain {}",
+            self.config.chain_id
+        ))
     }
 
     /// Validates if a provider is fresh (not too far behind current time)
-    /// 
+    ///
     /// This method checks if the provider's latest block is within the acceptable
     /// delay window. This prevents using stale providers that might be out of sync.
-    /// 
+    ///
     /// # Arguments
     /// * `provider` - Provider to validate
     /// * `max_delay` - Maximum allowed delay in seconds
-    /// 
+    ///
     /// # Returns
     /// * `bool` - True if provider is fresh, false otherwise
     async fn is_provider_fresh(provider: &ProviderType, max_delay: u64) -> bool {
@@ -162,25 +178,24 @@ impl ProviderState {
             Ok(Some(block)) => {
                 let block_timestamp: u64 = block.header.inner.timestamp.into();
                 let current_time = chrono::Utc::now().timestamp() as u64;
-                
+
                 // Provider is fresh if block time is current or within max delay
-                current_time <= block_timestamp || 
-                (current_time - block_timestamp) <= max_delay
+                current_time <= block_timestamp || (current_time - block_timestamp) <= max_delay
             }
-            _ => false
+            _ => false,
         }
     }
 
     /// Creates a new provider connection to the specified URL
-    /// 
+    ///
     /// This method creates a new connection to the specified URL using either
     /// HTTP or WebSocket protocol based on the configuration. It configures
     /// the provider with all necessary fillers for blockchain interaction.
-    /// 
+    ///
     /// # Arguments
     /// * `url` - RPC URL to connect to
     /// * `use_websocket` - Whether to use WebSocket (true) or HTTP (false) connection
-    /// 
+    ///
     /// # Returns
     /// * `Result<ProviderType>` - Connected provider
     async fn create_provider(url: &str, use_websocket: bool) -> Result<ProviderType> {
@@ -191,9 +206,10 @@ impl ProviderState {
 
         if use_websocket {
             // Create WebSocket connection
-            let ws_url: Url = url.parse()
+            let ws_url: Url = url
+                .parse()
                 .wrap_err_with(|| format!("Invalid WebSocket URL: {}", url))?;
-            
+
             let ws_connect = WsConnect::new(ws_url);
             ProviderBuilder::new()
                 .wallet(wallet)
@@ -202,12 +218,11 @@ impl ProviderState {
                 .wrap_err("Failed to connect to WebSocket")
         } else {
             // Create HTTP connection
-            let rpc_url: Url = url.parse()
+            let rpc_url: Url = url
+                .parse()
                 .wrap_err_with(|| format!("Invalid HTTP URL: {}", url))?;
-            
-            Ok(ProviderBuilder::new()
-                .wallet(wallet)
-                .connect_http(rpc_url))
+
+            Ok(ProviderBuilder::new().wallet(wallet).connect_http(rpc_url))
         }
     }
-} 
+}

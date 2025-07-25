@@ -127,10 +127,14 @@ pub enum EventType {
 impl EventType {
     pub fn from_signature(signature: &[u8]) -> Self {
         use alloy::primitives::keccak256;
-        
+
         match signature {
-            sig if sig == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => EventType::HostBorrow,
-            sig if sig == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => EventType::HostWithdraw,
+            sig if sig == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => {
+                EventType::HostBorrow
+            }
+            sig if sig == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => {
+                EventType::HostWithdraw
+            }
             _ => EventType::Unknown,
         }
     }

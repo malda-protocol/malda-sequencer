@@ -1,16 +1,16 @@
 //! # Reset Transaction Manager Module
-//! 
+//!
 //! This module provides a reset transaction manager that handles stuck events and failed transactions
 //! in the sequencer system. It continuously monitors the database for events that need to be reset
 //! and optionally triggers rebalancing when certain conditions are met.
-//! 
+//!
 //! ## Key Features:
 //! - **Stuck Event Reset**: Automatically resets events that have been stuck for too long
 //! - **Failed Transaction Handling**: Processes failed transactions and resets them
 //! - **Rebalancing Integration**: Triggers rebalancing requests when USD value thresholds are met
 //! - **Retry Logic**: Implements exponential backoff retry logic for resilience
 //! - **Parallel Processing**: Handles failed transactions in a separate spawned task
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! ResetTxManager::new()
@@ -20,7 +20,7 @@
 //! ├── Database Operations: Resets events and transactions
 //! └── Error Handling: Graceful error recovery with backoff
 //! ```
-//! 
+//!
 //! ## Workflow:
 //! 1. **Initialization**: Sets up configuration and database connection
 //! 2. **Stuck Event Processing**: Continuously polls for stuck events to reset
@@ -40,7 +40,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 /// Configuration for the reset transaction manager
-/// 
+///
 /// This struct contains all necessary parameters for configuring the reset transaction
 /// manager's behavior, including retry settings, polling intervals, and rebalancing
 /// thresholds.
@@ -71,16 +71,16 @@ pub struct ResetTxManagerConfig {
 }
 
 /// Reset transaction manager that handles stuck events and failed transactions
-/// 
+///
 /// This component continuously monitors for stuck events and failed transactions,
 /// resetting them and optionally triggering rebalancing when needed. It operates
 /// with two main processing loops:
-/// 
+///
 /// 1. **Main Loop**: Handles stuck events with retry logic and exponential backoff
 /// 2. **Spawned Task**: Processes failed transactions in parallel with rebalancing
-/// 
+///
 /// ## Error Handling
-/// 
+///
 /// - Implements exponential backoff retry logic for resilience
 /// - Gracefully handles database errors and network failures
 /// - Provides detailed logging for monitoring and debugging
@@ -89,34 +89,34 @@ pub struct ResetTxManager;
 
 impl ResetTxManager {
     /// Creates and starts a new reset transaction manager
-    /// 
+    ///
     /// This method initializes the reset transaction manager and immediately starts
     /// processing stuck events and failed transactions in a continuous loop. The manager
     /// operates with two parallel processes:
-    /// 
+    ///
     /// - **Main Process**: Continuously polls for stuck events and resets them
     /// - **Background Process**: Handles failed transactions and triggers rebalancing
-    /// 
+    ///
     /// ## Retry Logic
-    /// 
+    ///
     /// The manager implements exponential backoff retry logic:
     /// - Starts with 1 second delay
     /// - Doubles delay on each retry attempt
     /// - Gives up after reaching max_retries
-    /// 
+    ///
     /// ## Error Recovery
-    /// 
+    ///
     /// - Database errors trigger retry with backoff
     /// - Network failures are handled gracefully
     /// - Failed operations don't stop the main processing loop
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Reset transaction manager configuration
     /// * `db` - Database connection for event and transaction operations
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let config = ResetTxManagerConfig { /* ... */ };
@@ -169,26 +169,26 @@ impl ResetTxManager {
     }
 
     /// Converts U256 amount to string with correct decimal precision for the market
-    /// 
+    ///
     /// This function handles the conversion of blockchain amounts (U256) to human-readable
     /// strings with the appropriate decimal precision based on the market type.
-    /// 
+    ///
     /// ## Market Types and Decimals
-    /// 
+    ///
     /// - **USDC/USDT**: 6 decimals (1.0 = 1,000,000)
     /// - **WBTC**: 8 decimals (1.0 = 100,000,000)
     /// - **Other tokens**: 18 decimals (1.0 = 1,000,000,000,000,000,000)
-    /// 
+    ///
     /// ## Formatting
-    /// 
+    ///
     /// - Removes trailing zeros for cleaner output
     /// - Removes decimal point if not needed
     /// - Handles edge cases gracefully
-    /// 
+    ///
     /// # Arguments
     /// * `market` - Market address to determine decimal precision
     /// * `amount` - U256 amount to convert
-    /// 
+    ///
     /// # Returns
     /// * `String` - Formatted amount string with correct decimals
     fn parse_amount(market: &Address, amount: &U256) -> String {
@@ -200,12 +200,12 @@ impl ResetTxManager {
         } else {
             18
         };
-        
+
         // Convert U256 to f64 and apply decimal precision
         let amount_f64 = amount.to_string().parse::<f64>().unwrap_or(0.0);
         let divisor = 10f64.powi(decimals);
         let value = amount_f64 / divisor;
-        
+
         // Format output: remove trailing zeros and decimal point if not needed
         let output = if value.fract() == 0.0 {
             format!("{:.0}", value)
@@ -220,31 +220,31 @@ impl ResetTxManager {
     }
 
     /// Requests rebalancing for a specific market and amount
-    /// 
+    ///
     /// This function sends a rebalancing request to the external rebalancing service
     /// when certain conditions are met (e.g., USD value thresholds). It handles the
     /// HTTP request and response processing.
-    /// 
+    ///
     /// ## Request Format
-    /// 
+    ///
     /// The request includes:
     /// - Market address (hex format)
     /// - Amount in human-readable format
     /// - Destination chain ID
     /// - API key for authentication
-    /// 
+    ///
     /// ## Error Handling
-    /// 
+    ///
     /// - Network errors are propagated up
     /// - HTTP errors include status code and response body
     /// - Invalid responses trigger appropriate error messages
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Reset transaction manager configuration
     /// * `market` - Market address for rebalancing
     /// * `dst_chain_id` - Destination chain ID
     /// * `amount` - Amount to rebalance (U256)
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
     pub async fn request_rebalance(
@@ -259,24 +259,24 @@ impl ResetTxManager {
             config.rebalancer_url.trim_end_matches('/')
         );
         let api_key = &config.api_key;
-        
+
         // Convert amount to human-readable format
         let amount_str = Self::parse_amount(&market, &amount);
-        
+
         // Prepare request payload
         let payload = serde_json::json!({
             "marketAddress": format!("{:#x}", market),
             "amountRaw": amount_str,
             "dstChainId": dst_chain_id.to_string(),
         });
-        
+
         info!(
             "Requested rebalance for market {} dst_chain_id {} amount {}",
             format!("{:#x}", market),
             dst_chain_id,
             amount
         );
-        
+
         // Send HTTP request to rebalancing service
         let res = client
             .post(&url)
@@ -285,7 +285,7 @@ impl ResetTxManager {
             .json(&payload)
             .send()
             .await?;
-            
+
         if res.status().is_success() {
             info!(
                 "Rebalance request successful for market {} dst_chain_id {} amount {}",
@@ -299,37 +299,37 @@ impl ResetTxManager {
             error!("Rebalance request failed: status {} body {}", status, text);
             eyre::bail!("Rebalance request failed: status {} body {}", status, text)
         }
-        
+
         // Wait for the configured delay after rebalancing
         sleep(Duration::from_secs(config.rebalance_delay)).await;
         Ok(())
     }
 
     /// Runs the main reset transaction manager processing loop
-    /// 
+    ///
     /// This function implements the core processing logic for the reset transaction manager.
     /// It operates with two parallel processes:
-    /// 
+    ///
     /// 1. **Main Loop**: Continuously polls for stuck events and resets them
     /// 2. **Spawned Task**: Processes failed transactions and triggers rebalancing
-    /// 
+    ///
     /// ## Processing Flow
-    /// 
+    ///
     /// - **Stuck Events**: Polls database for events that have been stuck too long
     /// - **Failed Transactions**: Processes failed transactions in parallel task
     /// - **Rebalancing**: Triggers rebalancing requests when USD thresholds are met
     /// - **Database Updates**: Resets events and transactions in the database
-    /// 
+    ///
     /// ## Error Handling
-    /// 
+    ///
     /// - Database errors are logged but don't stop processing
     /// - Network failures trigger retry logic
     /// - Individual operation failures don't affect the main loop
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Reset transaction manager configuration
     /// * `db` - Database connection for operations
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
     async fn run_reset_tx_manager(config: &ResetTxManagerConfig, db: &Database) -> Result<()> {
@@ -341,7 +341,7 @@ impl ResetTxManager {
         let max_retries_reset = config.max_retries_reset;
         let db_clone = db.clone();
         let config_clone = config.clone();
-        
+
         // Spawn background task for failed transaction processing
         tokio::spawn(async move {
             let mut failed_interval = tokio::time::interval(poll_interval);
@@ -356,20 +356,25 @@ impl ResetTxManager {
                             if tx_hashes.is_empty() {
                                 continue;
                             }
-                            
+
                             // Check if rebalancing is needed based on USD value
-                            let should_rebalance = Self::check_usd_value(&config_clone, &market, &sum);
+                            let should_rebalance =
+                                Self::check_usd_value(&config_clone, &market, &sum);
                             if should_rebalance {
-                                if let Err(e) =
-                                    Self::request_rebalance(&config_clone, market, dst_chain_id, sum)
-                                        .await
+                                if let Err(e) = Self::request_rebalance(
+                                    &config_clone,
+                                    market,
+                                    dst_chain_id,
+                                    sum,
+                                )
+                                .await
                                 {
                                     error!("Failed to request rebalance: {:?}", e);
                                 }
                             } else {
                                 info!("Skipping rebalance for market {} dst_chain_id {} amount {}: below minimum USD value", format!("{:#x}", market), dst_chain_id, sum);
                             }
-                            
+
                             // Reset the failed transactions in the database
                             match db_clone.reset_failed_transactions(&tx_hashes).await {
                                 Ok(_) => {
@@ -417,12 +422,12 @@ impl ResetTxManager {
         // Get current price for the market
         let price = Self::get_price(market);
         info!("amount {}", amount);
-        
+
         // Calculate USD value
         let amount_f64 = amount.to_string().parse::<f64>().unwrap_or(0.0);
         let usd_value = amount_f64 * price;
         let minimum_met = usd_value >= config.minimum_usd_value;
-        
+
         info!(
             "Checking USD value for market {} amount {} price {} usd_value {} minimum_met {}",
             format!("{:#x}", market),

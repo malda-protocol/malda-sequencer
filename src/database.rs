@@ -1,9 +1,9 @@
 //! # Database Module
-//! 
+//!
 //! This module provides the core database functionality for the sequencer system,
 //! managing event lifecycle, proof generation, batch processing, and transaction
 //! status tracking across multiple chains.
-//! 
+//!
 //! ## Key Features:
 //! - **Event Lifecycle Management**: Tracks events from reception to completion
 //! - **Proof Generation Coordination**: Manages proof request timing and journal indexing
@@ -12,7 +12,7 @@
 //! - **Volume Flow Control**: Implements lane-based volume management
 //! - **Stuck Event Recovery**: Automatically resets stuck events with retry logic
 //! - **Transaction Status Tracking**: Monitors transaction success/failure states
-//! 
+//!
 //! ## Architecture:
 //! ```
 //! Database Operations
@@ -23,7 +23,7 @@
 //! ├── Recovery Systems: Stuck event detection and reset
 //! └── Transaction Tracking: Success/failure monitoring
 //! ```
-//! 
+//!
 //! ## Event Lifecycle:
 //! 1. **Received**: Event initially received from blockchain
 //! 2. **Processed**: Event parsed and validated
@@ -34,7 +34,7 @@
 //! 7. **BatchSubmitted**: Included in batch submission
 //! 8. **BatchIncluded**: Batch confirmed on blockchain
 //! 9. **TxProcessSuccess/Fail**: Final transaction status
-//! 
+//!
 //! ## Database Schema:
 //! - **events**: Active events being processed
 //! - **finished_events**: Completed events with final status
@@ -56,7 +56,7 @@ use tracing::info;
 use tracing::{debug, warn};
 
 /// Chain-specific parameters for volume flow management
-/// 
+///
 /// This struct defines the configuration parameters for managing
 /// volume flow on a per-chain basis, including maximum volume
 /// thresholds, time intervals, and protection mechanisms.
@@ -73,7 +73,7 @@ pub struct ChainParams {
 }
 
 /// Event status enumeration for tracking event lifecycle
-/// 
+///
 /// This enum represents all possible states an event can be in
 /// during its processing lifecycle, from initial reception to
 /// final completion or failure.
@@ -109,10 +109,10 @@ pub enum EventStatus {
 
 impl EventStatus {
     /// Converts the event status to its database string representation
-    /// 
+    ///
     /// This method maps each enum variant to its corresponding
     /// database string value for storage and retrieval.
-    /// 
+    ///
     /// # Returns
     /// * `String` - Database string representation of the status
     fn to_db_string(&self) -> String {
@@ -143,7 +143,7 @@ impl Default for EventStatus {
 }
 
 /// Event update structure for database operations
-/// 
+///
 /// This struct contains all the fields that can be updated for an event,
 /// including transaction details, status information, proof data, and
 /// timing information for various processing stages.
@@ -202,22 +202,22 @@ pub struct EventUpdate {
 }
 
 /// Database connection and operations manager
-/// 
+///
 /// This struct provides the main interface for all database operations,
 /// including event management, proof coordination, batch processing,
 /// and transaction status tracking.
-/// 
+///
 /// ## Key Responsibilities:
-/// 
+///
 /// - **Event Lifecycle Management**: Track events through all processing stages
 /// - **Proof Generation Coordination**: Manage proof request timing and journal indexing
 /// - **Batch Processing**: Handle batch submission and inclusion tracking
 /// - **Volume Flow Control**: Implement lane-based volume management
 /// - **Stuck Event Recovery**: Automatically detect and reset stuck events
 /// - **Transaction Status Tracking**: Monitor transaction success/failure states
-/// 
+///
 /// ## Connection Management:
-/// 
+///
 /// - **Connection Pooling**: Uses SQLx connection pool for efficient database access
 /// - **Migration Support**: Automatically runs database migrations on initialization
 /// - **SSL Support**: Configures SSL connections for secure database access
@@ -229,17 +229,17 @@ pub struct Database {
 
 impl Database {
     /// Creates a new database connection with automatic migration support
-    /// 
+    ///
     /// This method initializes a new database connection with the provided
     /// connection string, sets up SSL connections, and runs any pending
     /// database migrations automatically.
-    /// 
+    ///
     /// # Arguments
     /// * `database_url` - PostgreSQL connection string
-    /// 
+    ///
     /// # Returns
     /// * `Result<Self>` - Database instance or error
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let db = Database::new("postgresql://user:pass@localhost/db").await?;
@@ -260,24 +260,24 @@ impl Database {
     }
 
     /// Adds new events to the database with retarded event filtering
-    /// 
+    ///
     /// This method adds a batch of new events to the database, with special
     /// handling for retarded events that filters out events already in the
     /// finished_events table or active events table.
-    /// 
+    ///
     /// ## Retarded Event Handling:
-    /// 
+    ///
     /// For retarded events, the method performs additional filtering to ensure
     /// only truly new events are added, preventing duplicate processing of
     /// events that may have been processed in previous runs.
-    /// 
+    ///
     /// # Arguments
     /// * `events` - Vector of events to add to the database
     /// * `is_retarded` - Whether these are retarded events requiring special filtering
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let events = vec![event1, event2, event3];
@@ -365,32 +365,32 @@ impl Database {
     }
 
     /// Retrieves events ready for proof generation with rate limiting
-    /// 
+    ///
     /// This method implements a sophisticated proof request system that:
     /// 1. Checks rate limiting using global timestamps
     /// 2. Ensures fair distribution across chains
     /// 3. Claims events atomically to prevent race conditions
     /// 4. Applies batch limits with chain-specific quotas
-    /// 
+    ///
     /// ## Rate Limiting:
-    /// 
+    ///
     /// The method uses a global timestamp table to ensure proof requests
     /// are not made too frequently, preventing overwhelming the proof
     /// generation system.
-    /// 
+    ///
     /// ## Fair Distribution:
-    /// 
+    ///
     /// Events are distributed fairly across chains based on their
     /// percentage of total ready events, ensuring no single chain
     /// dominates the proof generation queue.
-    /// 
+    ///
     /// # Arguments
     /// * `delay_seconds` - Minimum delay between proof requests in seconds
     /// * `batch_limit` - Maximum number of events to claim in this batch
-    /// 
+    ///
     /// # Returns
     /// * `Result<Vec<EventUpdate>>` - Vector of claimed events ready for proof generation
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let events = db.get_ready_to_request_proof_events(60, 10).await?;
@@ -535,32 +535,32 @@ impl Database {
     }
 
     /// Retrieves proven events for batch submission on a specific destination chain
-    /// 
+    ///
     /// This method implements chain-specific batch processing that:
     /// 1. Checks delay requirements for the target chain
     /// 2. Finds the oldest journal for the target chain
     /// 3. Claims events atomically with journal ordering
     /// 4. Applies transaction limits per batch
-    /// 
+    ///
     /// ## Chain-Specific Processing:
-    /// 
+    ///
     /// Each destination chain has its own batch timing and limits,
     /// ensuring that batches are submitted at appropriate intervals
     /// and don't exceed chain-specific transaction limits.
-    /// 
+    ///
     /// ## Journal Ordering:
-    /// 
+    ///
     /// Events are processed in journal order to maintain the correct
     /// sequence for proof verification and batch inclusion.
-    /// 
+    ///
     /// # Arguments
     /// * `delay_seconds` - Minimum delay between batch submissions for this chain
     /// * `target_dst_chain_id` - Destination chain ID to process events for
     /// * `max_tx` - Maximum number of transactions per batch
-    /// 
+    ///
     /// # Returns
     /// * `Result<Vec<EventUpdate>>` - Vector of events ready for batch submission
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let events = db.get_proven_events_for_chain(120, 59144, 50).await?;
@@ -725,23 +725,23 @@ impl Database {
     }
 
     /// Updates events to ready status based on current block numbers
-    /// 
+    ///
     /// This method updates events from `ReorgSecurityDelay` status to
     /// `ReadyToRequestProof` status when the current block number meets
     /// the required proof request block threshold.
-    /// 
+    ///
     /// ## Block-Based Updates:
-    /// 
+    ///
     /// The method processes events chain by chain, updating only events
     /// where the current block number has reached or exceeded the
     /// `should_request_proof_at_block` threshold.
-    /// 
+    ///
     /// # Arguments
     /// * `current_block_map` - HashMap of chain ID to current block number
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let block_map = HashMap::from([(59144, 12345), (59140, 67890)]);
@@ -793,22 +793,22 @@ impl Database {
     }
 
     /// Updates events with proof data and journal indices
-    /// 
+    ///
     /// This method updates events that have been claimed for proof generation
     /// with the received proof data, including journal, seal, and timing
     /// information. It also assigns journal indices for proper ordering.
-    /// 
+    ///
     /// ## Proof Data Management:
-    /// 
+    ///
     /// The method updates multiple events with the same proof data (journal
     /// and seal) while assigning unique journal indices to maintain proper
     /// ordering for batch processing.
-    /// 
+    ///
     /// ## Performance Tracking:
-    /// 
+    ///
     /// The method records timing information (stark_time, snark_time) and
     /// cycle counts for performance monitoring and optimization.
-    /// 
+    ///
     /// # Arguments
     /// * `updates` - Vector of (tx_hash, journal_index) pairs
     /// * `journal` - Journal data for proof verification
@@ -817,10 +817,10 @@ impl Database {
     /// * `stark_time` - Stark proof generation time in seconds
     /// * `snark_time` - Snark proof generation time in seconds
     /// * `total_cycles` - Total cycles used for proof generation
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let updates = vec![(tx_hash1, 0), (tx_hash2, 1)];
@@ -893,32 +893,32 @@ impl Database {
     }
 
     /// Updates batch status for a group of events
-    /// 
+    ///
     /// This method updates the batch status for multiple events that were
     /// submitted as part of the same batch transaction. It handles both
     /// successful batch inclusion and failed batch submissions.
-    /// 
+    ///
     /// ## Batch Status Management:
-    /// 
+    ///
     /// The method updates events atomically within a transaction to ensure
     /// consistency, setting the appropriate status and optional batch
     /// transaction hash and inclusion timestamp.
-    /// 
+    ///
     /// ## Error Handling:
-    /// 
+    ///
     /// For failed batches, the method can set an error message to provide
     /// context about why the batch failed.
-    /// 
+    ///
     /// # Arguments
     /// * `tx_hashes` - Vector of transaction hashes to update
     /// * `batch_tx_hash` - Optional batch transaction hash
     /// * `batch_included_at` - Optional timestamp when batch was included
     /// * `error` - Optional error message for failed batches
     /// * `status` - New status for the events (BatchIncluded, BatchFailed, etc.)
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error status
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let tx_hashes = vec![tx_hash1, tx_hash2];
