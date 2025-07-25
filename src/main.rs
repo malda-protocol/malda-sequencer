@@ -21,7 +21,7 @@ mod transaction_manager;
 use transaction_manager::{TransactionConfig, TransactionManager};
 
 mod batch_event_listener;
-use batch_event_listener::{BatchEventConfig, BatchEventListener};
+use batch_event_listener::BatchEventListener;
 
 mod lane_manager;
 use lane_manager::{LaneManager, LaneManagerConfig};
@@ -135,11 +135,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Result<()> {
     let mut handles = vec![];
 
-    // Start batch event listeners for all chains
+    // Start unified batch event listener for all chains
+    info!("Starting unified batch event listener for all chains");
+    
+    let mut batch_chain_configs = Vec::new();
+    
     for chain in config.get_all_chains() {
-        info!("Starting batch event listener for {}", chain.name);
+        info!("Adding chain {} to unified batch event listener", chain.name);
 
-        let batch_config = BatchEventConfig {
+        // Create normal batch config for this chain
+        let normal_batch_config = batch_event_listener::ChainConfig {
             primary_ws_url: chain.ws_url.clone(),
             fallback_ws_url: chain.fallback_ws_url.clone(),
             batch_submitter: chain.batch_submitter_address,
@@ -148,8 +153,10 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
             max_block_delay_secs: chain.max_block_delay_secs,
             is_retarded: false,
         };
+        batch_chain_configs.push(normal_batch_config);
 
-        let retarded_batch_config = BatchEventConfig {
+        // Create retarded batch config for this chain
+        let retarded_batch_config = batch_event_listener::ChainConfig {
             primary_ws_url: chain.ws_url.clone(),
             fallback_ws_url: chain.fallback_ws_url.clone(),
             batch_submitter: chain.batch_submitter_address,
@@ -158,22 +165,19 @@ async fn start_sequencer_components(config: SequencerConfig, db: Database) -> Re
             max_block_delay_secs: chain.max_block_delay_secs,
             is_retarded: true,
         };
-
-        let db_clone = db.clone();
-        let config_clone = config.clone();
-
-        let handle = tokio::spawn(async move {
-            start_batch_event_listeners(
-                batch_config,
-                retarded_batch_config,
-                db_clone,
-                config_clone.restart_config,
-            )
-            .await
-        });
-
-        handles.push(handle);
+        batch_chain_configs.push(retarded_batch_config);
     }
+
+    let unified_batch_config = batch_event_listener::BatchEventConfig {
+        chain_configs: batch_chain_configs,
+    };
+
+    let db_clone = db.clone();
+    let handle = tokio::spawn(async move {
+        BatchEventListener::new(unified_batch_config, db_clone).await
+    });
+
+    handles.push(handle);
 
     // Start simplified event listener for all chains, markets, and events
     let mut all_event_configs = Vec::new();
@@ -355,29 +359,7 @@ fn create_transaction_config(config: &SequencerConfig) -> TransactionConfig {
     TransactionConfig { chain_configs }
 }
 
-async fn start_batch_event_listeners(
-    normal_config: BatchEventConfig,
-    retarded_config: BatchEventConfig,
-    db: Database,
-    restart_config: RestartConfig,
-) -> Result<()> {
-    loop {
-        let mut normal_listener = BatchEventListener::new(normal_config.clone(), db.clone());
-        let mut retarded_listener = BatchEventListener::new(retarded_config.clone(), db.clone());
 
-        info!("Starting new batch event listener instance");
-
-        if let Err(e) = normal_listener.start().await {
-            error!("Batch event listener failed: {:?}", e);
-        }
-
-        if let Err(e) = retarded_listener.start().await {
-            error!("Retarded batch event listener failed: {:?}", e);
-        }
-
-        tokio::time::sleep(Duration::from_secs(restart_config.listener_delay_seconds)).await;
-    }
-}
 
 
 
