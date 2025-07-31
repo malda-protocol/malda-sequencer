@@ -227,6 +227,9 @@ fn print_configuration_summary(config: &SequencerConfig) {
     println!("\n================ Sequencer Configuration Summary ================");
     println!("  Environment: {:?}", config.environment);
     println!("  Database: {}", config.database_url);
+    if let Some(ref fallback_url) = config.fallback_database_url {
+        println!("  Fallback Database: {}", fallback_url);
+    }
     println!("  Chains:");
 
     // Print detailed information for each configured chain
@@ -281,6 +284,13 @@ fn log_configuration_details(config: &SequencerConfig) {
     let chains = config.get_all_chains();
     info!("📋 Configuration Summary:");
     info!("   Environment: {:?}", config.environment);
+    info!("   Database: {}", config.database_url);
+    if let Some(ref fallback_url) = config.fallback_database_url {
+        info!("   Fallback Database: {}", fallback_url);
+        info!("   Database Failover: Enabled");
+    } else {
+        info!("   Database Failover: Disabled");
+    }
     info!("   Total chains configured: {}", chains.len());
 
     // Log detailed information for each chain
@@ -334,8 +344,19 @@ fn log_configuration_details(config: &SequencerConfig) {
 /// let db = initialize_database(&config).await?;
 /// ```
 async fn initialize_database(config: &SequencerConfig) -> Result<Database> {
-    // Create database connection with SSL support
-    let db = Database::new(&config.database_url).await?;
+    // Create database connection with fallback support if configured
+    let db = if let Some(ref fallback_url) = config.fallback_database_url {
+        info!("Initializing database with fallback support");
+        info!("Primary database: {}", config.database_url);
+        info!("Fallback database: {}", fallback_url);
+        
+        Database::new_with_simple_fallback(&config.database_url, Some(fallback_url.clone())).await?
+    } else {
+        info!("Initializing database without fallback support");
+        info!("Database URL: {}", config.database_url);
+        
+        Database::new(&config.database_url).await?
+    };
 
     // Reset events that were in progress when sequencer was stopped
     db.sequencer_start_events_reset().await?;

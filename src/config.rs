@@ -3,6 +3,7 @@ use eyre::Result;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing::info;
 
 use crate::constants::*;
 use crate::events::*;
@@ -78,6 +79,7 @@ pub struct SequencerConfig {
     pub environment: Environment,
     pub chains: HashMap<u32, ChainConfig>,
     pub database_url: String,
+    pub fallback_database_url: Option<String>,
     pub sequencer_address: Address,
     pub sequencer_private_key: String,
     pub gas_fee_distributer_address: Address,
@@ -162,6 +164,7 @@ impl SequencerConfig {
             environment: environment.clone(),
             chains: HashMap::new(),
             database_url: Self::get_env_var("DATABASE_URL")?,
+            fallback_database_url: std::env::var("DATABASE_URL_FALLBACK").ok(),
             sequencer_address: Address::from_str(&Self::get_env_var("SEQUENCER_ADDRESS")?)?,
             sequencer_private_key: Self::get_env_var("SEQUENCER_PRIVATE_KEY")?,
             gas_fee_distributer_address: Address::from_str(&Self::get_env_var(
@@ -182,6 +185,16 @@ impl SequencerConfig {
 
     fn get_env_var(key: &str) -> Result<String> {
         std::env::var(key).map_err(|_| eyre::eyre!("Environment variable {} not found", key))
+    }
+
+    fn get_env_var_with_default(key: &str, default: &str) -> Result<String> {
+        match std::env::var(key) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                info!("Environment variable {} not found, using default: {}", key, default);
+                Ok(default.to_string())
+            }
+        }
     }
 
     fn init_chains(&mut self) -> Result<()> {
@@ -301,7 +314,7 @@ impl SequencerConfig {
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG.to_string(),
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.to_string(),
             ],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
@@ -330,7 +343,7 @@ impl SequencerConfig {
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
@@ -359,7 +372,7 @@ impl SequencerConfig {
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1", "600")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
                 .parse()?,
@@ -388,7 +401,7 @@ impl SequencerConfig {
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
@@ -430,7 +443,7 @@ impl SequencerConfig {
                 HOST_BORROW_ON_EXTENSION_CHAIN_SIG.to_string(),
                 HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.to_string(),
             ],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
@@ -468,7 +481,7 @@ impl SequencerConfig {
                 MWRS_ETH_MARKET,
             ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
@@ -506,7 +519,7 @@ impl SequencerConfig {
                 MWRS_ETH_MARKET,
             ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1", "600")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
                 .parse()?,
@@ -544,7 +557,7 @@ impl SequencerConfig {
                 MWRS_ETH_MARKET,
             ],
             events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
-            max_block_delay_secs: Self::get_env_var("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2")?
+            max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
                 .parse()?,
