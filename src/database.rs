@@ -54,6 +54,10 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing::info;
 use tracing::{debug, warn};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::timeout;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Chain-specific parameters for volume flow management
 ///
@@ -70,6 +74,40 @@ pub struct ChainParams {
     pub block_delay: u64,
     /// Reorg protection delay in blocks
     pub reorg_protection: u64,
+}
+
+/// Database configuration for primary and fallback connections
+///
+/// This struct defines the configuration parameters for database
+/// connections, including primary and fallback URLs, health monitoring
+/// intervals, and failure thresholds.
+#[derive(Clone)]
+pub struct DatabaseConfig {
+    /// Primary database connection URL
+    pub primary_url: String,
+    /// Fallback database connection URL (optional)
+    pub fallback_url: Option<String>,
+    /// Health check interval in seconds
+    pub health_check_interval: Duration,
+    /// Number of consecutive failures before switching to fallback
+    pub failure_threshold: u32,
+    /// Number of consecutive successes before switching back to primary
+    pub recovery_threshold: u32,
+    /// Timeout for health check queries in seconds
+    pub health_check_timeout: Duration,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            primary_url: String::new(),
+            fallback_url: None,
+            health_check_interval: Duration::from_secs(5),
+            failure_threshold: 3,
+            recovery_threshold: 2,
+            health_check_timeout: Duration::from_secs(2),
+        }
+    }
 }
 
 /// Event status enumeration for tracking event lifecycle
@@ -215,16 +253,32 @@ pub struct EventUpdate {
 /// - **Volume Flow Control**: Implement lane-based volume management
 /// - **Stuck Event Recovery**: Automatically detect and reset stuck events
 /// - **Transaction Status Tracking**: Monitor transaction success/failure states
-///
-/// ## Connection Management:
-///
-/// - **Connection Pooling**: Uses SQLx connection pool for efficient database access
-/// - **Migration Support**: Automatically runs database migrations on initialization
-/// - **SSL Support**: Configures SSL connections for secure database access
+/// - **Fallback Database Support**: Automatic failover to backup database
+/// - **Health Monitoring**: Continuous monitoring of database connectivity
 #[derive(Clone)]
 pub struct Database {
-    /// PostgreSQL connection pool
-    pub pool: Pool<Postgres>,
+    /// Primary PostgreSQL connection pool (None if failed to initialize)
+    pub pool: Option<Pool<Postgres>>,
+    /// Fallback PostgreSQL connection pool (optional)
+    fallback_pool: Option<Pool<Postgres>>,
+    /// Configuration for database connections and health monitoring
+    config: DatabaseConfig,
+    /// Current active pool (primary or fallback)
+    active_pool: Arc<RwLock<Pool<Postgres>>>,
+    /// Health monitoring state
+    health_state: Arc<HealthState>,
+}
+
+/// Internal health monitoring state
+struct HealthState {
+    /// Whether currently using fallback database
+    using_fallback: AtomicBool,
+    /// Number of consecutive failures for active database
+    active_failures: Arc<RwLock<u32>>,
+    /// Number of consecutive successes for secondary database
+    secondary_successes: Arc<RwLock<u32>>,
+    /// Whether health monitoring is running
+    monitoring_active: AtomicBool,
 }
 
 impl Database {
@@ -247,7 +301,7 @@ impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::PgPool::connect_with(
             sqlx::postgres::PgConnectOptions::from_str(database_url)?
-                .ssl_mode(sqlx::postgres::PgSslMode::Require),
+                .ssl_mode(sqlx::postgres::PgSslMode::Require)
         )
         .await?;
 
@@ -256,7 +310,539 @@ impl Database {
 
         info!("Database initialized successfully");
 
-        Ok(Self { pool })
+        // Create a simple config for the basic constructor
+        let config = DatabaseConfig {
+            primary_url: database_url.to_string(),
+            fallback_url: None,
+            health_check_interval: Duration::from_secs(5),
+            failure_threshold: 3,
+            recovery_threshold: 2,
+            health_check_timeout: Duration::from_secs(2),
+        };
+
+        // Initialize health state
+        let health_state = Arc::new(HealthState {
+            using_fallback: AtomicBool::new(false),
+            active_failures: Arc::new(RwLock::new(0)),
+            secondary_successes: Arc::new(RwLock::new(0)),
+            monitoring_active: AtomicBool::new(false),
+        });
+
+        let active_pool = Arc::new(RwLock::new(pool.clone()));
+
+        Ok(Self { 
+            pool: Some(pool),
+            fallback_pool: None,
+            config,
+            active_pool,
+            health_state,
+        })
+    }
+
+    /// Creates a new database connection with fallback support and health monitoring
+    ///
+    /// This method initializes database connections with primary and optional fallback
+    /// URLs, sets up SSL connections, runs migrations, and starts health monitoring.
+    ///
+    /// # Arguments
+    /// * `config` - Database configuration including primary and fallback URLs
+    ///
+    /// # Returns
+    /// * `Result<Self>` - Database instance or error
+    ///
+    /// # Example
+    /// ```rust
+    /// let config = DatabaseConfig {
+    ///     primary_url: "postgresql://user:pass@primary/db".to_string(),
+    ///     fallback_url: Some("postgresql://user:pass@fallback/db".to_string()),
+    ///     health_check_interval: Duration::from_secs(5),
+    ///     failure_threshold: 3,
+    ///     recovery_threshold: 2,
+    ///     health_check_timeout: Duration::from_secs(2),
+    /// };
+    /// let db = Database::new_with_fallback(config).await?;
+    /// ```
+    pub async fn new_with_fallback(config: DatabaseConfig) -> Result<Self> {
+        // Try to create primary pool
+        let primary_pool = match sqlx::postgres::PgConnectOptions::from_str(&config.primary_url) {
+            Ok(connect_options) => {
+                match sqlx::PgPool::connect_with(connect_options.ssl_mode(sqlx::postgres::PgSslMode::Require)).await {
+                    Ok(pool) => {
+                        info!("Primary database pool created successfully");
+                        Some(pool)
+                    }
+                    Err(e) => {
+                        debug!("Failed to create primary database pool: {:?}", e);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                debug!("Failed to parse primary database URL during health check: {:?}", e);
+                None
+            }
+        };
+
+        // Create fallback pool if provided
+        let fallback_pool = if let Some(ref fallback_url) = config.fallback_url {
+            match sqlx::postgres::PgConnectOptions::from_str(fallback_url) {
+                Ok(connect_options) => {
+                    match sqlx::PgPool::connect_with(connect_options.ssl_mode(sqlx::postgres::PgSslMode::Require)).await {
+                        Ok(pool) => {
+                            info!("Fallback database pool created successfully");
+                            Some(pool)
+                        }
+                        Err(e) => {
+                            warn!("Failed to create fallback database pool: {:?}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to parse fallback database URL: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Run migrations on primary if it's working
+        if let Some(ref primary_pool) = primary_pool {
+            if let Err(e) = sqlx::migrate!("./migrations").run(primary_pool).await {
+                warn!("Failed to run migrations on primary database: {:?}", e);
+            }
+        }
+
+        // Run migrations on fallback if available
+        if let Some(ref fallback_pool) = fallback_pool {
+            if let Err(e) = sqlx::migrate!("./migrations").run(fallback_pool).await {
+                warn!("Failed to run migrations on fallback database: {:?}", e);
+            }
+        }
+
+        // Initialize health state
+        let health_state = Arc::new(HealthState {
+            using_fallback: AtomicBool::new(false),
+            active_failures: Arc::new(RwLock::new(0)),
+            secondary_successes: Arc::new(RwLock::new(0)),
+            monitoring_active: AtomicBool::new(false),
+        });
+
+        // Determine initial active pool
+        let initial_pool = if let Some(ref fallback_pool) = fallback_pool {
+            if primary_pool.is_none() {
+                info!("Primary database unavailable, starting with fallback database");
+                health_state.using_fallback.store(true, Ordering::Relaxed);
+                fallback_pool.clone()
+            } else {
+                primary_pool.as_ref().unwrap().clone()
+            }
+        } else if let Some(ref primary_pool) = primary_pool {
+            primary_pool.clone()
+        } else {
+            return Err(eyre::eyre!("No database pools available"));
+        };
+
+        let active_pool = Arc::new(RwLock::new(initial_pool));
+
+        let db = Self {
+            pool: primary_pool,
+            fallback_pool,
+            config,
+            active_pool,
+            health_state,
+        };
+
+        // Start health monitoring
+        db.start_health_monitoring().await;
+
+        info!("Database with fallback support initialized successfully");
+
+        Ok(db)
+    }
+
+    /// Creates a new database connection with simple fallback support
+    ///
+    /// This is a convenience method that creates a DatabaseConfig with
+    /// default health monitoring settings and calls new_with_fallback.
+    ///
+    /// # Arguments
+    /// * `primary_url` - Primary database connection string
+    /// * `fallback_url` - Optional fallback database connection string
+    ///
+    /// # Returns
+    /// * `Result<Self>` - Database instance or error
+    ///
+    /// # Example
+    /// ```rust
+    /// let db = Database::new_with_simple_fallback(
+    ///     "postgresql://user:pass@primary/db",
+    ///     Some("postgresql://user:pass@fallback/db".to_string())
+    /// ).await?;
+    /// ```
+    pub async fn new_with_simple_fallback(
+        primary_url: &str,
+        fallback_url: Option<String>,
+    ) -> Result<Self> {
+        let config = DatabaseConfig {
+            primary_url: primary_url.to_string(),
+            fallback_url,
+            ..Default::default()
+        };
+
+        Self::new_with_fallback(config).await
+    }
+
+    /// Retry a database operation with exponential backoff
+    ///
+    /// This helper method retries database operations that might fail due to
+    /// connection issues, with exponential backoff to avoid overwhelming the database.
+    ///
+    /// # Arguments
+    /// * `operation` - The database operation to retry
+    /// * `max_retries` - Maximum number of retry attempts
+    /// * `base_delay` - Base delay between retries in seconds
+    ///
+    /// # Returns
+    /// * `Result<T>` - Result of the operation
+    ///
+    /// # Example
+    /// ```rust
+    /// let result = db.retry_operation(|| async { /* db operation */ }, 3, 1).await?;
+    /// ```
+    async fn retry_operation<F, Fut, T>(&self, operation: F, max_retries: u32, base_delay: u64) -> Result<T>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let mut attempt = 0;
+        loop {
+            match operation().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    attempt += 1;
+                    if attempt > max_retries {
+                        return Err(e);
+                    }
+                    
+                    let delay = base_delay * 2_u64.pow(attempt - 1);
+                    warn!("Database operation failed (attempt {}/{}), retrying in {}s: {:?}", 
+                          attempt, max_retries, delay, e);
+                    
+                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                }
+            }
+        }
+    }
+
+    /// Starts the background health monitoring task
+    ///
+    /// This method spawns a background task that continuously monitors
+    /// the health of both primary and fallback databases and automatically
+    /// switches between them based on availability.
+    async fn start_health_monitoring(&self) {
+        if self.health_state.monitoring_active.load(Ordering::Relaxed) {
+            return; // Already monitoring
+        }
+
+        self.health_state.monitoring_active.store(true, Ordering::Relaxed);
+
+        let health_state = self.health_state.clone();
+        let config = self.config.clone();
+        let active_pool = self.active_pool.clone();
+        let primary_pool = self.pool.clone();
+        let fallback_pool = self.fallback_pool.clone();
+
+        // Clone config for logging before moving into async block
+        let config_for_logging = config.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(config.health_check_interval);
+            let mut status_interval = tokio::time::interval(Duration::from_secs(60)); // Status log every minute
+            
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if !health_state.monitoring_active.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        let using_fallback = health_state.using_fallback.load(Ordering::Relaxed);
+                        
+                        if using_fallback {
+                            // Currently using fallback, check both databases
+                            Self::check_fallback_health(
+                                &health_state,
+                                &config,
+                                &active_pool,
+                                &primary_pool,
+                                &fallback_pool,
+                            ).await;
+                        } else {
+                            // Currently using primary, check primary health
+                            Self::check_primary_health(
+                                &health_state,
+                                &config,
+                                &active_pool,
+                                &primary_pool,
+                                &fallback_pool,
+                            ).await;
+                        }
+                    }
+                    _ = status_interval.tick() => {
+                        if !health_state.monitoring_active.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        // Log status every minute
+                        let using_fallback = health_state.using_fallback.load(Ordering::Relaxed);
+                        let secondary_successes = *health_state.secondary_successes.read().await;
+
+                        info!("Database Status: Active={}, Secondary(successes={})", 
+                              if using_fallback { "Fallback" } else { "Primary" },
+                              secondary_successes);
+                    }
+                }
+            }
+        });
+
+        info!("Health monitoring started with interval: {:?}", config_for_logging.health_check_interval);
+    }
+
+    /// Checks primary database health and switches to fallback if needed
+    async fn check_primary_health(
+        health_state: &Arc<HealthState>,
+        config: &DatabaseConfig,
+        active_pool: &Arc<RwLock<Pool<Postgres>>>,
+        primary_pool: &Option<Pool<Postgres>>,
+        fallback_pool: &Option<Pool<Postgres>>,
+    ) {
+        // Try to initialize primary pool if it's None
+        let primary_pool = if primary_pool.is_none() {
+            match sqlx::postgres::PgConnectOptions::from_str(&config.primary_url) {
+                Ok(connect_options) => {
+                    match sqlx::PgPool::connect_with(connect_options.ssl_mode(sqlx::postgres::PgSslMode::Require)).await {
+                        Ok(pool) => {
+                            info!("Primary database pool initialized successfully during health check");
+                            Some(pool)
+                        }
+                        Err(e) => {
+                            debug!("Failed to initialize primary database pool during health check: {:?}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to parse primary database URL during health check: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            primary_pool.clone()
+        };
+
+        // Check primary health if pool exists
+        if let Some(ref primary_pool) = primary_pool {
+            match timeout(config.health_check_timeout, Self::ping_database(primary_pool)).await {
+                Ok(Ok(_)) => {
+                    // Primary is healthy, reset failures
+                    let mut active_failures = health_state.active_failures.write().await;
+                    *active_failures = 0;
+                    
+                    debug!("Primary database is healthy");
+                }
+                Ok(Err(e)) => {
+                    // Primary is unhealthy
+                    let mut active_failures = health_state.active_failures.write().await;
+                    *active_failures += 1;
+                    
+                    debug!("Primary database health check failed (failures: {}): {:?}", *active_failures, e);
+                    
+                    // Check if we should switch to fallback
+                    if *active_failures >= config.failure_threshold {
+                        if let Some(fallback_pool) = fallback_pool {
+                            // Check if fallback is healthy before switching
+                            match timeout(config.health_check_timeout, Self::ping_database(fallback_pool)).await {
+                                Ok(Ok(_)) => {
+                                    // Fallback is healthy, switch to it
+                                    health_state.using_fallback.store(true, Ordering::Relaxed);
+                                    *active_pool.write().await = fallback_pool.clone();
+                                    
+                                    // Reset counters when switching
+                                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                                    *secondary_successes = 0;
+                                    *active_failures = 0;
+                                    
+                                    info!("Switched to fallback database after {} consecutive primary failures", *active_failures);
+                                }
+                                Ok(Err(e)) => {
+                                    warn!("Both primary and fallback databases are unhealthy. Primary failures: {}, Fallback error: {:?}", *active_failures, e);
+                                }
+                                Err(_) => {
+                                    warn!("Both primary and fallback databases are unhealthy. Primary failures: {}, Fallback timeout", *active_failures);
+                                }
+                            }
+                        } else {
+                            warn!("Primary database unhealthy (failures: {}) but no fallback available", *active_failures);
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Primary timeout
+                    let mut active_failures = health_state.active_failures.write().await;
+                    *active_failures += 1;
+                    
+                    debug!("Primary database health check timed out (failures: {})", *active_failures);
+                    
+                    // Check if we should switch to fallback
+                    if *active_failures >= config.failure_threshold {
+                        if let Some(fallback_pool) = fallback_pool {
+                            // Check if fallback is healthy before switching
+                            match timeout(config.health_check_timeout, Self::ping_database(fallback_pool)).await {
+                                Ok(Ok(_)) => {
+                                    // Fallback is healthy, switch to it
+                                    health_state.using_fallback.store(true, Ordering::Relaxed);
+                                    *active_pool.write().await = fallback_pool.clone();
+                                    
+                                    // Reset counters when switching
+                                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                                    *secondary_successes = 0;
+                                    *active_failures = 0;
+                                    
+                                    info!("Switched to fallback database after {} consecutive primary failures (timeout)", *active_failures);
+                                }
+                                Ok(Err(e)) => {
+                                    warn!("Both primary and fallback databases are unhealthy. Primary failures: {}, Fallback error: {:?}", *active_failures, e);
+                                }
+                                Err(_) => {
+                                    warn!("Both primary and fallback databases are unhealthy. Primary failures: {}, Fallback timeout", *active_failures);
+                                }
+                            }
+                        } else {
+                            warn!("Primary database unhealthy (failures: {}) but no fallback available", *active_failures);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Primary pool is None, increment failures
+            let mut active_failures = health_state.active_failures.write().await;
+            *active_failures += 1;
+            debug!("Primary database pool is None (failures: {})", *active_failures);
+        }
+    }
+
+    /// Checks fallback database health and switches back to primary if possible
+    async fn check_fallback_health(
+        health_state: &Arc<HealthState>,
+        config: &DatabaseConfig,
+        active_pool: &Arc<RwLock<Pool<Postgres>>>,
+        primary_pool: &Option<Pool<Postgres>>,
+        fallback_pool: &Option<Pool<Postgres>>,
+    ) {
+        // Try to initialize primary pool if it's None
+        let primary_pool = if primary_pool.is_none() {
+            match sqlx::postgres::PgConnectOptions::from_str(&config.primary_url) {
+                Ok(connect_options) => {
+                    match sqlx::PgPool::connect_with(connect_options.ssl_mode(sqlx::postgres::PgSslMode::Require)).await {
+                        Ok(pool) => {
+                            info!("Primary database pool initialized successfully during health check");
+                            Some(pool)
+                        }
+                        Err(e) => {
+                            debug!("Failed to initialize primary database pool during health check: {:?}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to parse primary database URL during health check: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            primary_pool.clone()
+        };
+
+        // Check primary health first - if it's healthy, switch back immediately
+        if let Some(ref primary_pool) = primary_pool {
+            match timeout(config.health_check_timeout, Self::ping_database(primary_pool)).await {
+                Ok(Ok(_)) => {
+                    // Primary is healthy, switch back to it immediately
+                    health_state.using_fallback.store(false, Ordering::Relaxed);
+                    *active_pool.write().await = primary_pool.clone();
+                    
+                    // Reset counters when switching
+                    let mut active_failures = health_state.active_failures.write().await;
+                    *active_failures = 0;
+                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                    *secondary_successes = 0;
+                    
+                    info!("Switched back to primary database (primary is healthy)");
+                }
+                Ok(Err(e)) => {
+                    // Primary is still unhealthy
+                    debug!("Primary database still unhealthy: {:?}", e);
+                }
+                Err(_) => {
+                    // Primary timeout
+                    debug!("Primary database still unhealthy (timeout)");
+                }
+            }
+        } else {
+            // Primary pool is None
+            debug!("Primary database pool is None");
+        }
+
+        // Check fallback health (only track successes for secondary)
+        if let Some(fallback_pool) = fallback_pool {
+            match timeout(config.health_check_timeout, Self::ping_database(fallback_pool)).await {
+                Ok(Ok(_)) => {
+                    // Fallback is healthy, increment successes
+                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                    *secondary_successes += 1;
+                    
+                    debug!("Fallback database health check passed (successes: {})", *secondary_successes);
+                }
+                Ok(Err(e)) => {
+                    // Fallback is unhealthy, reset successes
+                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                    *secondary_successes = 0;
+                    
+                    warn!("Fallback database health check failed: {:?}", e);
+                }
+                Err(_) => {
+                    // Fallback timeout, reset successes
+                    let mut secondary_successes = health_state.secondary_successes.write().await;
+                    *secondary_successes = 0;
+                    
+                    warn!("Fallback database health check timed out");
+                }
+            }
+        }
+    }
+
+    /// Performs a simple ping query to check database health
+    async fn ping_database(pool: &Pool<Postgres>) -> Result<()> {
+        query("SELECT 1").execute(pool).await?;
+        Ok(())
+    }
+
+    /// Stops the health monitoring task
+    pub fn stop_health_monitoring(&self) {
+        self.health_state.monitoring_active.store(false, Ordering::Relaxed);
+        info!("Health monitoring stopped");
+    }
+
+    /// Returns whether currently using fallback database
+    pub fn is_using_fallback(&self) -> bool {
+        self.health_state.using_fallback.load(Ordering::Relaxed)
+    }
+
+    /// Returns the current active pool for database operations
+    async fn get_active_pool(&self) -> Pool<Postgres> {
+        self.active_pool.read().await.clone()
     }
 
     /// Adds new events to the database with retarded event filtering
@@ -288,7 +874,8 @@ impl Database {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await?;
+        let active_pool = self.get_active_pool().await;
+        let mut tx = active_pool.begin().await?;
 
         let mut filtered_events = events.clone();
         let mut _discarded = 0;
@@ -303,7 +890,7 @@ impl Database {
                 "#,
             )
             .bind(&tx_hashes)
-            .fetch_all(&self.pool)
+            .fetch_all(&active_pool)
             .await?;
             let valid_hashes: std::collections::HashSet<String> = rows
                 .iter()
@@ -400,6 +987,8 @@ impl Database {
         delay_seconds: i64,
         batch_limit: i64,
     ) -> Result<Vec<EventUpdate>> {
+        let active_pool = self.get_active_pool().await;
+        
         // Re-added rate limiting check using sync_timestamps
         let should_proceed = query(
             r#"
@@ -414,7 +1003,7 @@ impl Database {
             "#,
         )
         .bind(delay_seconds)
-        .fetch_one(&self.pool) // Use fetch_one, assuming the row always exists
+        .fetch_one(&active_pool) // Use fetch_one, assuming the row always exists
         .await?
         .try_get::<bool, _>("should_proceed")?;
 
@@ -427,7 +1016,7 @@ impl Database {
         }
 
         // Use a transaction to ensure atomicity
-        let mut tx = self.pool.begin().await?;
+        let mut tx = active_pool.begin().await?;
 
         // Re-added UPDATE sync_timestamps set last_proof_requested_at = NOW()
         // This acts as a lock for this cycle
@@ -571,12 +1160,14 @@ impl Database {
         target_dst_chain_id: u32,
         max_tx: i64, // Added max_tx limit parameter
     ) -> Result<Vec<EventUpdate>> {
+        let active_pool = self.get_active_pool().await;
+        
         // 1. & 2. Get last submission time for the target chain and check delay
         let last_submission_time: Option<DateTime<Utc>> = query_scalar(
             "SELECT last_batch_submitted_at FROM chain_batch_sync WHERE dst_chain_id = $1",
         )
         .bind(target_dst_chain_id as i32)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&active_pool)
         .await?;
 
         let now = Utc::now();
@@ -606,7 +1197,7 @@ impl Database {
             "#,
         )
         .bind(target_dst_chain_id as i32)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&active_pool)
         .await?;
 
         let oldest_journal = match oldest_journal_data {
@@ -621,7 +1212,7 @@ impl Database {
         };
 
         // 4. Start Transaction
-        let mut tx = self.pool.begin().await?;
+        let mut tx = active_pool.begin().await?;
 
         // 5. Update Timestamp in chain_batch_sync for the target chain
         let now_utc = Utc::now();
@@ -760,6 +1351,8 @@ impl Database {
         let chain_ids: Vec<i64> = current_block_map.keys().map(|&k| k as i64).collect();
         let block_numbers: Vec<i32> = current_block_map.values().cloned().collect();
 
+        let active_pool = self.get_active_pool().await;
+        
         let rows_affected = query(
             r#"
             WITH current_blocks (chain_id, block_num) AS (
@@ -776,7 +1369,7 @@ impl Database {
         )
         .bind(&chain_ids)
         .bind(&block_numbers)
-        .execute(&self.pool)
+        .execute(&active_pool)
         .await?
         .rows_affected();
 
@@ -846,6 +1439,8 @@ impl Database {
         let journal_indices: Vec<i32> = updates.iter().map(|(_, idx)| *idx).collect();
         let count = updates.len();
 
+        let active_pool = self.get_active_pool().await;
+        
         // Use UNNEST and JOIN to update journal_index based on tx_hash
         let rows_affected = query(
             r#"
@@ -876,7 +1471,7 @@ impl Database {
         .bind(stark_time)      // Bind stark_time
         .bind(snark_time)      // Bind snark_time
         .bind(total_cycles)    // Bind total_cycles
-        .execute(&self.pool)
+        .execute(&active_pool)
         .await?
         .rows_affected();
 
@@ -942,8 +1537,10 @@ impl Database {
         let status_str = status.to_db_string();
         let count = tx_hashes.len();
 
+        let active_pool = self.get_active_pool().await;
+        
         // Start a transaction
-        let mut tx = self.pool.begin().await?;
+        let mut tx = active_pool.begin().await?;
 
         // Bulk update the events
         let rows_affected = query(
@@ -1002,8 +1599,10 @@ impl Database {
         let count = tx_hashes.len();
         let now = Utc::now();
 
+        let active_pool = self.get_active_pool().await;
+        
         // Start a transaction
-        let mut tx = self.pool.begin().await?;
+        let mut tx = active_pool.begin().await?;
 
         // 1. Insert into finished_events and delete from events in a single transaction
         let insert_result = query(
@@ -1103,7 +1702,8 @@ impl Database {
         chain_params: &HashMap<u32, ChainParams>,
         market_prices: &HashMap<Address, f64>,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let active_pool = self.get_active_pool().await;
+        let mut tx = active_pool.begin().await?;
 
         // Convert market prices to a format usable in SQL
         let market_price_pairs: Vec<(String, f64)> = market_prices
@@ -1237,7 +1837,8 @@ impl Database {
         batch_limit: i64,
         max_retries: i64,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let active_pool = self.get_active_pool().await;
+        let mut tx = active_pool.begin().await?;
 
         // Check if we have enough historical data first
         let has_sufficient_data = query_scalar::<_, bool>(
@@ -1402,6 +2003,8 @@ impl Database {
     }
 
     pub async fn sequencer_start_events_reset(&self) -> Result<()> {
+        let active_pool = self.get_active_pool().await;
+        
         let rows_affected = query(
             r#"
             UPDATE events
@@ -1411,7 +2014,7 @@ impl Database {
             WHERE status = 'ProofRequested'::event_status
             "#,
         )
-        .execute(&self.pool)
+        .execute(&active_pool)
         .await?
         .rows_affected();
 
@@ -1435,6 +2038,8 @@ impl Database {
         fallback_url: &str,
         reason: &str,
     ) -> Result<()> {
+        let active_pool = self.get_active_pool().await;
+        
         query(
             r#"
             INSERT INTO node_status (chain_id, primary_url, fallback_url, reason)
@@ -1445,7 +2050,7 @@ impl Database {
         .bind(primary_url)
         .bind(fallback_url)
         .bind(reason)
-        .execute(&self.pool)
+        .execute(&active_pool)
         .await?;
 
         debug!("Recorded node failure for chain {}: {}", chain_id, reason);
@@ -1460,6 +2065,8 @@ impl Database {
         use sqlx::Row;
         use std::str::FromStr;
 
+        let active_pool = self.get_active_pool().await;
+        
         // Query: group by dst_chain_id and market, sum amounts, collect tx_hashes
         let rows = sqlx::query(
             r#"
@@ -1476,7 +2083,7 @@ impl Database {
             "#,
         )
         .bind(max_retries)
-        .fetch_all(&self.pool)
+        .fetch_all(&active_pool)
         .await?;
 
         let mut result = Vec::new();
@@ -1521,7 +2128,8 @@ impl Database {
             return Ok(());
         }
         let tx_hashes_str: Vec<String> = tx_hashes.iter().map(|h| h.to_string()).collect();
-        let mut tx = self.pool.begin().await?;
+        let active_pool = self.get_active_pool().await;
+        let mut tx = active_pool.begin().await?;
         // Move the specified fields from finished_events to events, set status to ProofReceived
         sqlx::query(
             r#"
@@ -1546,4 +2154,5 @@ impl Database {
         tx.commit().await?;
         Ok(())
     }
+
 }

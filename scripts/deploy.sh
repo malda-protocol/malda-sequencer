@@ -80,15 +80,51 @@ fi
 
 echo "Environment: $ENVIRONMENT"
 echo "Database URL: ${DATABASE_URL:0:20}..."
+if [[ -n "$DATABASE_URL_FALLBACK" ]]; then
+    echo "Fallback Database URL: ${DATABASE_URL_FALLBACK:0:20}..."
+fi
 echo "Sequencer Address: $SEQUENCER_ADDRESS"
 
 # Check if database is accessible
 echo "Checking database connection..."
-if ! psql "$DATABASE_URL" -c "\q" > /dev/null 2>&1; then
-    echo "Error: Cannot connect to database. Please check your connection settings."
+DATABASE_CONNECTED=false
+
+# Try primary database first
+if [[ -n "$DATABASE_URL" ]]; then
+    echo "Testing primary database connection..."
+    if psql "$DATABASE_URL" -c "\q" > /dev/null 2>&1; then
+        echo "✅ Primary database connection successful!"
+        DATABASE_CONNECTED=true
+    else
+        echo "❌ Primary database connection failed."
+    fi
+fi
+
+# Try fallback database if primary failed
+if [[ "$DATABASE_CONNECTED" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
+    echo "Testing fallback database connection..."
+    if psql "$DATABASE_URL_FALLBACK" -c "\q" > /dev/null 2>&1; then
+        echo "✅ Fallback database connection successful!"
+        DATABASE_CONNECTED=true
+        # Store the original primary URL for the application
+        export ORIGINAL_DATABASE_URL="$DATABASE_URL"
+        # Use fallback URL for migrations but keep original for app
+        export MIGRATION_DATABASE_URL="$DATABASE_URL_FALLBACK"
+        echo "Using fallback database for migrations."
+    else
+        echo "❌ Fallback database connection failed."
+    fi
+fi
+
+# Check if we have at least one working database
+if [[ "$DATABASE_CONNECTED" == false ]]; then
+    echo "Error: Cannot connect to any database. Please check your connection settings."
+    echo "Primary URL: ${DATABASE_URL:0:30}..."
+    if [[ -n "$DATABASE_URL_FALLBACK" ]]; then
+        echo "Fallback URL: ${DATABASE_URL_FALLBACK:0:30}..."
+    fi
     exit 1
 fi
-echo "Database connection successful!"
 
 # Clean build if requested
 if [[ "$CLEAN_BUILD" == true ]]; then
@@ -100,7 +136,36 @@ fi
 # Run database migrations
 echo "Running database migrations..."
 cd "$SEQUENCER_DIR"
-sqlx migrate run --database-url "${DATABASE_URL}"
+
+MIGRATION_SUCCESS=false
+
+# Try primary database first
+if [[ -n "$DATABASE_URL" ]]; then
+    echo "Running migrations on primary database..."
+    if sqlx migrate run --database-url "${DATABASE_URL}" > /dev/null 2>&1; then
+        echo "✅ Migrations successful on primary database!"
+        MIGRATION_SUCCESS=true
+    else
+        echo "❌ Migrations failed on primary database."
+    fi
+fi
+
+# Try fallback database if primary failed
+if [[ "$MIGRATION_SUCCESS" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
+    echo "Running migrations on fallback database..."
+    if sqlx migrate run --database-url "${DATABASE_URL_FALLBACK}" > /dev/null 2>&1; then
+        echo "✅ Migrations successful on fallback database!"
+        MIGRATION_SUCCESS=true
+    else
+        echo "❌ Migrations failed on fallback database."
+    fi
+fi
+
+# Check if migrations succeeded on at least one database
+if [[ "$MIGRATION_SUCCESS" == false ]]; then
+    echo "Error: Migrations failed on all databases. Please check your database setup."
+    exit 1
+fi
 
 # Build the project
 echo "Building sequencer..."
@@ -164,7 +229,13 @@ if ps -p $SEQUENCER_PID > /dev/null 2>&1; then
     echo "  Environment: $ENVIRONMENT"
     echo "  Process ID: $SEQUENCER_PID"
     echo "  Log File: $SEQUENCER_DIR/logs/sequencer.log"
-    echo "  Database: ${DATABASE_URL:0:30}..."
+    if [[ "$DATABASE_CONNECTED" == true ]]; then
+        if [[ "$DATABASE_URL" == "$DATABASE_URL_FALLBACK" ]]; then
+            echo "  Database: Fallback (${DATABASE_URL:0:30}...)"
+        else
+            echo "  Database: Primary (${DATABASE_URL:0:30}...)"
+        fi
+    fi
     echo ""
     echo "To stop the sequencer:"
     echo "  kill $SEQUENCER_PID"

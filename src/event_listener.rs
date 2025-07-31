@@ -216,17 +216,29 @@ impl EventListener {
             // Wait for next polling cycle
             chain_state.wait_for_next_poll().await;
 
-            // Get a fresh provider connection using shared provider helper
-            let (provider, _is_fallback) = chain_state.provider_state.get_fresh_provider().await?;
+            // Get a fresh provider connection using shared provider helper with retry logic
+            let (provider, _is_fallback) = match chain_state.provider_state.get_fresh_provider().await {
+                Ok(result) => result,
+                Err(e) => {
+                    error!(
+                        "Failed to get fresh provider for chain {}: {:?}, retrying in next cycle",
+                        chain_state.config.chain_id, e
+                    );
+                    continue; // Continue to next polling cycle instead of terminating
+                }
+            };
 
             // Get current block number for range calculation
-            let current_block = provider.get_block_number().await.map_err(|e| {
-                eyre!(
-                    "Failed to get block number for chain {}: {:?}",
-                    chain_state.config.chain_id,
-                    e
-                )
-            })?;
+            let current_block = match provider.get_block_number().await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!(
+                        "Failed to get block number for chain {}: {:?}, retrying in next cycle",
+                        chain_state.config.chain_id, e
+                    );
+                    continue; // Continue to next polling cycle instead of terminating
+                }
+            };
 
             // Skip if we're already at or past the current block
             if chain_state.last_processed_block >= current_block {
@@ -242,23 +254,44 @@ impl EventListener {
             let to_block = current_block - chain_state.config.block_range_offset_to;
 
             // Get block timestamps for event processing
-            let block_timestamps =
-                Self::get_block_timestamps(&provider, from_block, to_block, &chain_state.config)
-                    .await?;
+            let block_timestamps = match Self::get_block_timestamps(&provider, from_block, to_block, &chain_state.config).await {
+                Ok(timestamps) => timestamps,
+                Err(e) => {
+                    error!(
+                        "Failed to get block timestamps for chain {}: {:?}, retrying in next cycle",
+                        chain_state.config.chain_id, e
+                    );
+                    continue; // Continue to next polling cycle instead of terminating
+                }
+            };
 
             // Get and process blockchain logs
-            let logs = Self::get_logs(
+            let logs = match Self::get_logs(
                 &provider,
                 &filter,
                 from_block,
                 current_block,
                 &chain_state.config,
-            )
-            .await?;
+            ).await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    error!(
+                        "Failed to get logs for chain {}: {:?}, retrying in next cycle",
+                        chain_state.config.chain_id, e
+                    );
+                    continue; // Continue to next polling cycle instead of terminating
+                }
+            };
 
             // Process events if any logs were found
             if !logs.is_empty() {
-                Self::process_logs(logs, &block_timestamps, &chain_state.config, &db).await?;
+                if let Err(e) = Self::process_logs(logs, &block_timestamps, &chain_state.config, &db).await {
+                    error!(
+                        "Failed to process logs for chain {}: {:?}, continuing to next cycle",
+                        chain_state.config.chain_id, e
+                    );
+                    // Don't continue here - we still want to update the last processed block
+                }
             }
 
             // Update the last processed block for next iteration

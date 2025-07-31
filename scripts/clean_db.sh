@@ -10,7 +10,11 @@ echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
 # Set database URL
-export DATABASE_URL="postgres://app:NVHEojL0TwU2xOhhAegvhNKGx2OvwsjJyL9JfNNIE5u4OX8Zo5JZARmEBfGWo7r7@dal.database.lsh.io:31187/app"
+# LATTITUDE
+# export DATABASE_URL="postgres://app:NVHEojL0TwU2xOhhAegvhNKGx2OvwsjJyL9JfNNIE5u4OX8Zo5JZARmEBfGWo7r7@dal.database.lsh.io:31187/app"
+
+# DIGITAL OCEAN
+export DATABASE_URL=postgresql://doadmin:AVNS_OQyocJWtE2gPGARd5oM@db-postgresql-nyc1-sequencer-do-user-15988403-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require
 
 # Check if database is accessible
 echo "Checking database connection..."

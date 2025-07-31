@@ -100,32 +100,37 @@ impl ProviderState {
     ///
     /// This method implements the complete provider selection logic:
     /// 1. Checks if cached primary provider is still fresh
-    /// 2. Reuses cached provider if valid
-    /// 3. Creates new primary provider if needed
-    /// 4. Falls back to secondary provider if primary fails
-    /// 5. Updates cache and state accordingly
+    /// 2. If cached not fresh, tries primary provider
+    /// 3. If primary is fresh, uses it and caches it
+    /// 4. If primary not fresh, uses fallback (but doesn't cache it)
+    /// 5. Cached provider is always the primary, never the fallback
     ///
     /// # Returns
     /// * `Result<(ProviderType, bool)>` - Provider and whether fallback was used
     pub async fn get_fresh_provider(&mut self) -> Result<(ProviderType, bool)> {
-        // Try to reuse cached primary provider if fresh
-        if !self.used_fallback && self.cached_primary.is_some() {
-            let provider = self.cached_primary.as_ref().unwrap();
-            if Self::is_provider_fresh(provider, self.config.max_block_delay_secs).await {
+        // Step 1: Try cached provider if available
+        if let Some(cached_provider) = &self.cached_primary {
+            if Self::is_provider_fresh(cached_provider, self.config.max_block_delay_secs).await {
                 debug!(
                     "Reusing cached primary provider for chain {}",
                     self.config.chain_id
                 );
-                return Ok((provider.clone(), false));
+                return Ok((cached_provider.clone(), false));
+            } else {
+                debug!(
+                    "Cached primary provider for chain {} is stale, clearing cache",
+                    self.config.chain_id
+                );
+                self.cached_primary = None;
             }
         }
 
-        // Try primary provider
+        // Step 2: Try primary provider
         match Self::create_provider(&self.config.primary_url, self.config.use_websocket).await {
             Ok(provider) => {
                 if Self::is_provider_fresh(&provider, self.config.max_block_delay_secs).await {
                     debug!(
-                        "Using new primary provider for chain {}",
+                        "Primary provider for chain {} is fresh, caching and using it",
                         self.config.chain_id
                     );
                     self.cached_primary = Some(provider.clone());
@@ -146,14 +151,27 @@ impl ProviderState {
             }
         }
 
-        // Try fallback provider
-        let fallback_provider =
-            Self::create_provider(&self.config.fallback_url, self.config.use_websocket).await?;
-        if Self::is_provider_fresh(&fallback_provider, self.config.max_block_delay_secs).await {
-            info!("Using fallback provider for chain {}", self.config.chain_id);
-            self.cached_primary = None; // Clear primary cache when using fallback
-            self.used_fallback = true;
-            return Ok((fallback_provider, true));
+        // Step 3: Try fallback provider (never cache it)
+        match Self::create_provider(&self.config.fallback_url, self.config.use_websocket).await {
+            Ok(fallback_provider) => {
+                if Self::is_provider_fresh(&fallback_provider, self.config.max_block_delay_secs).await {
+                    info!("Using fallback provider for chain {}", self.config.chain_id);
+                    // Don't cache fallback provider - keep primary cache clear
+                    self.used_fallback = true;
+                    return Ok((fallback_provider, true));
+                } else {
+                    warn!(
+                        "Fallback provider for chain {} is also not fresh",
+                        self.config.chain_id
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to create fallback provider for chain {}: {:?}",
+                    self.config.chain_id, e
+                );
+            }
         }
 
         Err(eyre!(
@@ -173,16 +191,30 @@ impl ProviderState {
     ///
     /// # Returns
     /// * `bool` - True if provider is fresh, false otherwise
-    async fn is_provider_fresh(provider: &ProviderType, max_delay: u64) -> bool {
+    pub async fn is_provider_fresh(provider: &ProviderType, max_delay: u64) -> bool {
         match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
             Ok(Some(block)) => {
                 let block_timestamp: u64 = block.header.inner.timestamp.into();
                 let current_time = chrono::Utc::now().timestamp() as u64;
 
                 // Provider is fresh if block time is current or within max delay
-                current_time <= block_timestamp || (current_time - block_timestamp) <= max_delay
+                // Also allow for slight time drift (up to 60 seconds ahead)
+                let time_diff = if current_time > block_timestamp {
+                    current_time - block_timestamp
+                } else {
+                    block_timestamp - current_time
+                };
+                
+                time_diff <= max_delay || time_diff <= 60 // Allow 60 seconds of time drift
             }
-            _ => false,
+            Ok(None) => {
+                warn!("Provider returned None for latest block");
+                false
+            }
+            Err(e) => {
+                warn!("Failed to get latest block from provider: {:?}", e);
+                false
+            }
         }
     }
 
@@ -198,7 +230,7 @@ impl ProviderState {
     ///
     /// # Returns
     /// * `Result<ProviderType>` - Connected provider
-    async fn create_provider(url: &str, use_websocket: bool) -> Result<ProviderType> {
+    pub async fn create_provider(url: &str, use_websocket: bool) -> Result<ProviderType> {
         // Use a dummy private key since we only need view calls
         let dummy_key = "0000000000000000000000000000000000000000000000000000000000000001";
         let signer: PrivateKeySigner = dummy_key.parse().expect("should parse private key");
