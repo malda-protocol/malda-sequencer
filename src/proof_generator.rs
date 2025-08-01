@@ -193,7 +193,14 @@ impl ProofGenerator {
         // Main processing loop - runs indefinitely
         loop {
             // Retrieve events ready for proof generation
-            let events = Self::get_ready_events(&db, proof_delay, config.batch_size).await?;
+            let events = match Self::get_ready_events(&db, proof_delay, config.batch_size).await {
+                Ok(events) => events,
+                Err(e) => {
+                    error!("Database error in proof generator: {:?}, continuing to next cycle", e);
+                    sleep(proof_delay).await;
+                    continue;
+                }
+            };
 
             if !events.is_empty() {
                 info!(
@@ -289,15 +296,23 @@ impl ProofGenerator {
         );
 
         // Generate proof with retry logic and fallback methods
-        let proof_info =
-            Self::generate_proof(users, markets, dst_chain_ids, src_chain_ids, config).await?;
+        let proof_info = match Self::generate_proof(users, markets, dst_chain_ids, src_chain_ids, config).await {
+            Ok(proof_info) => proof_info,
+            Err(e) => {
+                error!("Failed to generate proof: {:?}", e);
+                return Err(e);
+            }
+        };
 
         // Log processing time for performance monitoring
         let duration_ms = start_time.elapsed().as_millis() as u64;
         debug!("Batch proof generation completed in {}ms", duration_ms);
 
         // Update database with proof data and journal indices
-        Self::update_database_with_proof(events, proof_info, db).await?;
+        if let Err(e) = Self::update_database_with_proof(events, proof_info, db).await {
+            error!("Failed to update database with proof data: {:?}", e);
+            return Err(e);
+        }
 
         Ok(())
     }

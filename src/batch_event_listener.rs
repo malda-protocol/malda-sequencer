@@ -382,7 +382,13 @@ impl BatchEventListener {
         };
 
         // Get block timestamps for event processing
-        let block_timestamps = Self::get_block_timestamps(provider, from_block, to_block).await?;
+        let block_timestamps = match Self::get_block_timestamps(provider, from_block, to_block).await {
+            Ok(timestamps) => timestamps,
+            Err(e) => {
+                error!("Failed to get block timestamps: {:?}, continuing to next cycle", e);
+                return Ok(()); // Return early but don't crash
+            }
+        };
 
         // Separate logs by event type (success vs failure)
         let (success_logs, failure_logs) = Self::separate_logs_by_event_type(&all_logs);
