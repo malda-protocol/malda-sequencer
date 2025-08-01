@@ -2,6 +2,10 @@
 
 A high-performance blockchain sequencer that processes cross-chain events, generates Zero-Knowledge (ZK) proofs, and manages transaction submissions across multiple Layer 1 and Layer 2 networks.
 
+sudo iptables -A OUTPUT -p tcp -d dal.database.lsh.io --dport 32586 -j DROP
+nc -zv dal.database.lsh.io 32586
+sudo iptables -D OUTPUT -p tcp -d dal.database.lsh.io --dport 32586 -j DROP
+
 ## Table of Contents
 
 - [Overview](#overview)
