@@ -411,8 +411,8 @@ impl ResetTxManager {
                     debug!("Successfully reset stuck events");
                 }
                 Err(e) => {
-                    error!("Failed to reset stuck events: {:?}", e);
-                    return Err(e);
+                    error!("Failed to reset stuck events: {:?}, continuing to next cycle", e);
+                    // Don't return error, just log and continue
                 }
             }
         }

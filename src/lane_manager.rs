@@ -82,8 +82,8 @@ impl LaneManager {
                     debug!("Successfully updated lane status");
                 }
                 Err(e) => {
-                    error!("Failed to update lane status: {:?}", e);
-                    return Err(e);
+                    error!("Failed to update lane status: {:?}, continuing to next cycle", e);
+                    // Don't return error, just log and continue
                 }
             }
         }

@@ -412,7 +412,10 @@ impl EventListener {
 
         // Batch save all processed events to database
         if !event_updates.is_empty() {
-            Self::save_events_to_database(event_updates, config, db).await?;
+            if let Err(e) = Self::save_events_to_database(event_updates, config, db).await {
+                error!("Failed to save events to database for chain {}: {:?}, continuing to next cycle", config.chain_id, e);
+                // Don't return error, just log and continue
+            }
         }
 
         Ok(())
