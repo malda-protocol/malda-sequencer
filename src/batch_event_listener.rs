@@ -42,7 +42,7 @@ use futures;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 use std::vec::Vec;
-use tokio::time::{interval, sleep};
+use tokio::time::interval;
 use tracing::{debug, error, info};
 
 use crate::events::{
@@ -169,7 +169,8 @@ impl BatchEventListener {
     ///
     /// This function implements the core event processing logic for a single chain.
     /// It sets up a unified filter for both success and failure events, manages
-    /// provider connections, and implements retry logic with exponential backoff.
+    /// provider connections, and implements resilient error handling that never
+    /// terminates the task.
     ///
     /// ## Processing Flow
     ///
@@ -179,12 +180,13 @@ impl BatchEventListener {
     /// 4. **Event Processing**: Separates and processes events by type
     /// 5. **Database Updates**: Updates event status in the database
     ///
-    /// ## Retry Logic
+    /// ## Error Handling
     ///
-    /// - Implements exponential backoff starting at 1 second
-    /// - Doubles delay on each retry attempt
-    /// - Gives up after reaching max_retries (5 attempts)
-    /// - Resets retry count on successful operations
+    /// - **Never Terminates**: All errors are handled gracefully with continue to next cycle
+    /// - **Provider Failures**: Log error and continue to next polling cycle
+    /// - **Block Processing Failures**: Log error and continue to next polling cycle
+    /// - **Database Errors**: Log error but don't stop processing
+    /// - **Resilient Design**: Task runs indefinitely, never giving up on reconnection
     ///
     /// ## Block Processing
     ///
@@ -205,127 +207,104 @@ impl BatchEventListener {
             config.batch_submitter, config.chain_id
         );
 
-        let mut retry_count = 0;
-        let max_retries = 5;
-        let mut retry_delay = StdDuration::from_secs(1);
+        // Create unified filter for both success and failure events
+        let unified_filter = Filter::new()
+            .events(vec![BATCH_PROCESS_SUCCESS_SIG, BATCH_PROCESS_FAILED_SIG])
+            .address(config.batch_submitter);
 
+        let mut last_processed_block = 0u64;
+        let poll_interval = StdDuration::from_secs(5);
+        let mut interval = interval(poll_interval);
+
+        info!("Started polling for batch events");
+
+        // Initialize provider state for this chain
+        let mut provider_state = Self::create_provider_state(&config);
+
+        // Main processing loop - runs indefinitely
         loop {
-            // Create unified filter for both success and failure events
-            let unified_filter = Filter::new()
-                .events(vec![BATCH_PROCESS_SUCCESS_SIG, BATCH_PROCESS_FAILED_SIG])
-                .address(config.batch_submitter);
+            // Wait for next polling cycle
+            interval.tick().await;
 
-            debug!("Setting up polling with unified filter");
-
-            let mut last_processed_block = 0u64;
-            let poll_interval = StdDuration::from_secs(5);
-            let mut interval = interval(poll_interval);
-
-            info!("Started polling for batch events");
-
-            // Initialize provider state for this chain
-            let mut provider_state = Self::create_provider_state(&config);
-
-            loop {
-                interval.tick().await;
-
-                // Get fresh provider with fallback logic
-                let (provider, _is_fallback) = match provider_state.get_fresh_provider().await {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("Failed to get fresh provider: {:?}", e);
-                        if retry_count >= max_retries {
-                            error!("Max retries reached, giving up on reconnection");
-                            return Err(e);
-                        }
-                        retry_count += 1;
-                        retry_delay *= 2;
-                        info!(
-                            "Waiting {} seconds before reconnection attempt {}",
-                            retry_delay.as_secs(),
-                            retry_count
-                        );
-                        sleep(retry_delay).await;
-                        continue;
-                    }
-                };
-
-                // Get current block number for processing logic
-                let current_block = match provider.get_block_number().await {
-                    Ok(block) => block,
-                    Err(e) => {
-                        error!("Provider failed to get block number: {:?}", e);
-                        continue;
-                    }
-                };
-
-                // Initialize last_processed_block on first run
-                if last_processed_block == 0 {
-                    last_processed_block = if current_block > config.block_delay {
-                        current_block - config.block_delay - 2
-                    } else {
-                        0
-                    };
-                    info!(
-                        "Initializing last_processed_block to {} (current: {}, delay: {})",
-                        last_processed_block, current_block, config.block_delay
+            // Get fresh provider with fallback logic
+            let (provider, _is_fallback) = match provider_state.get_fresh_provider().await {
+                Ok(result) => result,
+                Err(e) => {
+                    error!(
+                        "Failed to get fresh provider for chain {}: {:?}, retrying in next cycle",
+                        config.chain_id, e
                     );
-                    continue;
+                    continue; // Continue to next polling cycle instead of terminating
                 }
+            };
 
-                // Calculate target block with delay
-                let target_block = if current_block > config.block_delay {
-                    current_block - config.block_delay
+            // Get current block number for processing logic
+            let current_block = match provider.get_block_number().await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!(
+                        "Failed to get block number for chain {}: {:?}, retrying in next cycle",
+                        config.chain_id, e
+                    );
+                    continue; // Continue to next polling cycle instead of terminating
+                }
+            };
+
+            // Initialize last_processed_block on first run
+            if last_processed_block == 0 {
+                last_processed_block = if current_block > config.block_delay {
+                    current_block - config.block_delay - 2
                 } else {
-                    current_block
+                    0
                 };
-
-                // Skip if no new blocks to process
-                if last_processed_block >= target_block {
-                    debug!("No new blocks to process. Last processed: {}, Target: {}, Current: {}, Delay: {}", 
-                           last_processed_block, target_block, current_block, config.block_delay);
-                    continue;
-                }
-
-                let from_block = last_processed_block + 1;
-
-                debug!(
-                    "Processing blocks {} to {} (current: {}, delay: {})",
-                    from_block, target_block, current_block, config.block_delay
+                info!(
+                    "Initializing last_processed_block to {} (current: {}, delay: {})",
+                    last_processed_block, current_block, config.block_delay
                 );
-
-                // Process the block range and handle errors
-                if let Err(e) = Self::process_block_range(
-                    &provider,
-                    &unified_filter,
-                    from_block,
-                    target_block,
-                    &db,
-                    &config,
-                )
-                .await
-                {
-                    error!("Failed to process block range: {:?}", e);
-                    if retry_count >= max_retries {
-                        error!("Max retries reached, giving up on reconnection");
-                        return Err(e);
-                    }
-                    retry_count += 1;
-                    retry_delay *= 2;
-                    info!(
-                        "Waiting {} seconds before reconnection attempt {}",
-                        retry_delay.as_secs(),
-                        retry_count
-                    );
-                    sleep(retry_delay).await;
-                    continue;
-                }
-
-                // Update last processed block and reset retry count on success
-                last_processed_block = target_block;
-                retry_count = 0;
-                retry_delay = StdDuration::from_secs(1);
+                continue;
             }
+
+            // Calculate target block with delay
+            let target_block = if current_block > config.block_delay {
+                current_block - config.block_delay
+            } else {
+                current_block
+            };
+
+            // Skip if no new blocks to process
+            if last_processed_block >= target_block {
+                debug!("No new blocks to process. Last processed: {}, Target: {}, Current: {}, Delay: {}", 
+                       last_processed_block, target_block, current_block, config.block_delay);
+                continue;
+            }
+
+            let from_block = last_processed_block + 1;
+
+            debug!(
+                "Processing blocks {} to {} (current: {}, delay: {})",
+                from_block, target_block, current_block, config.block_delay
+            );
+
+            // Process the block range and handle errors
+            if let Err(e) = Self::process_block_range(
+                &provider,
+                &unified_filter,
+                from_block,
+                target_block,
+                &db,
+                &config,
+            )
+            .await
+            {
+                error!(
+                    "Failed to process block range for chain {}: {:?}, retrying in next cycle",
+                    config.chain_id, e
+                );
+                continue; // Continue to next polling cycle instead of terminating
+            }
+
+            // Update the last processed block for next iteration
+            last_processed_block = target_block;
         }
     }
 
@@ -344,9 +323,10 @@ impl BatchEventListener {
     ///
     /// ## Error Handling
     ///
-    /// - Provider errors are propagated up for retry logic
-    /// - Database errors are logged but don't stop processing
-    /// - Invalid logs are skipped with debug logging
+    /// - **Provider Errors**: Log error and return Err to trigger retry in next cycle
+    /// - **Timestamp Errors**: Log error and return Ok to continue processing
+    /// - **Database Errors**: Log error but don't stop processing
+    /// - **Resilient Design**: Never crashes, always returns Result for proper handling
     ///
     /// # Arguments
     /// * `provider` - Provider for blockchain access
@@ -376,7 +356,10 @@ impl BatchEventListener {
         let all_logs = match provider.get_logs(&range_filter).await {
             Ok(logs) => logs,
             Err(e) => {
-                error!("Provider failed to get logs: {:?}", e);
+                error!(
+                    "Provider failed to get logs for chain {}: {:?}",
+                    config.chain_id, e
+                );
                 return Err(e.into());
             }
         };
@@ -385,7 +368,10 @@ impl BatchEventListener {
         let block_timestamps = match Self::get_block_timestamps(provider, from_block, to_block).await {
             Ok(timestamps) => timestamps,
             Err(e) => {
-                error!("Failed to get block timestamps: {:?}, continuing to next cycle", e);
+                error!(
+                    "Failed to get block timestamps for chain {}: {:?}, continuing to next cycle",
+                    config.chain_id, e
+                );
                 return Ok(()); // Return early but don't crash
             }
         };
@@ -485,8 +471,9 @@ impl BatchEventListener {
     /// ## Error Handling
     ///
     /// - Missing blocks return specific error messages
-    /// - Provider errors are propagated up
+    /// - Provider errors are propagated up for retry logic
     /// - Individual block failures don't stop the entire range
+    /// - Resilient design that never crashes the task
     ///
     /// # Arguments
     /// * `provider` - Provider for blockchain access
@@ -509,10 +496,13 @@ impl BatchEventListener {
                 .await
             {
                 Ok(Some(block)) => block,
-                Ok(None) => return Err(eyre::eyre!("Block {} not found", block_number)),
+                Ok(None) => {
+                    error!("Block {} not found, skipping", block_number);
+                    continue; // Skip missing blocks but continue processing
+                }
                 Err(e) => {
                     error!("Failed to get block {}: {:?}", block_number, e);
-                    return Err(e.into());
+                    return Err(e.into()); // Propagate provider errors for retry logic
                 }
             };
 
