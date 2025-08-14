@@ -9,12 +9,14 @@ SEQUENCER_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
-# Set database URL
-# LATTITUDE
-# export DATABASE_URL="postgres://app:NVHEojL0TwU2xOhhAegvhNKGx2OvwsjJyL9JfNNIE5u4OX8Zo5JZARmEBfGWo7r7@dal.database.lsh.io:31187/app"
-
-# DIGITAL OCEAN
-export DATABASE_URL=postgresql://doadmin:AVNS_OQyocJWtE2gPGARd5oM@db-postgresql-nyc1-sequencer-do-user-15988403-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+# Load environment variables from .env file
+if [ -f "$SEQUENCER_DIR/.env" ]; then
+    echo "Loading environment variables from .env file..."
+    source "$SEQUENCER_DIR/.env"
+else
+    echo "Error: .env file not found at $SEQUENCER_DIR/.env"
+    exit 1
+fi
 
 # Check if database is accessible
 echo "Checking database connection..."
