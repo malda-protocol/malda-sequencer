@@ -798,6 +798,18 @@ sudo apt install build-essential pkg-config libssl-dev libpq-dev
 
 # Install PostgreSQL client
 sudo apt install postgresql-client
+
+# Verify PostgreSQL client installation
+psql --version
+
+# Test database connection (replace with your actual DATABASE_URL)
+# psql "postgres://username:password@host:port/database" -c "SELECT version();"
+
+# Install SQLx CLI for database migrations
+cargo install sqlx-cli --no-default-features --features postgres
+
+# Verify SQLx CLI installation
+sqlx --version
 ```
 
 #### Install RISC0 Dependencies
