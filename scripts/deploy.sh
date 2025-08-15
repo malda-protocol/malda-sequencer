@@ -92,18 +92,20 @@ DATABASE_CONNECTED=false
 # Try primary database first
 if [[ -n "$DATABASE_URL" ]]; then
     echo "Testing primary database connection..."
-    if psql "$DATABASE_URL" -c "\q" > /dev/null 2>&1; then
+    if timeout 5 psql "$DATABASE_URL" -c "\q" > /dev/null 2>&1; then
         echo "✅ Primary database connection successful!"
         DATABASE_CONNECTED=true
+        PRIMARY_DB_WORKING=true
     else
         echo "❌ Primary database connection failed."
+        PRIMARY_DB_WORKING=false
     fi
 fi
 
 # Try fallback database if primary failed
 if [[ "$DATABASE_CONNECTED" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
     echo "Testing fallback database connection..."
-    if psql "$DATABASE_URL_FALLBACK" -c "\q" > /dev/null 2>&1; then
+    if timeout 5 psql "$DATABASE_URL_FALLBACK" -c "\q" > /dev/null 2>&1; then
         echo "✅ Fallback database connection successful!"
         DATABASE_CONNECTED=true
         # Store the original primary URL for the application
@@ -139,8 +141,8 @@ cd "$SEQUENCER_DIR"
 
 MIGRATION_SUCCESS=false
 
-# Try primary database first
-if [[ -n "$DATABASE_URL" ]]; then
+# Try primary database first (only if we know it's working)
+if [[ -n "$DATABASE_URL" && "$PRIMARY_DB_WORKING" == true ]]; then
     echo "Running migrations on primary database..."
     if sqlx migrate run --database-url "${DATABASE_URL}" > /dev/null 2>&1; then
         echo "✅ Migrations successful on primary database!"
@@ -150,7 +152,7 @@ if [[ -n "$DATABASE_URL" ]]; then
     fi
 fi
 
-# Try fallback database if primary failed
+# Try fallback database if primary failed or wasn't working
 if [[ "$MIGRATION_SUCCESS" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
     echo "Running migrations on fallback database..."
     if sqlx migrate run --database-url "${DATABASE_URL_FALLBACK}" > /dev/null 2>&1; then
