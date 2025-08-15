@@ -1060,7 +1060,33 @@ RPC_URL_BASE_TRANSACTION=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 - **PostgreSQL**: Hosted or self-hosted
 - **SSL Support**: Required for secure connections
 
-### 4.3 Deployment
+### 4.3 Changing Config
+
+**Important:** If any configuration parameters are changed in the environment files (`.env.testnet` or `.env.mainnet`), the sequencer needs to be restarted for the changes to take effect.
+
+**Restart Commands:**
+
+```bash
+# Restart sequencer for testnet
+./scripts/deploy.sh testnet
+
+# Restart sequencer for mainnet
+./scripts/deploy.sh mainnet
+
+```
+
+**Event Safety During Restart:**
+
+The sequencer is designed to handle restarts safely without missing events:
+
+- **Events in Pipeline**: Events that are already in the processing pipeline will be automatically reset after a configurable time period
+- **Hanging Proof Requests**: Any proof requests that are stuck or hanging will be automatically re-requested
+- **No Event Loss**: The restart sequence ensures no events are missed during the seconds of restart
+- **Retarded Event Listener**: A secondary event listener runs behind the main listener to catch any events that might have been missed
+
+This design ensures that configuration changes can be applied safely without any risk of losing cross-chain events or proof requests.
+
+### 4.4 Deployment
 
 #### Using Deployment Scripts (Recommended)
 
