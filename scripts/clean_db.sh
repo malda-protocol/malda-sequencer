@@ -18,13 +18,33 @@ else
     exit 1
 fi
 
-# Check if database is accessible
-echo "Checking database connection..."
-if ! psql "$DATABASE_URL" -c "\q" > /dev/null 2>&1; then
-    echo "Error: Cannot connect to database. Please check your connection settings."
-    exit 1
-fi
-echo "Database connection successful!"
+# Function to clean a database
+clean_database() {
+    local db_url="$1"
+    local db_name="$2"
+    
+    echo "=== Cleaning $db_name ==="
+    
+    # Check if database is accessible
+    echo "Checking $db_name connection..."
+    if ! psql "$db_url" -c "\q" > /dev/null 2>&1; then
+        echo "Warning: Cannot connect to $db_name. Skipping..."
+        return 1
+    fi
+    echo "$db_name connection successful!"
+    
+    # Drop tables and migrations
+    echo "Dropping $db_name tables and migrations..."
+    psql "$db_url" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
+    psql "$db_url" -c "DROP TABLE IF EXISTS events CASCADE;"
+    psql "$db_url" -c "DROP TABLE IF EXISTS finished_events CASCADE;"
+    psql "$db_url" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
+    psql "$db_url" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
+    psql "$db_url" -c "DROP TYPE IF EXISTS event_status CASCADE;"
+    psql "$db_url" -c "DROP TABLE IF EXISTS node_status CASCADE;"
+    echo "$db_name cleanup completed successfully!"
+    echo ""
+}
 
 # Stop the sequencer if it's running
 if [ -f "$SEQUENCER_DIR/logs/sequencer.pid" ]; then
@@ -38,16 +58,18 @@ if [ -f "$SEQUENCER_DIR/logs/sequencer.pid" ]; then
             kill -9 $OLD_PID
         fi
         echo "Sequencer process stopped."
+        echo ""
     fi
 fi
 
-# Drop tables and migrations
-echo "Dropping database tables and migrations..."
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS events CASCADE;"
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS finished_events CASCADE;"
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
-psql "$DATABASE_URL" -c "DROP TYPE IF EXISTS event_status CASCADE;"
-psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS node_status CASCADE;"
-echo "Database cleanup completed successfully!" 
+# Clean main database
+clean_database "$DATABASE_URL" "Main Database"
+
+# Clean fallback database if FALLBACK_DATABASE_URL is set
+if [ -n "$FALLBACK_DATABASE_URL" ]; then
+    clean_database "$FALLBACK_DATABASE_URL" "Fallback Database"
+else
+    echo "FALLBACK_DATABASE_URL not set, skipping fallback database cleanup."
+fi
+
+echo "All database cleanup operations completed!" 

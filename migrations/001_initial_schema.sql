@@ -190,9 +190,17 @@ CREATE INDEX finished_events_status_idx ON finished_events(status);
 CREATE INDEX idx_events_dst_chain_id ON events(dst_chain_id);
 CREATE INDEX idx_node_status_timestamp ON node_status(timestamp);
 
+-- Create boundless_users table
+CREATE TABLE boundless_users (
+    user_address TEXT PRIMARY KEY
+);
+
 -- Grant SELECT permissions to frontend user
 GRANT SELECT ON events TO "Frontend";
 GRANT SELECT ON finished_events TO "Frontend";
+
+-- Grant full access to boundless_users table for frontend user
+GRANT SELECT, INSERT, UPDATE, DELETE ON boundless_users TO "Frontend";
 
 GRANT SELECT ON events TO "Analytics";
 GRANT SELECT ON finished_events TO "Analytics";

@@ -83,7 +83,7 @@ use uuid::Uuid;
 use crate::provider_helper::{ProviderConfig, ProviderState};
 use malda_rs::constants::*;
 use malda_rs::types::{abi, SolidityDataType, TakeLastXBytes};
-use malda_rs::viewcalls::{get_proof_data_prove_boundless, get_proof_data_prove_sdk};
+use malda_rs::viewcalls::{get_proof_data_prove_boundless, get_proof_data_prove_sdk, BoundlessParams};
 
 /// Proof information containing journal, seal, and metadata
 ///
@@ -193,7 +193,7 @@ impl ProofGenerator {
         // Main processing loop - runs indefinitely
         loop {
             // Retrieve events ready for proof generation
-            let events = match Self::get_ready_events(&db, proof_delay, config.batch_size).await {
+            let (bonsai_events, boundless_events) = match Self::get_ready_events(&db, proof_delay, config.batch_size).await {
                 Ok(events) => events,
                 Err(e) => {
                     error!("Database error in proof generator: {:?}, continuing to next cycle", e);
@@ -202,20 +202,36 @@ impl ProofGenerator {
                 }
             };
 
-            if !events.is_empty() {
+            let total_events = bonsai_events.len() + boundless_events.len();
+            if total_events > 0 {
                 info!(
-                    "Processing batch of {} events for proof generation",
-                    events.len()
+                    "Processing batch of {} events for proof generation ({} bonsai, {} boundless)",
+                    total_events,
+                    bonsai_events.len(),
+                    boundless_events.len()
                 );
 
-                // Process batch in background task to avoid blocking the main loop
-                let config_clone = config.clone();
-                let db_clone = db.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = Self::process_batch(events, config_clone, db_clone).await {
-                        error!("Failed to generate proofs for batch: {}", e);
-                    }
-                });
+                // Process bonsai events in background task
+                if !bonsai_events.is_empty() {
+                    let config_clone = config.clone();
+                    let db_clone = db.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = Self::process_batch(bonsai_events, config_clone, db_clone, false).await {
+                            error!("Failed to generate proofs for bonsai batch: {}", e);
+                        }
+                    });
+                }
+
+                // Process boundless events in background task
+                if !boundless_events.is_empty() {
+                    let config_clone = config.clone();
+                    let db_clone = db.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = Self::process_batch(boundless_events, config_clone, db_clone, true).await {
+                            error!("Failed to generate proofs for boundless batch: {}", e);
+                        }
+                    });
+                }
             }
 
             // Wait before next polling cycle
@@ -242,12 +258,12 @@ impl ProofGenerator {
     /// * `batch_size` - Maximum number of events to retrieve in one batch
     ///
     /// # Returns
-    /// * `Result<Vec<EventUpdate>>` - Events ready for proof generation, or error if query fails
+    /// * `Result<(Vec<EventUpdate>, Vec<EventUpdate>)>` - Tuple of (bonsai_events, boundless_events) ready for proof generation, or error if query fails
     async fn get_ready_events(
         db: &Database,
         proof_delay: Duration,
         batch_size: usize,
-    ) -> Result<Vec<EventUpdate>> {
+    ) -> Result<(Vec<EventUpdate>, Vec<EventUpdate>)> {
         db.get_ready_to_request_proof_events(proof_delay.as_secs() as i64, batch_size as i64)
             .await
     }
@@ -276,6 +292,7 @@ impl ProofGenerator {
     /// * `events` - Events to process for proof generation
     /// * `config` - Proof generator configuration for retry settings
     /// * `db` - Database connection for updates
+    /// * `boundless` - Whether to use boundless proof generation (true) or SDK method (false)
     ///
     /// # Returns
     /// * `Result<()>` - Success or error status
@@ -283,6 +300,7 @@ impl ProofGenerator {
         events: Vec<EventUpdate>,
         config: ProofGeneratorConfig,
         db: Database,
+        boundless: bool,
     ) -> Result<()> {
         let start_time = Instant::now();
 
@@ -296,7 +314,7 @@ impl ProofGenerator {
         );
 
         // Generate proof with retry logic and fallback methods
-        let proof_info = match Self::generate_proof(users, markets, dst_chain_ids, src_chain_ids, config).await {
+        let proof_info = match Self::generate_proof(users, markets, dst_chain_ids, src_chain_ids, config, boundless).await {
             Ok(proof_info) => proof_info,
             Err(e) => {
                 error!("Failed to generate proof: {:?}", e);
@@ -493,10 +511,14 @@ impl ProofGenerator {
     ///
     /// ## Proof Generation Strategy
     ///
-    /// 1. **Boundless Attempt**: Try boundless proof generation first (onchain=true)
-    /// 2. **SDK Fallback**: If boundless fails, use SDK method with retry logic
-    /// 3. **Provider Validation**: Use provider helper to determine fallback mode
-    /// 4. **Retry Logic**: Implement exponential backoff with configurable retries
+    /// The method uses either boundless or SDK proof generation based on the `boundless` parameter:
+    /// - **Boundless**: Uses decentralized proof generation via boundless market
+    /// - **SDK**: Uses local Bonsai SDK proof generation
+    /// 
+    /// Both methods use the same retry logic and fallback strategy:
+    /// 1. **Provider Validation**: Use provider helper to determine fallback mode
+    /// 2. **Retry Logic**: Implement exponential backoff with configurable retries
+    /// 3. **Unified Error Handling**: Same error handling for both methods
     ///
     /// ## Fallback Logic
     ///
@@ -517,6 +539,7 @@ impl ProofGenerator {
     /// * `dst_chain_ids` - Destination chain IDs grouped by chain
     /// * `src_chain_ids` - Source chain IDs
     /// * `config` - Proof generator configuration for retry settings
+    /// * `boundless` - Whether to use boundless proof generation (true) or SDK method (false)
     ///
     /// # Returns
     /// * `Result<ProofInfo>` - Generated proof information
@@ -526,6 +549,7 @@ impl ProofGenerator {
         dst_chain_ids: Vec<Vec<u64>>,
         src_chain_ids: Vec<u64>,
         config: ProofGeneratorConfig,
+        boundless: bool,
     ) -> Result<ProofInfo> {
         debug!(
             "Starting proof generation for {} source chains",
@@ -548,19 +572,7 @@ impl ProofGenerator {
         } else {
             info!("Dummy proof mode disabled, using real proof generation");
 
-            // Try boundless proof generation first (preferred method)
-            if let Ok(proof_info) = Self::try_boundless_proof(
-                users.clone(),
-                markets.clone(),
-                dst_chain_ids.clone(),
-                src_chain_ids.clone(),
-            )
-            .await
-            {
-                return Ok(proof_info);
-            }
-
-            // Fall back to SDK method with retry logic if boundless fails
+            // Unified retry logic for both boundless and SDK methods
             let mut attempts = 0;
             loop {
                 // Determine whether to use fallback mode based on provider status
@@ -573,68 +585,88 @@ impl ProofGenerator {
                 )
                 .await;
 
+                let method_name = if boundless { "boundless" } else { "SDK" };
                 if should_use_fallback {
                     info!(
-                        "Using fallback mode for proof generation (attempt {})",
-                        attempts
+                        "Using fallback mode for {} proof generation (attempt {})",
+                        method_name, attempts
                     );
                 } else {
                     info!(
-                        "Using primary mode for proof generation (attempt {})",
-                        attempts
+                        "Using primary mode for {} proof generation (attempt {})",
+                        method_name, attempts
                     );
                 }
 
                 let start_time = Instant::now();
 
-                // Attempt SDK proof generation
-                match get_proof_data_prove_sdk(
-                    users.clone(),
-                    markets.clone(),
-                    dst_chain_ids.clone(),
-                    src_chain_ids.clone(),
-                    false, // l1_inclusion
-                    should_use_fallback,
-                )
-                .await
-                {
+                // Attempt proof generation based on boundless parameter
+                let result = if boundless {
+                    Self::try_boundless_proof(
+                        users.clone(),
+                        markets.clone(),
+                        dst_chain_ids.clone(),
+                        src_chain_ids.clone(),
+                        should_use_fallback,
+                    )
+                    .await
+                } else {
+                    get_proof_data_prove_sdk(
+                        users.clone(),
+                        markets.clone(),
+                        dst_chain_ids.clone(),
+                        src_chain_ids.clone(),
+                        false, // l1_inclusion
+                        should_use_fallback,
+                    )
+                    .await
+                    .map_err(|e| eyre!("SDK proof generation failed: {}", e))
+                    .and_then(|proof_info| {
+                        Self::create_proof_info_from_sdk(proof_info)
+                    })
+                };
+
+                match result {
                     Ok(proof_info) => {
                         let duration = start_time.elapsed();
-                        let proof_result = Self::create_proof_info_from_sdk(proof_info)?;
-
-                        // Log performance statistics
                         let tx_num = users.clone().iter().flatten().count();
-                        info!(
-                            "Generated proof for {} transactions with {} cycles in {:?}{}",
-                            tx_num,
-                            proof_result.total_cycles,
-                            duration,
-                            if should_use_fallback {
-                                " (fallback mode)"
-                            } else {
-                                ""
-                            }
-                        );
+                        
+                        // Log performance statistics
+                        if boundless {
+                            info!(
+                                "Generated boundless proof for {} transactions in {:?}{}",
+                                tx_num,
+                                duration,
+                                if should_use_fallback { " (fallback mode)" } else { "" }
+                            );
+                        } else {
+                            info!(
+                                "Generated SDK proof for {} transactions with {} cycles in {:?}{}",
+                                tx_num,
+                                proof_info.total_cycles,
+                                duration,
+                                if should_use_fallback { " (fallback mode)" } else { "" }
+                            );
+                        }
 
-                        return Ok(proof_result);
+                        return Ok(proof_info);
                     }
                     Err(e) if attempts < config.max_retries => {
                         attempts += 1;
                         warn!(
-                            "Proof generation attempt {} failed: {}. Retrying...",
-                            attempts, e
+                            "{} proof generation attempt {} failed: {}. Retrying...",
+                            method_name, attempts, e
                         );
                         sleep(config.retry_delay).await;
                     }
                     Err(e) => {
                         error!(
-                            "Failed to generate proof after {} attempts: {}",
-                            attempts, e
+                            "Failed to generate {} proof after {} attempts: {}",
+                            method_name, attempts, e
                         );
                         return Err(eyre!(
-                            "Failed to generate proof after {} attempts: {}",
-                            attempts,
-                            e
+                            "Failed to generate {} proof after {} attempts: {}",
+                            method_name, attempts, e
                         ));
                     }
                 }
@@ -672,6 +704,7 @@ impl ProofGenerator {
     /// * `markets` - Market addresses grouped by chain
     /// * `dst_chain_ids` - Destination chain IDs grouped by chain
     /// * `src_chain_ids` - Source chain IDs
+    /// * `fallback` - Whether to use fallback RPC URLs
     ///
     /// # Returns
     /// * `Result<ProofInfo>` - Generated proof information or error
@@ -680,6 +713,7 @@ impl ProofGenerator {
         markets: Vec<Vec<Address>>,
         dst_chain_ids: Vec<Vec<u64>>,
         src_chain_ids: Vec<u64>,
+        fallback: bool,
     ) -> Result<ProofInfo> {
         info!("Attempting boundless proof generation with onchain=true");
 
@@ -690,8 +724,9 @@ impl ProofGenerator {
             dst_chain_ids,
             src_chain_ids,
             false, // l1_inclusion
-            false, // fallback
+            fallback, // fallback
             true,  // onchain
+            BoundlessParams::default(),
         )
         .await
         {

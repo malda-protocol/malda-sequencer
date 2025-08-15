@@ -986,7 +986,7 @@ impl Database {
         &self,
         delay_seconds: i64,
         batch_limit: i64,
-    ) -> Result<Vec<EventUpdate>> {
+    ) -> Result<(Vec<EventUpdate>, Vec<EventUpdate>)> {
         let active_pool = self.get_active_pool().await;
         
         // Re-added rate limiting check using sync_timestamps
@@ -1012,7 +1012,7 @@ impl Database {
                 "Proof request delay ({}s) not met, skipping claim.",
                 delay_seconds
             );
-            return Ok(Vec::new()); // Return empty if delay not met
+            return Ok((Vec::new(), Vec::new())); // Return empty if delay not met
         }
 
         // Use a transaction to ensure atomicity
@@ -1034,7 +1034,7 @@ impl Database {
         let records = query(
             r#"
             WITH ready_events AS (
-                SELECT tx_hash, dst_chain_id, received_at
+                SELECT tx_hash, dst_chain_id, received_at, msg_sender
                 FROM events 
                 WHERE status = 'ReadyToRequestProof'::event_status
             ),
@@ -1050,6 +1050,7 @@ impl Database {
                 SELECT 
                     tx_hash,
                     dst_chain_id,
+                    msg_sender,
                     ROW_NUMBER() OVER (
                         PARTITION BY dst_chain_id 
                         ORDER BY received_at ASC, tx_hash ASC
@@ -1057,7 +1058,7 @@ impl Database {
                 FROM ready_events
             ),
             claim_targets AS (
-                SELECT tx_hash
+                SELECT tx_hash, msg_sender
                 FROM ranked_events r
                 JOIN chain_counts c ON r.dst_chain_id = c.dst_chain_id
                 WHERE 
@@ -1084,15 +1085,46 @@ impl Database {
         .fetch_all(tx.as_mut())
         .await?;
 
+        let number_events_claimed = records.len();
+
         // Commit the transaction
         tx.commit().await?;
 
-        let mut events = Vec::new();
+        let mut boundless_events = Vec::new();
+        let mut bonsai_events = Vec::new();
+        
         if records.is_empty() {
-            return Ok(events);
+            return Ok((bonsai_events, boundless_events));
         }
 
-        info!("Claimed {} events for proof generation.", records.len());
+
+
+        // Get all msg_senders from the claimed events to check against boundless_users
+        let msg_senders: Vec<String> = records
+            .iter()
+            .filter_map(|row| row.try_get::<Option<String>, _>("msg_sender").ok().flatten())
+            .collect();
+
+        // Check which msg_senders are in boundless_users table
+        let boundless_users = if !msg_senders.is_empty() {
+            let boundless_query = query(
+                r#"
+                SELECT user_address 
+                FROM boundless_users 
+                WHERE user_address = ANY($1::text[])
+                "#,
+            )
+            .bind(&msg_senders)
+            .fetch_all(&active_pool)
+            .await?;
+
+            boundless_query
+                .iter()
+                .filter_map(|row| row.try_get::<String, _>("user_address").ok())
+                .collect::<std::collections::HashSet<String>>()
+        } else {
+            std::collections::HashSet::new()
+        };
 
         for row in records {
             let tx_hash_str: String = row.try_get("tx_hash")?;
@@ -1100,7 +1132,7 @@ impl Database {
 
             // We know the status is ProofRequested because we just set it.
             // Only populate fields returned by the query.
-            events.push(EventUpdate {
+            let event = EventUpdate {
                 tx_hash,
                 status: EventStatus::ProofRequested, // Set status explicitly
                 src_chain_id: row
@@ -1117,10 +1149,24 @@ impl Database {
                     .map(|addr| addr.parse().unwrap()),
                 // Other fields are Default::default()
                 ..Default::default()
-            });
+            };
+
+            // Check if the msg_sender is in boundless_users
+            let is_boundless = event.msg_sender
+                .as_ref()
+                .map(|addr| boundless_users.contains(&addr.to_string()))
+                .unwrap_or(false);
+
+            if is_boundless {
+                boundless_events.push(event);
+            } else {
+                bonsai_events.push(event);
+            }
         }
 
-        Ok(events)
+        info!("Claimed {} events for proof generation. {} boundless, {} bonsai", number_events_claimed, boundless_events.len(), bonsai_events.len());
+
+        Ok((bonsai_events, boundless_events))
     }
 
     /// Retrieves proven events for batch submission on a specific destination chain
