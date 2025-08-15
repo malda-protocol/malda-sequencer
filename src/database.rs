@@ -494,47 +494,7 @@ impl Database {
         Self::new_with_fallback(config).await
     }
 
-    /// Retry a database operation with exponential backoff
-    ///
-    /// This helper method retries database operations that might fail due to
-    /// connection issues, with exponential backoff to avoid overwhelming the database.
-    ///
-    /// # Arguments
-    /// * `operation` - The database operation to retry
-    /// * `max_retries` - Maximum number of retry attempts
-    /// * `base_delay` - Base delay between retries in seconds
-    ///
-    /// # Returns
-    /// * `Result<T>` - Result of the operation
-    ///
-    /// # Example
-    /// ```rust
-    /// let result = db.retry_operation(|| async { /* db operation */ }, 3, 1).await?;
-    /// ```
-    async fn retry_operation<F, Fut, T>(&self, operation: F, max_retries: u32, base_delay: u64) -> Result<T>
-    where
-        F: Fn() -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
-    {
-        let mut attempt = 0;
-        loop {
-            match operation().await {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    attempt += 1;
-                    if attempt > max_retries {
-                        return Err(e);
-                    }
-                    
-                    let delay = base_delay * 2_u64.pow(attempt - 1);
-                    warn!("Database operation failed (attempt {}/{}), retrying in {}s: {:?}", 
-                          attempt, max_retries, delay, e);
-                    
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
-                }
-            }
-        }
-    }
+
 
     /// Starts the background health monitoring task
     ///
@@ -1903,27 +1863,62 @@ impl Database {
             return Ok(());
         }
 
-        // Calculate timeouts only if we have enough data
+        // Calculate separate timeouts for boundless and bonsai proofs
         let timeouts = query(
             r#"
-            WITH recent_successes AS (
+            WITH boundless_successes AS (
                 SELECT 
-                    GREATEST(AVG(EXTRACT(EPOCH FROM ( proof_received_at - proof_requested_at))), 20) as avg_proof_request_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (proof_received_at - proof_requested_at))), 60) as avg_proof_request_time,
                     GREATEST(AVG(EXTRACT(EPOCH FROM (batch_submitted_at - proof_received_at))), 10) as avg_proof_generation_time,
                     GREATEST(AVG(EXTRACT(EPOCH FROM (batch_included_at - batch_submitted_at))), 10) as avg_batch_submission_time,
                     GREATEST(AVG(EXTRACT(EPOCH FROM (tx_finished_at - batch_included_at))), 20) as avg_batch_inclusion_time
-                FROM finished_events
+                FROM finished_events fe
+                JOIN boundless_users bu ON fe.msg_sender = bu.user_address
                 WHERE status = 'TxProcessSuccess'::event_status
-                GROUP BY tx_hash
-                ORDER BY received_at DESC
+                ORDER BY fe.received_at DESC
+                LIMIT $1
+            ),
+            bonsai_successes AS (
+                SELECT 
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (proof_received_at - proof_requested_at))), 20) as avg_proof_request_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (batch_submitted_at - proof_received_at))), 10) as avg_proof_generation_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (batch_included_at - batch_submitted_at))), 10) as avg_batch_submission_time,
+                    GREATEST(AVG(EXTRACT(EPOCH FROM (tx_finished_at - batch_included_at))), 20) as avg_batch_inclusion_time
+                FROM finished_events fe
+                LEFT JOIN boundless_users bu ON fe.msg_sender = bu.user_address
+                WHERE status = 'TxProcessSuccess'::event_status
+                  AND bu.user_address IS NULL
+                ORDER BY fe.received_at DESC
                 LIMIT $1
             )
             SELECT 
-                CEIL(avg_proof_request_time * $2)::INT8 as proof_request_timeout,
-                CEIL(avg_proof_generation_time * $2)::INT8 as proof_generation_timeout,
-                CEIL(avg_batch_submission_time * $2)::INT8 as batch_submission_timeout,
-                CEIL(avg_batch_inclusion_time * $2)::INT8 as batch_inclusion_timeout
-            FROM recent_successes
+                -- Use boundless timeouts (longer) as default, fallback to bonsai if no boundless data
+                COALESCE(
+                    (SELECT CEIL(avg_proof_request_time * $2)::INT8 FROM boundless_successes),
+                    (SELECT CEIL(avg_proof_request_time * $2)::INT8 FROM bonsai_successes),
+                    120  -- Default fallback: 2 minutes
+                ) as boundless_proof_request_timeout,
+                COALESCE(
+                    (SELECT CEIL(avg_proof_request_time * $2)::INT8 FROM bonsai_successes),
+                    (SELECT CEIL(avg_proof_request_time * $2)::INT8 FROM boundless_successes),
+                    60   -- Default fallback: 1 minute
+                ) as bonsai_proof_request_timeout,
+                -- Use the same timeouts for other stages (they don't differ by proof method)
+                COALESCE(
+                    (SELECT CEIL(avg_proof_generation_time * $2)::INT8 FROM boundless_successes),
+                    (SELECT CEIL(avg_proof_generation_time * $2)::INT8 FROM bonsai_successes),
+                    20   -- Default fallback: 20 seconds
+                ) as proof_generation_timeout,
+                COALESCE(
+                    (SELECT CEIL(avg_batch_submission_time * $2)::INT8 FROM boundless_successes),
+                    (SELECT CEIL(avg_batch_submission_time * $2)::INT8 FROM bonsai_successes),
+                    20   -- Default fallback: 20 seconds
+                ) as batch_submission_timeout,
+                COALESCE(
+                    (SELECT CEIL(avg_batch_inclusion_time * $2)::INT8 FROM boundless_successes),
+                    (SELECT CEIL(avg_batch_inclusion_time * $2)::INT8 FROM bonsai_successes),
+                    40   -- Default fallback: 40 seconds
+                ) as batch_inclusion_timeout
             "#
         )
         .bind(finished_sample_size)
@@ -1932,30 +1927,38 @@ impl Database {
         .await?;
 
         // Extract timeout values with proper type conversion
-        let proof_request_timeout: i64 = timeouts.try_get("proof_request_timeout")?;
+        let boundless_proof_request_timeout: i64 = timeouts.try_get("boundless_proof_request_timeout")?;
+        let bonsai_proof_request_timeout: i64 = timeouts.try_get("bonsai_proof_request_timeout")?;
         let proof_generation_timeout: i64 = timeouts.try_get("proof_generation_timeout")?;
         let batch_submission_timeout: i64 = timeouts.try_get("batch_submission_timeout")?;
         let batch_inclusion_timeout: i64 = timeouts.try_get("batch_inclusion_timeout")?;
 
-        // Combined stuck events query with batch limit
+        // Combined stuck events query with batch limit and proof method-specific timeouts
         let rows_affected = query(
             r#"
             WITH stuck_events AS (
                 SELECT 
-                    tx_hash,
-                    status,
-                    resubmitted,
+                    e.tx_hash,
+                    e.status,
+                    e.resubmitted,
                     CASE 
-                        WHEN status = 'ProofRequested'::event_status AND proof_requested_at < NOW() - ($1::bigint || ' seconds')::interval THEN 'proof_requested'
-                        WHEN status = 'ProofReceived'::event_status AND proof_received_at < NOW() - ($2::bigint || ' seconds')::interval THEN 'proof_received'
-                        WHEN status = 'BatchSubmitted'::event_status AND batch_submitted_at < NOW() - ($3::bigint || ' seconds')::interval THEN 'batch_submitted'
-                        WHEN status = 'BatchFailed'::event_status AND batch_submitted_at < NOW() - ($4::bigint || ' seconds')::interval THEN 'batch_failed'
+                        WHEN e.status = 'ProofRequested'::event_status AND 
+                             e.proof_requested_at < NOW() - (
+                                 CASE 
+                                     WHEN bu.user_address IS NOT NULL THEN $1::bigint  -- boundless timeout
+                                     ELSE $2::bigint  -- bonsai timeout
+                                 END || ' seconds'
+                             )::interval THEN 'proof_requested'
+                        WHEN e.status = 'ProofReceived'::event_status AND e.proof_received_at < NOW() - ($3::bigint || ' seconds')::interval THEN 'proof_received'
+                        WHEN e.status = 'BatchSubmitted'::event_status AND e.batch_submitted_at < NOW() - ($4::bigint || ' seconds')::interval THEN 'batch_submitted'
+                        WHEN e.status = 'BatchFailed'::event_status AND e.batch_submitted_at < NOW() - ($5::bigint || ' seconds')::interval THEN 'batch_failed'
                         ELSE NULL
                     END as stuck_type
-                FROM events
-                WHERE status IN ('ProofRequested', 'ProofReceived', 'BatchSubmitted', 'BatchFailed')
-                  AND (resubmitted IS NULL OR resubmitted < $6)
-                LIMIT $5
+                FROM events e
+                LEFT JOIN boundless_users bu ON e.msg_sender = bu.user_address
+                WHERE e.status IN ('ProofRequested', 'ProofReceived', 'BatchSubmitted', 'BatchFailed')
+                  AND (e.resubmitted IS NULL OR e.resubmitted < $7)
+                LIMIT $6
             )
             UPDATE events e
             SET 
@@ -2011,12 +2014,13 @@ impl Database {
               AND se.stuck_type IS NOT NULL
             "#
         )
-        .bind(proof_request_timeout)
-        .bind(proof_generation_timeout)
-        .bind(batch_submission_timeout)
-        .bind(batch_inclusion_timeout)
-        .bind(batch_limit)
-        .bind(max_retries)
+        .bind(boundless_proof_request_timeout)  // $1 - boundless timeout
+        .bind(bonsai_proof_request_timeout)     // $2 - bonsai timeout
+        .bind(proof_generation_timeout)         // $3 - proof generation timeout
+        .bind(batch_submission_timeout)         // $4 - batch submission timeout
+        .bind(batch_inclusion_timeout)          // $5 - batch inclusion timeout
+        .bind(batch_limit)                      // $6 - batch limit
+        .bind(max_retries)                      // $7 - max retries
         .execute(&mut *tx)
         .await?
         .rows_affected();
