@@ -135,39 +135,39 @@ if [[ "$CLEAN_BUILD" == true ]]; then
     cargo clean
 fi
 
-# Run database migrations
-echo "Running database migrations..."
-cd "$SEQUENCER_DIR"
+# # Run database migrations
+# echo "Running database migrations..."
+# cd "$SEQUENCER_DIR"
 
-MIGRATION_SUCCESS=false
+# MIGRATION_SUCCESS=false
 
-# Try primary database first (only if we know it's working)
-if [[ -n "$DATABASE_URL" && "$PRIMARY_DB_WORKING" == true ]]; then
-    echo "Running migrations on primary database..."
-    if sqlx migrate run --database-url "${DATABASE_URL}" > /dev/null 2>&1; then
-        echo "✅ Migrations successful on primary database!"
-        MIGRATION_SUCCESS=true
-    else
-        echo "❌ Migrations failed on primary database."
-    fi
-fi
+# # Try primary database first (only if we know it's working)
+# if [[ -n "$DATABASE_URL" && "$PRIMARY_DB_WORKING" == true ]]; then
+#     echo "Running migrations on primary database..."
+#     if sqlx migrate run --database-url "${DATABASE_URL}" > /dev/null 2>&1; then
+#         echo "✅ Migrations successful on primary database!"
+#         MIGRATION_SUCCESS=true
+#     else
+#         echo "❌ Migrations failed on primary database."
+#     fi
+# fi
 
-# Try fallback database if primary failed or wasn't working
-if [[ "$MIGRATION_SUCCESS" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
-    echo "Running migrations on fallback database..."
-    if sqlx migrate run --database-url "${DATABASE_URL_FALLBACK}" > /dev/null 2>&1; then
-        echo "✅ Migrations successful on fallback database!"
-        MIGRATION_SUCCESS=true
-    else
-        echo "❌ Migrations failed on fallback database."
-    fi
-fi
+# # Try fallback database if primary failed or wasn't working
+# if [[ "$MIGRATION_SUCCESS" == false && -n "$DATABASE_URL_FALLBACK" ]]; then
+#     echo "Running migrations on fallback database..."
+#     if sqlx migrate run --database-url "${DATABASE_URL_FALLBACK}" > /dev/null 2>&1; then
+#         echo "✅ Migrations successful on fallback database!"
+#         MIGRATION_SUCCESS=true
+#     else
+#         echo "❌ Migrations failed on fallback database."
+#     fi
+# fi
 
-# Check if migrations succeeded on at least one database
-if [[ "$MIGRATION_SUCCESS" == false ]]; then
-    echo "Error: Migrations failed on all databases. Please check your database setup."
-    exit 1
-fi
+# # Check if migrations succeeded on at least one database
+# if [[ "$MIGRATION_SUCCESS" == false ]]; then
+#     echo "Error: Migrations failed on all databases. Please check your database setup."
+#     exit 1
+# fi
 
 # Build the project
 echo "Building sequencer..."

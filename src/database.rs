@@ -1875,7 +1875,6 @@ impl Database {
                 FROM finished_events fe
                 JOIN boundless_users bu ON fe.msg_sender = bu.user_address
                 WHERE status = 'TxProcessSuccess'::event_status
-                ORDER BY fe.received_at DESC
                 LIMIT $1
             ),
             bonsai_successes AS (
@@ -1888,7 +1887,6 @@ impl Database {
                 LEFT JOIN boundless_users bu ON fe.msg_sender = bu.user_address
                 WHERE status = 'TxProcessSuccess'::event_status
                   AND bu.user_address IS NULL
-                ORDER BY fe.received_at DESC
                 LIMIT $1
             )
             SELECT 
