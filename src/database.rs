@@ -584,7 +584,7 @@ impl Database {
                 Ok(connect_options) => {
                     match sqlx::PgPool::connect_with(connect_options.ssl_mode(sqlx::postgres::PgSslMode::Require)).await {
                         Ok(pool) => {
-                            debug!("Primary database pool initialized successfully during health check");git add .
+                            debug!("Primary database pool initialized successfully during health check");
                             Some(pool)
                         }
                         Err(e) => {
