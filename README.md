@@ -29,7 +29,7 @@ The Malda Sequencer is a sophisticated blockchain infrastructure component that:
 - **Multi-Chain Support**: Ethereum, Linea, Optimism, Base (mainnet and testnet)
 - **ZK Proof Generation**: Real and dummy proof modes for development/production
 - **Event Processing**: Monitors and processes cross-chain events
-- **Transaction Management**: Automated transaction submission with gas optimization
+- **Transaction Management**: Automated transaction resubmission and gas management
 - **Database Integration**: PostgreSQL for event tracking and state management
 - **Provider Fallback**: Automatic failover between primary and backup RPC endpoints
 - **Parallel Processing**: Independent chain processing for fault isolation
@@ -239,24 +239,7 @@ If you're planning to run multiple nodes, ensure you have enough space for:
 - Temporary files
 - Database storage (if applicable)
 
-**Troubleshooting:**
 
-If disk space is insufficient:
-1. **Clean up unnecessary files:**
-   ```bash
-   sudo apt autoremove
-   sudo apt autoclean
-   ```
-
-2. **Check largest directories:**
-   ```bash
-   du -h --max-depth=1 / | sort -hr | head -10
-   ```
-
-3. **Clear log files (if safe):**
-   ```bash
-   sudo journalctl --vacuum-time=7d
-   ```
 
 ### 3.2 Docker Setup
 
@@ -452,11 +435,6 @@ The Linea node will:
 - Provide RPC and WebSocket endpoints for applications
 - Support Linea-specific features like `linea_estimateGas`
 
-**Storage Requirements:**
-- **Full node**: ~316.63 GB (increasing by ~344.57 MB daily)
-- **Archive node**: ~3.5 TB (increasing by ~1.32 GB daily)
-
-All data is stored on the 14TB filesystem configured in Step 3.2.
 
 #### Ethereum Node Setup
 
@@ -474,7 +452,7 @@ cd reth
 
 **Modify Docker Configuration:**
 
-The default docker-compose.yml needs to be modified to enable WebSocket support and increase the proof window. The following changes are already applied in the repository:
+The default docker-compose.yml needs to be modified to enable WebSocket support and increase the proof window. The following changes need to be applied in the docker file:
 
 **WebSocket Support:**
 - Added port mapping: `"8546:8546" # websocket"`
@@ -538,7 +516,7 @@ docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml down
 
 #### Base Node Setup
 
-The MALDA Sequencer can also utilize a Base node for Base Chain interactions. Base is Coinbase's L2 network built on Ethereum.
+The MALDA Sequencer can also utilize a Base node for Base Chain interactions.
 
 **References:**
 - [Base Node Documentation](https://docs.base.org/base-chain/node-operators/run-a-base-node)
@@ -1048,8 +1026,8 @@ RPC_URL_BASE_TRANSACTION=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 **Required API Keys and Services:**
 
 **RPC Providers:**
-- **Alchemy**: Primary RPC provider for all chains
-- **Your own node**: Fallback RPC provider (recommended for production)
+- **Own Nodes**: Primary RPC provider for all chains
+- **Alchemy**: Fallback RPC provider (recommended for production)
 
 **ZK Proof Services:**
 - **Bonsai API**: For production ZK proof generation
