@@ -9,8 +9,14 @@ SEQUENCER_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 echo "Script directory: $SCRIPT_DIR"
 echo "Sequencer directory: $SEQUENCER_DIR"
 
-# Set database URL
-export DATABASE_URL="postgres://doadmin:AVNS_G5U-F8YEsMY2G4odL39@db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+# Load environment variables from .env file
+if [ -f "$SEQUENCER_DIR/.env" ]; then
+    echo "Loading environment variables from .env file..."
+    source "$SEQUENCER_DIR/.env"
+else
+    echo "Error: .env file not found at $SEQUENCER_DIR/.env"
+    exit 1
+fi
 
 # Check if database is accessible
 echo "Checking database connection..."
@@ -37,9 +43,11 @@ fi
 
 # Drop tables and migrations
 echo "Dropping database tables and migrations..."
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS events CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TABLE IF EXISTS finished_events CASCADE;"
-PGPASSWORD=AVNS_G5U-F8YEsMY2G4odL39 psql -h db-postgresql-lon1-66182-do-user-15988403-0.k.db.ondigitalocean.com -p 25060 -U doadmin -d defaultdb -c "DROP TYPE IF EXISTS event_status CASCADE;"
-
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS events CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS finished_events CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
+psql "$DATABASE_URL" -c "DROP TYPE IF EXISTS event_status CASCADE;"
+psql "$DATABASE_URL" -c "DROP TABLE IF EXISTS node_status CASCADE;"
 echo "Database cleanup completed successfully!" 

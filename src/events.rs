@@ -98,25 +98,79 @@ pub const HOST_REPAY_EXTERNAL_SIG: &str =
 pub const HOST_WITHDRAW_EXTERNAL_SIG: &str =
     "mErc20Host_WithdrawExternal(address,address,uint32,uint256)";
 pub const HOST_BORROW_ON_EXTENSION_CHAIN_SIG: &str =
-    "mErc20Host_BorrowOnExternsionChain(address,uint32,uint256)";
+    "mErc20Host_BorrowOnExtensionChain(address,uint32,uint256)";
 pub const HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG: &str =
     "mErc20Host_WithdrawOnExtensionChain(address,uint32,uint256)";
 pub const EXTENSION_SUPPLIED_SIG: &str =
-    "mTokenGateway_Supplied(address,uint256,uint256,uint256,uint32,uint32,bytes4)";
+    "mTokenGateway_Supplied(address,address,uint256,uint256,uint256,uint32,uint32,bytes4)";
 pub const EXTENSION_EXTRACTED_SIG: &str =
     "mTokenGateway_Extracted(address,address,address,uint256,uint256,uint256,uint32,uint32)";
 
-pub const MINT_EXTERNAL_SELECTOR: &str = "9d9339b3";
+pub const MINT_EXTERNAL_SELECTOR: &str = "05dbe8a7";
 pub const REPAY_EXTERNAL_SELECTOR: &str = "08fee263";
 pub const OUT_HERE_SELECTOR: &str = "b511d3b1";
 
-pub const MINT_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x9d, 0x93, 0x39, 0xb3];
+pub const MINT_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x05, 0xdb, 0xe8, 0xa7];
 pub const REPAY_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x08, 0xfe, 0xe2, 0x63];
 pub const OUT_HERE_SELECTOR_FB4: &[u8] = &[0xb5, 0x11, 0xd3, 0xb1];
+
+// Unified event processing system
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventType {
+    HostBorrow,
+    HostWithdraw,
+    ExtensionMint,
+    ExtensionRepay,
+    Unknown,
+}
+
+impl EventType {
+    pub fn from_signature(signature: &[u8]) -> Self {
+        use alloy::primitives::keccak256;
+
+        match signature {
+            sig if sig == keccak256(HOST_BORROW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => {
+                EventType::HostBorrow
+            }
+            sig if sig == keccak256(HOST_WITHDRAW_ON_EXTENSION_CHAIN_SIG.as_bytes()) => {
+                EventType::HostWithdraw
+            }
+            _ => EventType::Unknown,
+        }
+    }
+
+    pub fn from_method_selector(selector: &str) -> Self {
+        match selector {
+            MINT_EXTERNAL_SELECTOR => EventType::ExtensionMint,
+            REPAY_EXTERNAL_SELECTOR => EventType::ExtensionRepay,
+            _ => EventType::Unknown,
+        }
+    }
+
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            EventType::HostBorrow => "HostBorrow",
+            EventType::HostWithdraw => "HostWithdraw",
+            EventType::ExtensionMint => "ExtensionSupply",
+            EventType::ExtensionRepay => "ExtensionSupply",
+            EventType::Unknown => "Unknown",
+        }
+    }
+
+    pub fn target_function(&self) -> &'static str {
+        match self {
+            EventType::HostBorrow | EventType::HostWithdraw => "outHere",
+            EventType::ExtensionMint => "mintExternal",
+            EventType::ExtensionRepay => "repayExternal",
+            EventType::Unknown => "unknown",
+        }
+    }
+}
 
 // Add the parsing functions here
 pub fn parse_supplied_event(log: &Log) -> SuppliedEvent {
     let from = Address::from_slice(&log.topics()[1][12..]);
+    let _receiver = Address::from_slice(&log.topics()[2][12..]);
 
     // The non-indexed parameters are packed in the data field
     let data = log.data().data.clone();
@@ -141,13 +195,16 @@ pub fn parse_withdraw_on_extension_chain_event(log: &Log) -> WithdrawOnExtension
     }
 }
 
-pub const BATCH_PROCESS_FAILED_SIG: &str = "BatchProcessFailed(bytes32,bytes)";
-pub const BATCH_PROCESS_SUCCESS_SIG: &str = "BatchProcessSuccess(bytes32)";
+pub const BATCH_PROCESS_FAILED_SIG: &str =
+    "BatchProcessFailed(bytes32,address,address,uint256,uint256,bytes4,bytes)";
+pub const BATCH_PROCESS_SUCCESS_SIG: &str =
+    "BatchProcessSuccess(bytes32,address,address,uint256,uint256,bytes4)";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessFailedEvent {
     pub init_hash: Bytes32,
     pub reason: Bytes,
+    pub block_number: u64,
 }
 
 pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
@@ -157,16 +214,19 @@ pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
     BatchProcessFailedEvent {
         init_hash: Bytes32::from_slice(data[0..32].into()),
         reason: Bytes::from(data[32..].to_vec()),
+        block_number: log.block_number.unwrap_or_default(),
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessSuccessEvent {
     pub init_hash: Bytes32,
+    pub block_number: u64,
 }
 
 pub fn parse_batch_process_success_event(log: &Log) -> BatchProcessSuccessEvent {
     BatchProcessSuccessEvent {
         init_hash: Bytes32::from_slice(log.data().data[0..32].into()),
+        block_number: log.block_number.unwrap_or_default(),
     }
 }
