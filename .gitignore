@@ -7,3 +7,4 @@ target/
 .vscode/
 
 logs/ca-certificate.crt
+logs/
