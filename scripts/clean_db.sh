@@ -33,16 +33,49 @@ clean_database() {
     fi
     echo "$db_name connection successful!"
     
-    # Drop tables and migrations
-    echo "Dropping $db_name tables and migrations..."
-    psql "$db_url" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;"
-    psql "$db_url" -c "DROP TABLE IF EXISTS events CASCADE;"
-    psql "$db_url" -c "DROP TABLE IF EXISTS finished_events CASCADE;"
-    psql "$db_url" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;"
-    psql "$db_url" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;"
-    psql "$db_url" -c "DROP TYPE IF EXISTS event_status CASCADE;"
-    psql "$db_url" -c "DROP TABLE IF EXISTS node_status CASCADE;"
-    echo "$db_name cleanup completed successfully!"
+    # Terminate all active connections to prevent hanging
+    echo "Terminating all active database connections..."
+    psql "$db_url" -c "
+        SELECT pg_terminate_backend(pid) 
+        FROM pg_stat_activity 
+        WHERE datname = current_database() 
+          AND pid <> pg_backend_pid()
+          AND state IN ('active', 'idle in transaction');
+    " > /dev/null 2>&1 || true
+    
+    # Wait a moment for connections to close
+    sleep 2
+    
+    # Drop all tables and types in the correct order
+    echo "Dropping all tables and types..."
+    
+    # First drop tables that depend on the event_status type
+    psql "$db_url" -c "DROP TABLE IF EXISTS events CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS finished_events CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS archive_events CASCADE;" > /dev/null 2>&1 || true
+    
+    # Drop other tables
+    psql "$db_url" -c "DROP TABLE IF EXISTS sync_timestamps CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS chain_batch_sync CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS volume_flow CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS node_status CASCADE;" > /dev/null 2>&1 || true
+    psql "$db_url" -c "DROP TABLE IF EXISTS boundless_users CASCADE;" > /dev/null 2>&1 || true
+    
+    # Drop the event_status type
+    psql "$db_url" -c "DROP TYPE IF EXISTS event_status CASCADE;" > /dev/null 2>&1 || true
+    
+    # Finally drop the migrations table
+    psql "$db_url" -c "DROP TABLE IF EXISTS _sqlx_migrations CASCADE;" > /dev/null 2>&1 || true
+    
+    # Verify all tables are dropped
+    echo "Verifying cleanup..."
+    REMAINING_TABLES=$(psql "$db_url" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public';" 2>/dev/null | grep -v '^$' | wc -l)
+    if [ "$REMAINING_TABLES" -eq 0 ]; then
+        echo "✅ $db_name cleanup completed successfully!"
+    else
+        echo "⚠️  Warning: Some tables may still exist in $db_name"
+        psql "$db_url" -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public';" 2>/dev/null || true
+    fi
     echo ""
 }
 
@@ -66,10 +99,10 @@ fi
 clean_database "$DATABASE_URL" "Main Database"
 
 # Clean fallback database if FALLBACK_DATABASE_URL is set
-if [ -n "$FALLBACK_DATABASE_URL" ]; then
-    clean_database "$FALLBACK_DATABASE_URL" "Fallback Database"
+if [ -n "$DATABASE_URL_FALLBACK" ]; then
+    clean_database "$DATABASE_URL_FALLBACK" "Fallback Database"
 else
-    echo "FALLBACK_DATABASE_URL not set, skipping fallback database cleanup."
+    echo "DATABASE_URL_FALLBACK not set, skipping fallback database cleanup."
 fi
 
 echo "All database cleanup operations completed!" 
