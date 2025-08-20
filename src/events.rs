@@ -261,12 +261,24 @@ pub fn parse_batch_process_failed_event(log: &Log) -> BatchProcessFailedEvent {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BatchProcessSuccessEvent {
     pub init_hash: Bytes32,
+    pub receiver: Address,
+    pub m_token: Address,
+    pub amount: U256,
+    pub min_amount_out: U256,
+    pub selector: FixedBytes<4>,
     pub block_number: u64,
 }
 
 pub fn parse_batch_process_success_event(log: &Log) -> BatchProcessSuccessEvent {
+    let data = log.data().data.clone();
+    
     BatchProcessSuccessEvent {
-        init_hash: Bytes32::from_slice(log.data().data[0..32].into()),
+        init_hash: Bytes32::from_slice(data[0..32].into()),
+        receiver: Address::from_slice(&data[32..52]),
+        m_token: Address::from_slice(&data[52..72]),
+        amount: U256::from_be_slice(&data[72..104]),
+        min_amount_out: U256::from_be_slice(&data[104..136]),
+        selector: FixedBytes::from_slice(&data[136..140]),
         block_number: log.block_number.unwrap_or_default(),
     }
 }

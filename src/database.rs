@@ -1723,6 +1723,107 @@ impl Database {
         Ok(())
     }
 
+    /// Updates target functions for specific transaction hashes in finished_events
+    ///
+    /// This method is used to update the target_function field for events that have
+    /// already been migrated to finished_events. This is primarily used for liquidate
+    /// events that fell back to mint, where the target_function should be updated
+    /// to "liquidateExternal -> mintExternal".
+    ///
+    /// # Arguments
+    /// * `tx_hashes` - Vector of transaction hashes to update
+    /// * `new_target_function` - New target function value to set
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    pub async fn update_finished_events_target_function(
+        &self,
+        tx_hashes: &Vec<TxHash>,
+        new_target_function: &str,
+    ) -> Result<()> {
+        if tx_hashes.is_empty() {
+            return Ok(());
+        }
+
+        let tx_hashes_str: Vec<String> = tx_hashes.iter().map(|h| h.to_string()).collect();
+        let count = tx_hashes.len();
+
+        let active_pool = self.get_active_pool().await;
+        
+        let rows_affected = query(
+            r#"
+            UPDATE finished_events
+            SET target_function = $1
+            WHERE tx_hash = ANY($2::text[])
+            "#
+        )
+        .bind(new_target_function)
+        .bind(&tx_hashes_str)
+        .execute(&active_pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected == count as u64 {
+            info!(
+                "Successfully updated target_function to '{}' for {} events",
+                new_target_function, count
+            );
+        } else {
+            warn!(
+                "Attempted to update {} events, but {} rows were affected. Some events might not exist in finished_events.",
+                count, rows_affected
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Gets the original target functions for multiple events from the database
+    ///
+    /// This function queries the database to get the original target_function
+    /// for multiple transaction hashes in a single query. This is used to detect
+    /// liquidate fallback to mint scenarios efficiently.
+    ///
+    /// # Arguments
+    /// * `tx_hashes` - Vector of transaction hashes to look up
+    ///
+    /// # Returns
+    /// * `Result<HashMap<alloy::primitives::FixedBytes<32>, String>>` - Map of tx_hash to target function
+    pub async fn get_events_target_functions(&self, tx_hashes: &[alloy::primitives::FixedBytes<32>]) -> Result<std::collections::HashMap<alloy::primitives::FixedBytes<32>, String>> {
+        if tx_hashes.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Convert FixedBytes<32> to strings for database query
+        let tx_hashes_str: Vec<String> = tx_hashes
+            .iter()
+            .map(|h| format!("0x{}", hex::encode(h.as_slice())))
+            .collect();
+        
+        // Query the database for all original target_functions in a single query
+        let active_pool = self.get_active_pool().await;
+        
+        let rows = sqlx::query(
+            "SELECT tx_hash, target_function FROM events WHERE tx_hash = ANY($1::text[])"
+        )
+        .bind(&tx_hashes_str)
+        .fetch_all(&active_pool)
+        .await?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let tx_hash_str: String = row.try_get("tx_hash")?;
+            let target_function: Option<String> = row.try_get("target_function")?;
+            
+            // Convert string back to FixedBytes<32>
+            if let Ok(tx_hash) = alloy::primitives::FixedBytes::<32>::from_str(&tx_hash_str) {
+                result.insert(tx_hash, target_function.unwrap_or_else(|| "unknown".to_string()));
+            }
+        }
+
+        Ok(result)
+    }
+
     pub async fn update_lane_status(
         &self,
         chain_params: &HashMap<u32, ChainParams>,

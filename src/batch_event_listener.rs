@@ -33,7 +33,7 @@
 
 use alloy::{
     eips::BlockNumberOrTag,
-    primitives::{Address, TxHash},
+    primitives::{Address, TxHash, FixedBytes},
     providers::Provider,
     rpc::types::Filter,
 };
@@ -605,19 +605,72 @@ impl BatchEventListener {
             config.chain_id
         );
 
-        // Update database with processed events
+        // First, migrate events to finished_events normally
         if let Err(e) = db
-            .update_finished_events(&events, event_status, &timestamps, config.is_retarded)
+            .update_finished_events(&events, event_status.clone(), &timestamps, config.is_retarded)
             .await
         {
             error!("Failed to update {} events: {:?}", event_type_name, e);
-        } else {
-            info!(
-                "Successfully migrated {} {} events to finished_events",
-                events.len(),
-                event_type_name
-            );
+            return;
         }
+
+        // For success events, check for liquidate fallback to mint and update target functions
+        if matches!(event_status, EventStatus::TxProcessSuccess) {
+            // Collect all success events and their selectors
+            let success_events: Vec<(alloy::primitives::FixedBytes<32>, FixedBytes<4>)> = logs
+                .iter()
+                .map(|log| {
+                    let event = parse_batch_process_success_event(log);
+                    (event.init_hash, event.selector)
+                })
+                .collect();
+            
+            // Get all original target functions in a single query
+            let tx_hashes: Vec<alloy::primitives::FixedBytes<32>> = success_events.iter().map(|(hash, _)| *hash).collect();
+            let original_target_functions = match db.get_events_target_functions(&tx_hashes).await {
+                Ok(functions) => functions,
+                Err(e) => {
+                    error!("Failed to get original target functions: {:?}", e);
+                    std::collections::HashMap::new()
+                }
+            };
+            
+            // Filter for liquidate events that fell back to mint
+            let mut liquidate_fallback_hashes = Vec::new();
+            for (tx_hash, selector) in success_events {
+                if let Some(original_target_function) = original_target_functions.get(&tx_hash) {
+                    if original_target_function == "liquidateExternal" {
+                        // Check if the success event shows mint selector
+                        let success_selector = hex::encode(selector.as_slice());
+                        if success_selector == "05dbe8a7" { // MINT_EXTERNAL_SELECTOR
+                            liquidate_fallback_hashes.push(tx_hash);
+                            info!("Detected liquidate fallback to mint for tx: {:?}", tx_hash);
+                        }
+                    }
+                }
+            }
+            
+            // Update target functions for liquidate fallback events
+            if !liquidate_fallback_hashes.is_empty() {
+                if let Err(e) = db
+                    .update_finished_events_target_function(&liquidate_fallback_hashes, "liquidateExternal -> mintExternal")
+                    .await
+                {
+                    error!("Failed to update target functions for liquidate fallback events: {:?}", e);
+                } else {
+                    info!(
+                        "Successfully updated target_function for {} liquidate fallback events",
+                        liquidate_fallback_hashes.len()
+                    );
+                }
+            }
+        }
+
+        info!(
+            "Successfully migrated {} {} events to finished_events",
+            events.len(),
+            event_type_name
+        );
     }
 
     /// Creates provider state for the batch event listener
