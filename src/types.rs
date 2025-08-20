@@ -240,6 +240,10 @@ alloy::sol! {
         bytes32[] initHashes;
         /// Start index for batch processing
         uint256 startIndex;
+        /// Array of users to liquidate (for liquidate events)
+        address[] userToLiquidate;
+        /// Array of collateral addresses (for liquidate events)
+        address[] collateral;
     }
 
     /// Batch Submitter Contract Interface

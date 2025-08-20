@@ -122,11 +122,12 @@ pub const EXTENSION_LIQUIDATE_SIG: &str =
 pub const MINT_EXTERNAL_SELECTOR: &str = "05dbe8a7";
 pub const REPAY_EXTERNAL_SELECTOR: &str = "08fee263";
 pub const OUT_HERE_SELECTOR: &str = "b511d3b1";
-pub const LIQUIDATE_SELECTOR: &str = "liquidate"; // This will need to be updated with the actual selector
+pub const LIQUIDATE_EXTERNAL_SELECTOR: &str = "liquidateExternal"; // This will need to be updated with the actual selector
 
 pub const MINT_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x05, 0xdb, 0xe8, 0xa7];
 pub const REPAY_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x08, 0xfe, 0xe2, 0x63];
 pub const OUT_HERE_SELECTOR_FB4: &[u8] = &[0xb5, 0x11, 0xd3, 0xb1];
+pub const LIQUIDATE_EXTERNAL_SELECTOR_FB4: &[u8] = &[0x00, 0x00, 0x00, 0x00]; // This will need to be updated with the actual selector
 
 // Unified event processing system
 #[derive(Debug, Clone, PartialEq)]
@@ -161,7 +162,7 @@ impl EventType {
         match selector {
             MINT_EXTERNAL_SELECTOR => EventType::ExtensionMint,
             REPAY_EXTERNAL_SELECTOR => EventType::ExtensionRepay,
-            LIQUIDATE_SELECTOR => EventType::ExtensionLiquidate,
+            LIQUIDATE_EXTERNAL_SELECTOR => EventType::ExtensionLiquidate,
             _ => EventType::Unknown,
         }
     }

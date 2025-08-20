@@ -342,7 +342,7 @@ impl SequencerConfig {
                 "BATCH_SUBMITTER_ADDRESS",
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
@@ -371,7 +371,7 @@ impl SequencerConfig {
                 "BATCH_SUBMITTER_ADDRESS",
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1", "600")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
@@ -400,7 +400,7 @@ impl SequencerConfig {
                 "BATCH_SUBMITTER_ADDRESS",
             )?)?,
             markets: vec![M_USDC_MOCK_MARKET, MWST_ETH_MOCK_MARKET],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
@@ -480,7 +480,7 @@ impl SequencerConfig {
                 MWE_ETH_MARKET,
                 MWRS_ETH_MARKET,
             ],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
@@ -518,7 +518,7 @@ impl SequencerConfig {
                 MWE_ETH_MARKET,
                 MWRS_ETH_MARKET,
             ],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L1", "600")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L1")?
@@ -556,7 +556,7 @@ impl SequencerConfig {
                 MWE_ETH_MARKET,
                 MWRS_ETH_MARKET,
             ],
-            events: vec![EXTENSION_SUPPLIED_SIG.to_string()],
+            events: vec![EXTENSION_SUPPLIED_SIG.to_string(), EXTENSION_LIQUIDATE_SIG.to_string()],
             max_block_delay_secs: Self::get_env_var_with_default("NODE_MAX_SECONDS_DELAY_BEFORE_FALLBACK_L2", "300")?
                 .parse()?,
             block_delay: Self::get_env_var("BATCH_EVENT_LISTENER_REGISTRATION_BLOCK_DELAY_L2")?
