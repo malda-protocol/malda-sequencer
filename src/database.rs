@@ -205,6 +205,10 @@ pub struct EventUpdate {
     pub target_function: Option<String>,
     /// Market address
     pub market: Option<Address>,
+    /// Address of the user being liquidated (for liquidate events)
+    pub liquidatee: Option<Address>,
+    /// Collateral token address (for liquidate events)
+    pub collateral: Option<Address>,
     /// Block timestamp when event was received
     pub received_block_timestamp: Option<i64>,
     /// Block number when event was received
@@ -867,12 +871,12 @@ impl Database {
                 r#"
                 INSERT INTO events (
                     tx_hash, status, event_type, src_chain_id, dst_chain_id, 
-                    msg_sender, amount, target_function, market,
+                    msg_sender, amount, target_function, market, liquidatee, collateral,
                     received_at_block, received_block_timestamp, should_request_proof_at_block,
                     received_at
                 )
                 VALUES (
-                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                    $1, $2::event_status, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
                 )
                 ON CONFLICT (tx_hash) DO NOTHING
                 "#,
@@ -886,6 +890,8 @@ impl Database {
             .bind(event.amount.map(|amt| amt.to_string()))
             .bind(event.target_function.as_ref())
             .bind(event.market.map(|addr| addr.to_string()))
+            .bind(event.liquidatee.map(|addr| addr.to_string()))
+            .bind(event.collateral.map(|addr| addr.to_string()))
             .bind(event.received_at_block)
             .bind(event.received_block_timestamp.map(|ts| ts as i32)) // Convert i64 to i32 for database
             .bind(event.should_request_proof_at_block)
@@ -1036,7 +1042,7 @@ impl Database {
                     proof_requested_at = NOW() -- Set timestamp here
                 WHERE tx_hash IN (SELECT tx_hash FROM claim_targets)
                 RETURNING -- Only return necessary fields
-                    tx_hash, src_chain_id, dst_chain_id, msg_sender, market
+                    tx_hash, src_chain_id, dst_chain_id, msg_sender, market, liquidatee, collateral
             )
             SELECT * FROM claimed_events
             "#,
@@ -1107,6 +1113,12 @@ impl Database {
                 market: row
                     .try_get::<Option<String>, _>("market")?
                     .map(|addr| addr.parse().unwrap()),
+                liquidatee: row
+                    .try_get::<Option<String>, _>("liquidatee")?
+                    .and_then(|addr| addr.parse().ok()),
+                collateral: row
+                    .try_get::<Option<String>, _>("collateral")?
+                    .and_then(|addr| addr.parse().ok()),
                 // Other fields are Default::default()
                 ..Default::default()
             };
@@ -1253,7 +1265,7 @@ impl Database {
             WHERE tx_hash IN (SELECT tx_hash FROM events_to_claim) -- Update only the limited set
             RETURNING -- Only return necessary fields for the updated set
                 tx_hash, journal_index, dst_chain_id, journal, seal,
-                msg_sender, market, amount, target_function
+                msg_sender, market, amount, target_function, liquidatee, collateral
             -- ORDER BY journal_index ASC -- Ordering in UPDATE RETURNING is removed for reliability, sort in Rust
             "#)
             .bind(now_utc) // $1
@@ -1310,6 +1322,12 @@ impl Database {
                 market,
                 amount,
                 target_function: row.try_get("target_function")?,
+                liquidatee: row
+                    .try_get::<Option<String>, _>("liquidatee")?
+                    .and_then(|addr| addr.parse().ok()),
+                collateral: row
+                    .try_get::<Option<String>, _>("collateral")?
+                    .and_then(|addr| addr.parse().ok()),
                 batch_submitted_at: Some(now_utc), // Set from variable
                 ..Default::default()
             });
@@ -1623,7 +1641,7 @@ impl Database {
             )
             INSERT INTO finished_events (
                 tx_hash, status, event_type, src_chain_id, dst_chain_id,
-                msg_sender, amount, target_function, market, received_at_block, received_block_timestamp, should_request_proof_at_block,
+                msg_sender, amount, target_function, market, liquidatee, collateral, received_at_block, received_block_timestamp, should_request_proof_at_block,
                 journal_index, bonsai_uuid, stark_time, snark_time, total_cycles, batch_tx_hash, received_at, 
                 proof_requested_at, proof_received_at, batch_submitted_at, batch_included_at, tx_finished_at,
                 finished_block_timestamp, resubmitted, error
@@ -1638,6 +1656,8 @@ impl Database {
                 me.amount, 
                 me.target_function, 
                 me.market, 
+                me.liquidatee,
+                me.collateral,
                 me.received_at_block,
                 me.received_block_timestamp,
                 me.should_request_proof_at_block,
@@ -2185,13 +2205,13 @@ impl Database {
                 DELETE FROM finished_events
                 WHERE tx_hash = ANY($1::text[])
                 RETURNING 
-                    tx_hash, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, resubmitted
+                    tx_hash, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, liquidatee, collateral, received_block_timestamp, received_at_block, received_at, resubmitted
             )
             INSERT INTO events (
-                tx_hash, status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, resubmitted
+                tx_hash, status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, liquidatee, collateral, received_block_timestamp, received_at_block, received_at, resubmitted
             )
             SELECT 
-                tx_hash, 'Received'::event_status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, received_block_timestamp, received_at_block, received_at, COALESCE(resubmitted, 0) + 1
+                tx_hash, 'Received'::event_status, event_type, src_chain_id, dst_chain_id, msg_sender, amount, target_function, market, liquidatee, collateral, received_block_timestamp, received_at_block, received_at, COALESCE(resubmitted, 0) + 1
             FROM moved
             ON CONFLICT (tx_hash) DO NOTHING
             "#
