@@ -75,6 +75,8 @@ use event_proof_ready_checker::EventProofReadyChecker;
 
 mod gas_fee_distributer;
 mod provider_helper;
+mod api_module;
+use api_module::{ApiServer, ApiConfig};
 
 /// Main entry point for the Malda sequencer system
 ///
@@ -122,7 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = initialize_database(&config).await?;
 
     // Step 6: Start all sequencer components in parallel
-    start_all_sequencer_components(config, db).await?;
+    start_all_sequencer_components(config.clone(), db.clone()).await?;
+
+    // Step 6.5: Start API server
+    info!("About to start API server...");
+    start_api_server(config, db).await;
+    info!("API server startup initiated");
 
     // Step 7: Wait for shutdown signal and cleanup
     wait_for_shutdown().await;
@@ -408,8 +415,9 @@ async fn start_all_sequencer_components(config: SequencerConfig, db: Database) -
     start_transaction_manager(&config, &db).await;
     start_auxiliary_components(&config, db).await?;
 
-    // Wait for all component handles to complete (they shouldn't unless there's an error)
-    futures::future::join_all(handles).await;
+    // Don't wait for handles to complete - they should run indefinitely
+    // The main thread should continue to start the API server
+    info!("All sequencer components started successfully");
 
     Ok(())
 }
@@ -925,4 +933,42 @@ async fn start_auxiliary_components(config: &SequencerConfig, db: Database) -> R
     });
 
     Ok(())
+}
+
+/// Start API server
+///
+/// This function creates and starts the API server component,
+/// which provides REST endpoints for managing boundless users
+/// and other database operations.
+///
+/// # Arguments
+/// * `config` - Sequencer configuration
+/// * `db` - Database connection
+async fn start_api_server(_config: SequencerConfig, db: Database) {
+    info!("start_api_server function called");
+    
+    // Create API configuration
+    let api_config = ApiConfig {
+        host: std::env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
+        port: std::env::var("API_PORT")
+            .unwrap_or_else(|_| "3000".to_string())
+            .parse()
+            .unwrap_or(3000),
+        api_key: std::env::var("API_KEY").unwrap_or_else(|_| "default-api-key".to_string()),
+    };
+
+    info!("API config created: host={}, port={}", api_config.host, api_config.port);
+
+    // Create and start API server in a separate task
+    let api_server = ApiServer::new(api_config, db);
+    info!("ApiServer instance created");
+    
+    tokio::spawn(async move {
+        info!("API server task spawned, starting server...");
+        if let Err(e) = api_server.start().await {
+            error!("API server failed: {:?}", e);
+        }
+    });
+    
+    info!("API server task spawned successfully");
 }

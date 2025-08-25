@@ -2203,4 +2203,172 @@ impl Database {
         Ok(())
     }
 
+    /// Adds a boundless user to the database
+    ///
+    /// This method adds a new Ethereum address to the boundless_users table.
+    /// If the address already exists, it will be ignored (ON CONFLICT DO NOTHING).
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. They may use different proof generation
+    /// services or have different timeout configurations.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to add (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    ///
+    /// # Example
+    /// ```rust
+    /// db.add_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// ```
+    pub async fn add_boundless_user(&self, address: &str) -> Result<()> {
+        let active_pool = self.get_active_pool().await;
+        
+        let rows_affected = query(
+            r#"
+            INSERT INTO boundless_users (user_address) 
+            VALUES ($1)
+            ON CONFLICT (user_address) DO NOTHING
+            "#,
+        )
+        .bind(address)
+        .execute(&active_pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            info!("Added boundless user: {}", address);
+        } else {
+            debug!("Boundless user already exists: {}", address);
+        }
+
+        Ok(())
+    }
+
+    /// Removes a boundless user from the database
+    ///
+    /// This method removes an Ethereum address from the boundless_users table.
+    /// If the address doesn't exist, no error is returned.
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. Removing them will cause them to be
+    /// treated as regular users in future operations.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to remove (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    ///
+    /// # Example
+    /// ```rust
+    /// db.remove_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// ```
+    pub async fn remove_boundless_user(&self, address: &str) -> Result<()> {
+        let active_pool = self.get_active_pool().await;
+        
+        let rows_affected = query(
+            r#"
+            DELETE FROM boundless_users 
+            WHERE user_address = $1
+            "#,
+        )
+        .bind(address)
+        .execute(&active_pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            info!("Removed boundless user: {}", address);
+        } else {
+            debug!("Boundless user not found: {}", address);
+        }
+
+        Ok(())
+    }
+
+    /// Retrieves all boundless users from the database
+    ///
+    /// This method retrieves all Ethereum addresses from the boundless_users table.
+    /// The addresses are returned as a vector of strings.
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. This method provides a way to list all
+    /// currently configured boundless users.
+    ///
+    /// # Returns
+    /// * `Result<Vec<String>>` - Vector of boundless user addresses or error
+    ///
+    /// # Example
+    /// ```rust
+    /// let users = db.get_boundless_users().await?;
+    /// println!("Boundless users: {:?}", users);
+    /// ```
+    pub async fn get_boundless_users(&self) -> Result<Vec<String>> {
+        let active_pool = self.get_active_pool().await;
+        
+        let rows = query(
+            r#"
+            SELECT user_address 
+            FROM boundless_users 
+            ORDER BY user_address
+            "#,
+        )
+        .fetch_all(&active_pool)
+        .await?;
+
+        let users: Vec<String> = rows
+            .iter()
+            .filter_map(|row| row.try_get::<String, _>("user_address").ok())
+            .collect();
+
+        info!("Retrieved {} boundless users", users.len());
+        Ok(users)
+    }
+
+    /// Checks if a user is boundless
+    ///
+    /// This method checks if an Ethereum address exists in the boundless_users table.
+    /// Returns true if the user is boundless, false otherwise.
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. This method provides a way to check if
+    /// a specific address is configured as boundless.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to check (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<bool>` - True if user is boundless, false otherwise
+    ///
+    /// # Example
+    /// ```rust
+    /// let is_boundless = db.is_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// println!("User is boundless: {}", is_boundless);
+    /// ```
+    pub async fn is_boundless_user(&self, address: &str) -> Result<bool> {
+        let active_pool = self.get_active_pool().await;
+        
+        let exists: Option<i32> = query_scalar(
+            r#"
+            SELECT 1 FROM boundless_users 
+            WHERE user_address = $1
+            "#,
+        )
+        .bind(address)
+        .fetch_optional(&active_pool)
+        .await?;
+
+        Ok(exists.is_some())
+    }
+
 }
