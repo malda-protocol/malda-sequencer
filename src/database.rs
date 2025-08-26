@@ -2292,46 +2292,6 @@ impl Database {
         Ok(())
     }
 
-    /// Retrieves all boundless users from the database
-    ///
-    /// This method retrieves all Ethereum addresses from the boundless_users table.
-    /// The addresses are returned as a vector of strings.
-    ///
-    /// ## Boundless Users:
-    ///
-    /// Boundless users are special addresses that receive different proof generation
-    /// treatment compared to regular users. This method provides a way to list all
-    /// currently configured boundless users.
-    ///
-    /// # Returns
-    /// * `Result<Vec<String>>` - Vector of boundless user addresses or error
-    ///
-    /// # Example
-    /// ```rust
-    /// let users = db.get_boundless_users().await?;
-    /// println!("Boundless users: {:?}", users);
-    /// ```
-    pub async fn get_boundless_users(&self) -> Result<Vec<String>> {
-        let active_pool = self.get_active_pool().await;
-        
-        let rows = query(
-            r#"
-            SELECT user_address 
-            FROM boundless_users 
-            ORDER BY user_address
-            "#,
-        )
-        .fetch_all(&active_pool)
-        .await?;
-
-        let users: Vec<String> = rows
-            .iter()
-            .filter_map(|row| row.try_get::<String, _>("user_address").ok())
-            .collect();
-
-        info!("Retrieved {} boundless users", users.len());
-        Ok(users)
-    }
 
     /// Checks if a user is boundless
     ///
