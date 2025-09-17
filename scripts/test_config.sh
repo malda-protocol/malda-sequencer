@@ -10,6 +10,12 @@ echo ""
 # Determine environment
 ENVIRONMENT=${ENVIRONMENT:-testnet}
 echo "🔧 Testing for environment: $ENVIRONMENT"
+
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    echo "Loading environment variables from .env file..."
+    export $(cat .env | grep -v '^#' | xargs)
+fi
 echo ""
 
 if [ "$ENVIRONMENT" = "mainnet" ]; then
@@ -166,4 +172,4 @@ echo ""
 echo "Required variables per chain:"
 echo "  - RPC_URL_[CHAIN]_[ENVIRONMENT]"
 echo "  - WS_URL_[CHAIN]_[ENVIRONMENT]"
-echo "  - Plus fallback URLs for reliability" 
+echo "  - Plus fallback URLs for reliability"

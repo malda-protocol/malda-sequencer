@@ -52,6 +52,7 @@ use sqlx::{query, query_as, query_scalar, Pool, Postgres, Row};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
+use std::future::Future;
 use tracing::info;
 use tracing::{debug, warn};
 use std::sync::Arc;
@@ -803,6 +804,76 @@ impl Database {
     /// Returns the current active pool for database operations
     async fn get_active_pool(&self) -> Pool<Postgres> {
         self.active_pool.read().await.clone()
+    }
+
+    /// Executes a database operation on both primary and fallback databases concurrently
+    ///
+    /// This helper method abstracts the logic for running operations on both databases
+    /// and handling errors gracefully. It returns the combined results and any errors.
+    ///
+    /// # Arguments
+    /// * `operation` - Async closure that performs the database operation
+    ///
+    /// # Returns
+    /// * `(Vec<T>, Vec<String>)` - Tuple of results and error messages
+    async fn execute_on_both_databases<T, F, Fut>(&self, operation: F) -> (Vec<T>, Vec<String>)
+    where
+        F: Fn(Pool<Postgres>) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<T, sqlx::Error>> + Send,
+        T: Send + 'static,
+    {
+        // Get both primary and fallback pools
+        let primary_pool = if let Some(ref pool) = self.pool {
+            Some(pool.clone())
+        } else {
+            None
+        };
+        
+        let fallback_pool = self.fallback_pool.clone();
+        
+        // Run the operation on both databases concurrently
+        let mut handles = Vec::new();
+        
+        // Execute on primary database if available
+        if let Some(pool) = primary_pool {
+            let operation_clone = operation.clone();
+            let handle = tokio::spawn(async move {
+                operation_clone(pool).await
+            });
+            handles.push(("primary", handle));
+        }
+        
+        // Execute on fallback database if available
+        if let Some(pool) = fallback_pool {
+            let operation_clone = operation.clone();
+            let handle = tokio::spawn(async move {
+                operation_clone(pool).await
+            });
+            handles.push(("fallback", handle));
+        }
+        
+        // Wait for all operations to complete
+        let mut results = Vec::new();
+        let mut errors = Vec::new();
+        
+        for (db_name, handle) in handles {
+            match handle.await {
+                Ok(Ok(result)) => {
+                    results.push(result);
+                    debug!("Operation successful on {} database", db_name);
+                }
+                Ok(Err(e)) => {
+                    warn!("Operation failed on {} database: {:?}", db_name, e);
+                    errors.push(format!("{} database: {:?}", db_name, e));
+                }
+                Err(e) => {
+                    warn!("Task failed for {} database: {:?}", db_name, e);
+                    errors.push(format!("{} database task: {:?}", db_name, e));
+                }
+            }
+        }
+        
+        (results, errors)
     }
 
     /// Adds new events to the database with retarded event filtering
@@ -2201,6 +2272,207 @@ impl Database {
         .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Adds a boundless user to the database
+    ///
+    /// This method adds a new Ethereum address to the boundless_users table on both
+    /// primary and fallback databases for redundancy. If the address already exists,
+    /// it will be ignored (ON CONFLICT DO NOTHING).
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. They may use different proof generation
+    /// services or have different timeout configurations.
+    ///
+    /// ## Database Redundancy:
+    ///
+    /// This operation runs on both primary and fallback databases to ensure
+    /// data consistency and availability. If one database fails, the operation
+    /// continues on the other.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to add (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    ///
+    /// # Example
+    /// ```rust
+    /// db.add_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// ```
+    pub async fn add_boundless_user(&self, address: &str) -> Result<()> {
+        let address_clone = address.to_string();
+        let (results, errors) = self.execute_on_both_databases(move |pool| {
+            let addr = address_clone.clone();
+            async move {
+                let rows_affected = query(
+                    r#"
+                    INSERT INTO boundless_users (user_address) 
+                    VALUES ($1)
+                    ON CONFLICT (user_address) DO NOTHING
+                    "#,
+                )
+                .bind(&addr)
+                .execute(&pool)
+                .await?
+                .rows_affected();
+                
+                Ok::<u64, sqlx::Error>(rows_affected)
+            }
+        }).await;
+        
+        let total_rows_affected: u64 = results.iter().sum();
+        
+        // Log the result
+        if total_rows_affected > 0 {
+            info!("Added boundless user: {} ({} rows affected across databases)", address, total_rows_affected);
+        } else {
+            debug!("Boundless user already exists: {}", address);
+        }
+        
+        // Return error if all databases failed
+        if !errors.is_empty() && self.pool.is_none() && self.fallback_pool.is_none() {
+            return Err(eyre::eyre!("Failed to add boundless user to any database: {}", errors.join(", ")));
+        }
+        
+        Ok(())
+    }
+
+    /// Removes a boundless user from the database
+    ///
+    /// This method removes an Ethereum address from the boundless_users table on both
+    /// primary and fallback databases for redundancy. If the address doesn't exist,
+    /// no error is returned.
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. Removing them will cause them to be
+    /// treated as regular users in future operations.
+    ///
+    /// ## Database Redundancy:
+    ///
+    /// This operation runs on both primary and fallback databases to ensure
+    /// data consistency and availability. If one database fails, the operation
+    /// continues on the other.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to remove (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error status
+    ///
+    /// # Example
+    /// ```rust
+    /// db.remove_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// ```
+    pub async fn remove_boundless_user(&self, address: &str) -> Result<()> {
+        let address_clone = address.to_string();
+        let (results, errors) = self.execute_on_both_databases(move |pool| {
+            let addr = address_clone.clone();
+            async move {
+                let rows_affected = query(
+                    r#"
+                    DELETE FROM boundless_users 
+                    WHERE user_address = $1
+                    "#,
+                )
+                .bind(&addr)
+                .execute(&pool)
+                .await?
+                .rows_affected();
+                
+                Ok::<u64, sqlx::Error>(rows_affected)
+            }
+        }).await;
+        
+        let total_rows_affected: u64 = results.iter().sum();
+        
+        // Log the result
+        if total_rows_affected > 0 {
+            info!("Removed boundless user: {} ({} rows affected across databases)", address, total_rows_affected);
+        } else {
+            debug!("Boundless user not found: {}", address);
+        }
+        
+        // Return error if all databases failed
+        if !errors.is_empty() && self.pool.is_none() && self.fallback_pool.is_none() {
+            return Err(eyre::eyre!("Failed to remove boundless user from any database: {}", errors.join(", ")));
+        }
+        
+        Ok(())
+    }
+
+
+    /// Checks if a user is boundless
+    ///
+    /// This method checks if an Ethereum address exists in the boundless_users table
+    /// on both primary and fallback databases. Returns true if the user is boundless
+    /// in any database, false otherwise.
+    ///
+    /// ## Boundless Users:
+    ///
+    /// Boundless users are special addresses that receive different proof generation
+    /// treatment compared to regular users. This method provides a way to check if
+    /// a specific address is configured as boundless.
+    ///
+    /// ## Database Redundancy:
+    ///
+    /// This operation checks both primary and fallback databases concurrently.
+    /// If the user is found in any database, the result is true. This ensures
+    /// consistency across databases and provides fault tolerance.
+    ///
+    /// # Arguments
+    /// * `address` - Ethereum address to check (should be validated before calling)
+    ///
+    /// # Returns
+    /// * `Result<bool>` - True if user is boundless, false otherwise
+    ///
+    /// # Example
+    /// ```rust
+    /// let is_boundless = db.is_boundless_user("0x0000000000000000000000000000000000000000").await?;
+    /// println!("User is boundless: {}", is_boundless);
+    /// ```
+    pub async fn is_boundless_user(&self, address: &str) -> Result<bool> {
+        let address_clone = address.to_string();
+        let (results, errors) = self.execute_on_both_databases(move |pool| {
+            let addr = address_clone.clone();
+            async move {
+                let exists: Option<i32> = query_scalar(
+                    r#"
+                    SELECT 1 FROM boundless_users 
+                    WHERE user_address = $1
+                    "#,
+                )
+                .bind(&addr)
+                .fetch_optional(&pool)
+                .await?;
+                
+                Ok::<Option<i32>, sqlx::Error>(exists)
+            }
+        }).await;
+        
+        // Convert Option<i32> results to bool results
+        let bool_results: Vec<bool> = results.into_iter().map(|exists| exists.is_some()).collect();
+        
+        // If any database shows the user as boundless, return true
+        let is_boundless = bool_results.iter().any(|&result| result);
+        
+        // Log the result
+        if is_boundless {
+            debug!("User {} is boundless (found in {} database(s))", address, bool_results.iter().filter(|&&r| r).count());
+        } else {
+            debug!("User {} is not boundless", address);
+        }
+        
+        // Return error if all databases failed
+        if !errors.is_empty() && self.pool.is_none() && self.fallback_pool.is_none() {
+            return Err(eyre::eyre!("Failed to check boundless user in any database: {}", errors.join(", ")));
+        }
+        
+        Ok(is_boundless)
     }
 
 }
