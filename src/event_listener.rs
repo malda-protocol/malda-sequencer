@@ -571,11 +571,33 @@ impl EventListener {
     /// # Returns
     /// * `Result<()>` - Success or error status
     fn process_extension_chain_event(log: &Log, event_update: &mut EventUpdate) -> Result<()> {
+        let event_signature = &log.topics()[0];
+
+        // First check if this is a liquidate event by signature
+        let event_type_from_signature = crate::events::EventType::from_signature(event_signature.as_slice());
+        
+        if event_type_from_signature == crate::events::EventType::ExtensionLiquidate {
+            // Handle liquidate event
+            let event = crate::events::parse_liquidate_event(log);
+            
+            // Populate event update with liquidate-specific data
+            event_update.msg_sender = Some(event.from);
+            event_update.src_chain_id = Some(event.src_chain_id);
+            event_update.dst_chain_id = Some(event.dst_chain_id);
+            event_update.amount = Some(event.amount);
+            event_update.liquidatee = Some(event.user_to_liquidate);
+            event_update.collateral = Some(event.collateral);
+            event_update.target_function = Some(event_type_from_signature.target_function().to_string());
+            event_update.event_type = Some(event_type_from_signature.to_string().to_string());
+            
+            return Ok(());
+        }
+
+        // For backward compatibility, handle supply events using the original method selector approach
         let event = parse_supplied_event(log);
 
-        // Use unified event type system for classification
-        let event_type =
-            crate::events::EventType::from_method_selector(&event.linea_method_selector);
+        // Use unified event type system for classification based on method selector
+        let event_type = crate::events::EventType::from_method_selector(&event.linea_method_selector);
 
         if event_type == crate::events::EventType::Unknown {
             return Err(eyre!(

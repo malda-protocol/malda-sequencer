@@ -79,7 +79,7 @@ use crate::provider_helper::ProviderType;
 use malda_rs::constants::*;
 
 use crate::{
-    events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4},
+    events::{MINT_EXTERNAL_SELECTOR_FB4, OUT_HERE_SELECTOR_FB4, REPAY_EXTERNAL_SELECTOR_FB4, LIQUIDATE_EXTERNAL_SELECTOR_FB4},
     types::{BatchProcessMsg, IBatchSubmitter},
 };
 
@@ -407,6 +407,8 @@ impl TransactionManager {
         let mut amounts = Vec::new();
         let mut selectors = Vec::new();
         let mut init_hashes = Vec::new();
+        let mut user_to_liquidate = Vec::new();
+        let mut collateral = Vec::new();
 
         for event in events {
             receivers.push(event.msg_sender.unwrap_or_default());
@@ -414,6 +416,11 @@ impl TransactionManager {
             amounts.push(event.amount.unwrap_or_default());
             selectors.push(Self::get_selector_for_chain(chain_id, event)?);
             init_hashes.push(event.tx_hash.into());
+            
+            // For liquidate events, use the actual liquidatee and collateral
+            // For non-liquidate events, use zero address (will be ignored by contract)
+            user_to_liquidate.push(event.liquidatee.unwrap_or_default());
+            collateral.push(event.collateral.unwrap_or_default());
         }
 
         let min_amounts_out = vec![U256::from(0); amounts.len()];
@@ -428,6 +435,8 @@ impl TransactionManager {
             selectors,
             initHashes: init_hashes,
             startIndex: U256::from(start_idx),
+            userToLiquidate: user_to_liquidate,
+            collateral,
         })
     }
 
@@ -449,6 +458,7 @@ impl TransactionManager {
                     "outHere" => Ok(FixedBytes::from_slice(OUT_HERE_SELECTOR_FB4)),
                     "mintExternal" => Ok(FixedBytes::from_slice(MINT_EXTERNAL_SELECTOR_FB4)),
                     "repayExternal" => Ok(FixedBytes::from_slice(REPAY_EXTERNAL_SELECTOR_FB4)),
+                    "liquidateExternal" => Ok(FixedBytes::from_slice(LIQUIDATE_EXTERNAL_SELECTOR_FB4)),
                     method => {
                         error!("Invalid transaction method for Linea: {}", method);
                         Err(eyre::eyre!("Invalid method for Linea: {}", method))
