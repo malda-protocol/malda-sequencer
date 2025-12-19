@@ -32,7 +32,7 @@ alloy = {version = "1.0", features = [
 ] }
 alloy-sol-types = "1.0"
 futures-util = "0.3"
-malda_rs = { path = "../malda-zk-coprocessor/malda_rs" }
+malda_rs = { git = "https://github.com/malda-protocol/malda-zk-coprocessor.git", rev = "f6ecbd16e9b94687cdc851485db882bb876324e9" }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 risc0-ethereum-contracts = { git = "https://github.com/risc0/risc0-ethereum", tag = "v3.0.1" }
