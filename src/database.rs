@@ -1200,7 +1200,8 @@ impl Database {
                 .map(|addr| boundless_users.contains(&addr.to_string()))
                 .unwrap_or(false);
 
-            if is_boundless {
+            // NOTE: Bonsai service was shutdown; for now we will use Boundless only.
+            if is_boundless || true {
                 boundless_events.push(event);
             } else {
                 bonsai_events.push(event);
