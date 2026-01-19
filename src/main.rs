@@ -39,8 +39,18 @@
 use alloy::primitives::Address;
 
 use eyre::Result;
+use malda_signer::SignerService;
 use std::time::Duration;
+use tokio::sync::OnceCell;
 use tracing::{error, info};
+
+/// Global signer service, initialized once at startup.
+static SIGNER_SERVICE: OnceCell<SignerService> = OnceCell::const_new();
+
+/// Get the signer service. Panics if not initialized.
+pub fn get_signer_service() -> &'static SignerService {
+    SIGNER_SERVICE.get().expect("Signer service not initialized")
+}
 
 pub mod config;
 pub mod constants;
@@ -123,6 +133,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 5: Initialize database connection and reset events
     let db = initialize_database(&config).await?;
 
+    // Step 5.5: Initialize signer service (AWS KMS or local based on feature)
+    init_signer_service().await?;
+
     // Step 6: Start all sequencer components in parallel
     start_all_sequencer_components(config.clone(), db.clone()).await?;
 
@@ -134,6 +147,99 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 7: Wait for shutdown signal and cleanup
     wait_for_shutdown().await;
 
+    Ok(())
+}
+
+/// Initialize the signer service (AWS KMS mode).
+#[cfg(feature = "aws-signer")]
+async fn init_signer_service() -> Result<()> {
+    use malda_signer::{aws_config, aws_sdk_kms, aws_types, AwsConfig, SignerConfig};
+
+    info!("Initializing AWS KMS signer service...");
+
+    let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+    let role_arn = std::env::var("AWS_ROLE_ARN")
+        .map_err(|_| eyre::eyre!("AWS_ROLE_ARN must be set for aws-signer feature"))?;
+    let external_id = std::env::var("AWS_EXTERNAL_ID")
+        .map_err(|_| eyre::eyre!("AWS_EXTERNAL_ID must be set for aws-signer feature"))?;
+    let key_id = std::env::var("AWS_KMS_SEQUENCER_KEY_ID")
+        .map_err(|_| eyre::eyre!("AWS_KMS_SEQUENCER_KEY_ID must be set for aws-signer feature"))?;
+    let chain_id: u64 = std::env::var("CHAIN_ID")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .map_err(|_| eyre::eyre!("CHAIN_ID must be a valid u64"))?;
+
+    // Create AssumeRole provider for STS credential refresh
+    let provider = aws_config::sts::AssumeRoleProvider::builder(&role_arn)
+        .external_id(&external_id)
+        .session_name("malda-sequencer")
+        .region(aws_types::region::Region::new(region.clone()))
+        .build()
+        .await;
+
+    let aws_cfg = aws_config::from_env()
+        .credentials_provider(provider)
+        .region(aws_types::region::Region::new(region))
+        .load()
+        .await;
+
+    let kms_client = aws_sdk_kms::Client::new(&aws_cfg);
+
+    let config = SignerConfig::Aws(AwsConfig {
+        kms_client,
+        key_id,
+        chain_id: Some(chain_id),
+    });
+
+    let service = config
+        .build()
+        .await
+        .map_err(|e| eyre::eyre!("Failed to create signer service: {}", e))?;
+
+    // Health check
+    info!("Running health check...");
+    service
+        .health_check()
+        .await
+        .map_err(|e| eyre::eyre!("Signer health check failed: {}", e))?;
+
+    info!("Signer service initialized: {:?}", service.address());
+    SIGNER_SERVICE.set(service).map_err(|_| eyre::eyre!("Signer already initialized"))?;
+    Ok(())
+}
+
+/// Initialize the signer service (local mode).
+#[cfg(not(feature = "aws-signer"))]
+async fn init_signer_service() -> Result<()> {
+    use malda_signer::{LocalConfig, SignerConfig};
+
+    info!("Initializing local signer service...");
+
+    let private_key = std::env::var("SEQUENCER_PRIVATE_KEY")
+        .map_err(|_| eyre::eyre!("SEQUENCER_PRIVATE_KEY must be set"))?;
+
+    let key_bytes = hex::decode(private_key.trim_start_matches("0x"))
+        .map_err(|e| eyre::eyre!("Invalid private key hex: {}", e))?;
+
+    let private_key = malda_signer::B256::from_slice(&key_bytes);
+
+    let chain_id: u64 = std::env::var("CHAIN_ID")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .map_err(|_| eyre::eyre!("CHAIN_ID must be a valid u64"))?;
+
+    let config = SignerConfig::Local(LocalConfig {
+        private_key,
+        chain_id: Some(chain_id),
+    });
+
+    let service = config
+        .build()
+        .await
+        .map_err(|e| eyre::eyre!("Failed to create signer service: {}", e))?;
+
+    info!("Signer service initialized: {:?}", service.address());
+    SIGNER_SERVICE.set(service).map_err(|_| eyre::eyre!("Signer already initialized"))?;
     Ok(())
 }
 

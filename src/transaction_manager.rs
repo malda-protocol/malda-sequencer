@@ -717,18 +717,11 @@ impl TransactionManager {
         chain_id: u32,
         chain_config: &ChainConfig,
     ) -> Result<ProviderType> {
-        use alloy::{
-            network::EthereumWallet, providers::ProviderBuilder, signers::local::PrivateKeySigner,
-            transports::http::reqwest::Url,
-        };
+        use alloy::{network::EthereumWallet, providers::ProviderBuilder, transports::http::reqwest::Url};
+        use crate::get_signer_service;
 
-        // Get the sequencer private key from environment
-        let private_key = std::env::var("SEQUENCER_PRIVATE_KEY")
-            .expect("SEQUENCER_PRIVATE_KEY must be set in .env");
-
-        let signer: PrivateKeySigner = private_key
-            .parse()
-            .map_err(|e| eyre::eyre!("Failed to parse sequencer private key: {}", e))?;
+        // Get the global signer service (initialized at startup)
+        let signer = get_signer_service().clone();
         let wallet = EthereumWallet::from(signer);
 
         // Parse the RPC URL
