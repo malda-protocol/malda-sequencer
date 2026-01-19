@@ -6,6 +6,14 @@ edition = "2024"
 [lib]
 path = "src/lib.rs"
 
+[[example]]
+name = "aws_assume_role_loop"
+required-features = ["aws"]
+
+[[example]]
+name = "aws_simple"
+required-features = ["aws"]
+
 [features]
 default = ["local"]
 local = ["dep:alloy-signer-local"]
