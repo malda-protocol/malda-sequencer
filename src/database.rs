@@ -41,7 +41,6 @@
 //! - **volume_flow**: Chain-specific volume tracking
 //! - **chain_batch_sync**: Chain-specific batch timing
 //! - **sync_timestamps**: Global synchronization timestamps
-//! - **node_status**: Provider node health tracking
 
 use alloy::primitives::{Address, Bytes, TxHash, U256};
 use chrono::{DateTime, Utc};
@@ -2268,33 +2267,6 @@ impl Database {
             debug!("No events were reset from ProofRequested status");
         }
 
-        Ok(())
-    }
-
-    // Add a new record to the node_status table
-    pub async fn add_to_node_status(
-        &self,
-        chain_id: u64,
-        primary_url: &str,
-        fallback_url: &str,
-        reason: &str,
-    ) -> Result<()> {
-        let active_pool = self.get_active_pool().await;
-        
-        query(
-            r#"
-            INSERT INTO node_status (chain_id, primary_url, fallback_url, reason)
-            VALUES ($1, $2, $3, $4)
-            "#,
-        )
-        .bind(chain_id as i32)
-        .bind(primary_url)
-        .bind(fallback_url)
-        .bind(reason)
-        .execute(&active_pool)
-        .await?;
-
-        debug!("Recorded node failure for chain {}: {}", chain_id, reason);
         Ok(())
     }
 
