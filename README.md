@@ -1,5 +1,7 @@
 # Malda Sequencer
 
+> **⚠️ This repository is no longer maintained by the core team. Community contributions are welcome.**
+
 A high-performance blockchain sequencer that processes cross-chain events, generates Zero-Knowledge (ZK) proofs, and manages transaction submissions across multiple Layer 1 and Layer 2 networks.
 
 ## Table of Contents
