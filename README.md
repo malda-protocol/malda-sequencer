@@ -1241,7 +1241,7 @@ For additional support or questions regarding the MALDA Sequencer setup, please 
 
 ## License
 
-[Add your license information here]
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
